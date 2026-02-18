@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { Prisma } from "../generated/prisma";
+import { Prisma } from "@prisma/client";
 import type { DataTableSearchParams } from "@/types/table.types";
 
 interface ResinSearchParams extends DataTableSearchParams {

@@ -41,23 +41,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate Prisma client
-        run: npx prisma generate
-
       - name: Run database migrations
         run: npx prisma migrate deploy
 
-      - name: Verify generated files exist
-        run: |
-          echo "=== src/generated/prisma contents ==="
-          ls -la src/generated/prisma/
-          echo "=== index.ts content ==="
-          cat src/generated/prisma/index.ts
-          echo "=== client.ts first 3 lines ==="
-          head -3 src/generated/prisma/client.ts
-
       - name: Build (includes type check and lint)
-        run: npx next build --webpack
+        run: npm run build
         env:
           AUTH_SECRET: ci-test-secret-not-for-production
           AUTH_TRUST_HOST: "true"

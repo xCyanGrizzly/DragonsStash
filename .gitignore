@@ -42,9 +42,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# prisma — generated client is committed so Turbopack can resolve it
-# during next build (Turbopack excludes gitignored paths from module resolution).
-# Run `npx prisma generate` after schema changes to update.
+# prisma — generated client lives in node_modules after prisma generate
+src/generated
 
 # ide
 .idea
