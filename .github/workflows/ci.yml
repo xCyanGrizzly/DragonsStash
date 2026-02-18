@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  DATABASE_URL: postgresql://dragons:stash@localhost:5432/dragonsstash
+
 jobs:
   lint-and-build:
     runs-on: ubuntu-latest
@@ -41,10 +44,11 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
+      - name: Verify Prisma client generated
+        run: ls -la src/generated/prisma/
+
       - name: Run database migrations
         run: npx prisma migrate deploy
-        env:
-          DATABASE_URL: postgresql://dragons:stash@localhost:5432/dragonsstash
 
       - name: Type check
         run: npx tsc --noEmit
@@ -52,7 +56,6 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          DATABASE_URL: postgresql://dragons:stash@localhost:5432/dragonsstash
           AUTH_SECRET: ci-test-secret-not-for-production
           AUTH_TRUST_HOST: "true"
           NEXT_PUBLIC_APP_URL: http://localhost:3000
