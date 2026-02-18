@@ -161,9 +161,7 @@ function parseMarkdownTable(markdown: string, brandFile: string): PaintEntry[] {
   const nameIdx = 0;
   const codeIdx = hasCode ? 1 : -1;
   const setIdx = hasCode ? 2 : 1;
-  const rIdx = hasCode ? 3 : 2;
-  const gIdx = hasCode ? 4 : 3;
-  const bIdx = hasCode ? 5 : 4;
+  // RGB column indices (3-5 or 2-4) skipped — we use hex directly
   const hexIdx = hasCode ? 6 : 5;
 
   const entries: PaintEntry[] = [];

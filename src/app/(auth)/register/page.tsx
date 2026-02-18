@@ -28,7 +28,7 @@ export default function RegisterPage() {
   const [isPending, startTransition] = useTransition();
 
   const form = useForm<RegisterInput>({
-    resolver: zodResolver(registerSchema) as any,
+    resolver: zodResolver(registerSchema),
     defaultValues: { name: "", email: "", password: "", confirmPassword: "" },
   });
 

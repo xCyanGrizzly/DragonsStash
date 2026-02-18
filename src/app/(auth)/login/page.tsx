@@ -29,7 +29,7 @@ export default function LoginPage() {
   const [isPending, startTransition] = useTransition();
 
   const form = useForm<LoginInput>({
-    resolver: zodResolver(loginSchema) as any,
+    resolver: zodResolver(loginSchema),
     defaultValues: { email: "", password: "" },
   });
 

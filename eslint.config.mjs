@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Non-app scripts and seed — not part of Next.js build
+    "scripts/**",
+    "prisma/seed.ts",
   ]),
 ]);
 

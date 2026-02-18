@@ -39,7 +39,11 @@
       "Bash(python3:*)",
       "Bash(for page in filaments resins paints dashboard)",
       "Bash(do echo -n \"$page: \")",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(gh run:*)",
+      "Bash(npx next lint:*)",
+      "Bash(npx eslint .)",
+      "Bash(echo:*)"
     ]
   }
 }

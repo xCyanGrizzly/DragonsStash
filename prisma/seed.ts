@@ -33,7 +33,7 @@ async function main() {
 
   // Create regular user
   const userPassword = await hash("password123", 10);
-  const user = await prisma.user.upsert({
+  const _user = await prisma.user.upsert({
     where: { email: "user@dragonsstash.local" },
     update: {},
     create: {

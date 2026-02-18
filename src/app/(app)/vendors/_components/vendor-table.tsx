@@ -44,7 +44,7 @@ export function VendorTable({ data, pageCount, totalCount }: VendorTableProps) {
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const [searchValue, setSearchValue] = useState(searchParams.get("search") ?? "");
-  const debouncedSearch = useDebounce(searchValue, 300);
+  const _debouncedSearch = useDebounce(searchValue, 300);
 
   // Update URL when search changes
   const updateSearch = (value: string) => {
