@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 interface LowStockItem {
   id: string;
   name: string;
-  type: "filament" | "resin" | "paint";
+  type: "filament" | "resin" | "paint" | "supply";
   colorHex: string;
   remaining: number;
   total: number;
@@ -33,7 +33,7 @@ export async function getDashboardStats(
   userId: string,
   lowStockThreshold: number
 ): Promise<DashboardStats> {
-  const [filaments, resins, paints, usageLogs24h, recentLogs] = await Promise.all([
+  const [filaments, resins, paints, supplies, usageLogs24h, recentLogs] = await Promise.all([
     prisma.filament.findMany({
       where: { userId, archived: false },
       select: {
@@ -67,6 +67,17 @@ export async function getDashboardStats(
         cost: true,
       },
     }),
+    prisma.supply.findMany({
+      where: { userId, archived: false },
+      select: {
+        id: true,
+        name: true,
+        colorHex: true,
+        totalAmount: true,
+        usedAmount: true,
+        cost: true,
+      },
+    }),
     prisma.usageLog.count({
       where: {
         userId,
@@ -81,16 +92,18 @@ export async function getDashboardStats(
         filament: { select: { name: true } },
         resin: { select: { name: true } },
         paint: { select: { name: true } },
+        supply: { select: { name: true } },
       },
     }),
   ]);
 
-  const totalItems = filaments.length + resins.length + paints.length;
+  const totalItems = filaments.length + resins.length + paints.length + supplies.length;
 
   const inventoryValue =
     filaments.reduce((sum: number, f: { cost: number | null }) => sum + (f.cost ?? 0), 0) +
     resins.reduce((sum: number, r: { cost: number | null }) => sum + (r.cost ?? 0), 0) +
-    paints.reduce((sum: number, p: { cost: number | null }) => sum + (p.cost ?? 0), 0);
+    paints.reduce((sum: number, p: { cost: number | null }) => sum + (p.cost ?? 0), 0) +
+    supplies.reduce((sum: number, s: { cost: number | null }) => sum + (s.cost ?? 0), 0);
 
   const lowStockItems: LowStockItem[] = [];
 
@@ -142,6 +155,22 @@ export async function getDashboardStats(
     }
   }
 
+  for (const s of supplies) {
+    const remaining = s.totalAmount - s.usedAmount;
+    const percent = s.totalAmount > 0 ? (remaining / s.totalAmount) * 100 : 0;
+    if (percent <= lowStockThreshold && percent > 0) {
+      lowStockItems.push({
+        id: s.id,
+        name: s.name,
+        type: "supply",
+        colorHex: s.colorHex ?? "#6b7280",
+        remaining,
+        total: s.totalAmount,
+        percent,
+      });
+    }
+  }
+
   lowStockItems.sort((a, b) => a.percent - b.percent);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -153,7 +182,7 @@ export async function getDashboardStats(
     notes: log.notes,
     createdAt: log.createdAt,
     itemName:
-      log.filament?.name ?? log.resin?.name ?? log.paint?.name ?? "Unknown",
+      log.filament?.name ?? log.resin?.name ?? log.paint?.name ?? log.supply?.name ?? "Unknown",
   }));
 
   return {

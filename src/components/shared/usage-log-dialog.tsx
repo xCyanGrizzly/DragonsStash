@@ -35,7 +35,7 @@ interface UsageLogDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   itemName: string;
-  unit: "g" | "ml";
+  unit: string;
   onSubmit: (amount: number, notes?: string) => Promise<{ success: boolean; error?: string }>;
 }
 

@@ -31,6 +31,7 @@ model User {
   filaments Filament[]
   resins    Resin[]
   paints    Paint[]
+  supplies  Supply[]
   vendors   Vendor[]
   locations Location[]
   usageLogs UsageLog[]
@@ -92,6 +93,7 @@ model Vendor {
   filaments Filament[]
   resins    Resin[]
   paints    Paint[]
+  supplies  Supply[]
 
   @@index([userId])
   @@index([archived])
@@ -110,6 +112,7 @@ model Location {
   filaments Filament[]
   resins    Resin[]
   paints    Paint[]
+  supplies  Supply[]
 
   @@index([userId])
   @@index([archived])
@@ -230,6 +233,7 @@ model Tag {
   filaments TagOnFilament[]
   resins    TagOnResin[]
   paints    TagOnPaint[]
+  supplies  TagOnSupply[]
 
   @@unique([name, userId])
   @@index([userId])
@@ -265,12 +269,57 @@ model TagOnPaint {
   @@id([paintId, tagId])
 }
 
+model Supply {
+  id           String    @id @default(cuid())
+  name         String    @db.VarChar(128)
+  brand        String    @db.VarChar(64)
+  category     String    @db.VarChar(32)
+  color        String?   @db.VarChar(64)
+  colorHex     String?   @db.VarChar(7)
+  totalAmount  Float
+  usedAmount   Float     @default(0)
+  unit         String    @db.VarChar(16)
+  purchaseDate DateTime?
+  cost         Float?
+  notes        String?   @db.Text
+  archived     Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  userId     String
+  vendorId   String?
+  locationId String?
+
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vendor    Vendor?        @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  location  Location?      @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  tags      TagOnSupply[]
+  usageLogs UsageLog[]
+
+  @@index([userId])
+  @@index([vendorId])
+  @@index([locationId])
+  @@index([category])
+  @@index([archived])
+  @@index([brand])
+}
+
+model TagOnSupply {
+  supplyId String
+  tagId    String
+
+  supply Supply @relation(fields: [supplyId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([supplyId, tagId])
+}
+
 model UsageLog {
   id        String   @id @default(cuid())
   itemType  String   @db.VarChar(16)
   itemId    String
   amount    Float
-  unit      String   @db.VarChar(4)
+  unit      String   @db.VarChar(16)
   notes     String?  @db.Text
   createdAt DateTime @default(now())
   userId    String
@@ -282,6 +331,8 @@ model UsageLog {
   resinId    String?
   paint      Paint?    @relation(fields: [paintId], references: [id], onDelete: Cascade)
   paintId    String?
+  supply     Supply?   @relation(fields: [supplyId], references: [id], onDelete: Cascade)
+  supplyId   String?
 
   @@index([userId])
   @@index([itemType, itemId])
