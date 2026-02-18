@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: dragons
+          POSTGRES_PASSWORD: stash
+          POSTGRES_DB: dragonsstash
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dragons -d dragonsstash"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run database migrations
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://dragons:stash@localhost:5432/dragonsstash
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+        env:
+          DATABASE_URL: postgresql://dragons:stash@localhost:5432/dragonsstash
+          AUTH_SECRET: ci-test-secret-not-for-production
+          AUTH_TRUST_HOST: "true"
+          NEXT_PUBLIC_APP_URL: http://localhost:3000

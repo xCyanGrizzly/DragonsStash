@@ -1,0 +1,301 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────────────────
+// Auth.js required models
+// ───────────────────────────────────────
+
+enum Role {
+  ADMIN
+  USER
+}
+
+model User {
+  id             String    @id @default(cuid())
+  name           String?
+  email          String?   @unique
+  emailVerified  DateTime?
+  image          String?
+  hashedPassword String?
+  role           Role      @default(USER)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  accounts  Account[]
+  sessions  Session[]
+  filaments Filament[]
+  resins    Resin[]
+  paints    Paint[]
+  vendors   Vendor[]
+  locations Location[]
+  usageLogs UsageLog[]
+  tags      Tag[]
+  settings  UserSettings?
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ───────────────────────────────────────
+// Domain models
+// ───────────────────────────────────────
+
+model Vendor {
+  id        String   @id @default(cuid())
+  name      String   @db.VarChar(64)
+  website   String?  @db.VarChar(256)
+  notes     String?  @db.Text
+  archived  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  userId    String
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  filaments Filament[]
+  resins    Resin[]
+  paints    Paint[]
+
+  @@index([userId])
+  @@index([archived])
+}
+
+model Location {
+  id          String   @id @default(cuid())
+  name        String   @db.VarChar(64)
+  description String?  @db.VarChar(256)
+  archived    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  userId      String
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  filaments Filament[]
+  resins    Resin[]
+  paints    Paint[]
+
+  @@index([userId])
+  @@index([archived])
+}
+
+model Filament {
+  id               String    @id @default(cuid())
+  name             String    @db.VarChar(128)
+  brand            String    @db.VarChar(64)
+  material         String    @db.VarChar(32)
+  color            String    @db.VarChar(64)
+  colorHex         String    @db.VarChar(7)
+  diameter         Float     @default(1.75)
+  spoolWeight      Float
+  usedWeight       Float     @default(0)
+  emptySpoolWeight Float     @default(0)
+  purchaseDate     DateTime?
+  cost             Float?
+  notes            String?   @db.Text
+  archived         Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  userId     String
+  vendorId   String?
+  locationId String?
+
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vendor    Vendor?        @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  location  Location?      @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  tags      TagOnFilament[]
+  usageLogs UsageLog[]
+
+  @@index([userId])
+  @@index([vendorId])
+  @@index([locationId])
+  @@index([material])
+  @@index([archived])
+  @@index([brand])
+}
+
+model Resin {
+  id           String    @id @default(cuid())
+  name         String    @db.VarChar(128)
+  brand        String    @db.VarChar(64)
+  resinType    String    @db.VarChar(32)
+  color        String    @db.VarChar(64)
+  colorHex     String    @db.VarChar(7)
+  bottleSize   Float
+  usedML       Float     @default(0)
+  purchaseDate DateTime?
+  cost         Float?
+  notes        String?   @db.Text
+  archived     Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  userId     String
+  vendorId   String?
+  locationId String?
+
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vendor    Vendor?      @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  location  Location?    @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  tags      TagOnResin[]
+  usageLogs UsageLog[]
+
+  @@index([userId])
+  @@index([vendorId])
+  @@index([locationId])
+  @@index([resinType])
+  @@index([archived])
+  @@index([brand])
+}
+
+model Paint {
+  id           String    @id @default(cuid())
+  name         String    @db.VarChar(128)
+  brand        String    @db.VarChar(64)
+  line         String?   @db.VarChar(64)
+  color        String    @db.VarChar(64)
+  colorHex     String    @db.VarChar(7)
+  finish       String    @db.VarChar(32)
+  volumeML     Float
+  usedML       Float     @default(0)
+  purchaseDate DateTime?
+  cost         Float?
+  notes        String?   @db.Text
+  archived     Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  userId     String
+  vendorId   String?
+  locationId String?
+
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vendor    Vendor?       @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  location  Location?     @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  tags      TagOnPaint[]
+  usageLogs UsageLog[]
+
+  @@index([userId])
+  @@index([vendorId])
+  @@index([locationId])
+  @@index([finish])
+  @@index([archived])
+  @@index([brand])
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  name      String   @db.VarChar(64)
+  createdAt DateTime @default(now())
+  userId    String
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  filaments TagOnFilament[]
+  resins    TagOnResin[]
+  paints    TagOnPaint[]
+
+  @@unique([name, userId])
+  @@index([userId])
+}
+
+model TagOnFilament {
+  filamentId String
+  tagId      String
+
+  filament Filament @relation(fields: [filamentId], references: [id], onDelete: Cascade)
+  tag      Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([filamentId, tagId])
+}
+
+model TagOnResin {
+  resinId String
+  tagId   String
+
+  resin Resin @relation(fields: [resinId], references: [id], onDelete: Cascade)
+  tag   Tag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([resinId, tagId])
+}
+
+model TagOnPaint {
+  paintId String
+  tagId   String
+
+  paint Paint @relation(fields: [paintId], references: [id], onDelete: Cascade)
+  tag   Tag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([paintId, tagId])
+}
+
+model UsageLog {
+  id        String   @id @default(cuid())
+  itemType  String   @db.VarChar(16)
+  itemId    String
+  amount    Float
+  unit      String   @db.VarChar(4)
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  userId    String
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  filament   Filament? @relation(fields: [filamentId], references: [id], onDelete: Cascade)
+  filamentId String?
+  resin      Resin?    @relation(fields: [resinId], references: [id], onDelete: Cascade)
+  resinId    String?
+  paint      Paint?    @relation(fields: [paintId], references: [id], onDelete: Cascade)
+  paintId    String?
+
+  @@index([userId])
+  @@index([itemType, itemId])
+  @@index([createdAt])
+}
+
+model UserSettings {
+  id                String @id @default(cuid())
+  userId            String @unique
+  lowStockThreshold Float  @default(10)
+  currency          String @default("USD") @db.VarChar(3)
+  theme             String @default("dark") @db.VarChar(8)
+  units             String @default("metric") @db.VarChar(8)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
