@@ -2,9 +2,13 @@ node_modules
 .next
 .git
 .gitignore
-*.md
-docker-compose*.yml
-.env*
+.env
+.env.*
 !.env.example
+*.md
+Dockerfile
+docker-compose*.yml
+.dockerignore
+.claude
 .vscode
 .idea
