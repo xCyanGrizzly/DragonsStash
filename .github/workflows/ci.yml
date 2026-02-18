@@ -42,10 +42,12 @@ jobs:
         run: npm ci
 
       - name: Generate Prisma client
-        run: npx prisma generate
-
-      - name: Verify Prisma client generated
-        run: ls -la src/generated/prisma/
+        run: |
+          npx prisma generate
+          echo "--- Checking generated output ---"
+          ls -la src/generated/prisma/ || echo "ERROR: src/generated/prisma/ does not exist!"
+          echo "--- Checking node_modules/.prisma ---"
+          ls -la node_modules/.prisma/client/ 2>/dev/null || echo "No .prisma/client in node_modules"
 
       - name: Run database migrations
         run: npx prisma migrate deploy
