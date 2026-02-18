@@ -59,6 +59,7 @@ export function useDataTable<TData>({
     [searchParams]
   );
 
+  // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Table API is safe in this context
   const table = useReactTable({
     data,
     columns,

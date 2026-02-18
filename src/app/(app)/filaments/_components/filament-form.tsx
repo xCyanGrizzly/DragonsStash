@@ -80,6 +80,7 @@ export function FilamentForm({ filament, vendors, locations, onSuccess }: Filame
     },
   });
 
+  // eslint-disable-next-line react-hooks/incompatible-library -- RHF watch is safe here, used only for preview swatch
   const watchColorHex = form.watch("colorHex");
 
   function handleCatalogSelect(item: CatalogItem) {

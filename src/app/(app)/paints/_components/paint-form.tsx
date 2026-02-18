@@ -78,6 +78,7 @@ export function PaintForm({ paint, vendors, locations, onSuccess }: PaintFormPro
     },
   });
 
+  // eslint-disable-next-line react-hooks/incompatible-library -- RHF watch is safe here, used only for preview swatch
   const watchColorHex = form.watch("colorHex");
 
   function handleCatalogSelect(item: CatalogItem) {

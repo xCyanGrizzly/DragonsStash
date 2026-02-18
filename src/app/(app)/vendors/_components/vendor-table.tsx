@@ -5,7 +5,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { useDataTable } from "@/hooks/use-data-table";
-import { useDebounce } from "@/hooks/use-debounce";
+// useDebounce reserved for future search debouncing
 import { getVendorColumns } from "./vendor-columns";
 import { VendorModal } from "./vendor-modal";
 import { deleteVendor, archiveVendor } from "../actions";
@@ -44,8 +44,6 @@ export function VendorTable({ data, pageCount, totalCount }: VendorTableProps) {
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const [searchValue, setSearchValue] = useState(searchParams.get("search") ?? "");
-  const _debouncedSearch = useDebounce(searchValue, 300);
-
   // Update URL when search changes
   const updateSearch = (value: string) => {
     setSearchValue(value);
