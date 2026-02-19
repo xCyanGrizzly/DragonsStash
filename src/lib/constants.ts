@@ -6,6 +6,7 @@ export const NAV_ITEMS = [
   { label: "Resins", href: "/resins", icon: "Droplets" },
   { label: "Paints", href: "/paints", icon: "Paintbrush" },
   { label: "Supplies", href: "/supplies", icon: "Gem" },
+  { label: "Usage", href: "/usage", icon: "ClipboardList" },
   { label: "Vendors", href: "/vendors", icon: "Building2" },
   { label: "Locations", href: "/locations", icon: "MapPin" },
   { label: "Settings", href: "/settings", icon: "Settings" },

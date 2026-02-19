@@ -1,24 +1,34 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { getDashboardStats } from "@/data/dashboard.queries";
+import { getAllUserItems } from "@/data/usage.queries";
 import { getUserSettings } from "@/data/settings.queries";
-import { Package, DollarSign, AlertTriangle, Activity } from "lucide-react";
+import { Package, Euro, AlertTriangle, Activity } from "lucide-react";
 import { StatCard } from "@/components/shared/stat-card";
 import { ColorSwatch } from "@/components/shared/color-swatch";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { RecentUsageCard } from "./_components/recent-usage-card";
 
 export default async function DashboardPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
 
   const settings = await getUserSettings(session.user.id);
-  const stats = await getDashboardStats(session.user.id, settings.lowStockThreshold);
+  const [stats, items] = await Promise.all([
+    getDashboardStats(session.user.id, settings.lowStockThreshold),
+    getAllUserItems(session.user.id),
+  ]);
 
   const currencyFormatter = new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: settings.currency,
   });
+
+  // Serialize dates for the client component
+  const serializedUsage = stats.recentUsage.map((log) => ({
+    ...log,
+    createdAt: log.createdAt.toISOString(),
+  }));
 
   return (
     <div className="space-y-6">
@@ -33,7 +43,7 @@ export default async function DashboardPage() {
         <StatCard
           title="Inventory Value"
           value={currencyFormatter.format(stats.inventoryValue)}
-          icon={DollarSign}
+          icon={Euro}
           description="Total purchase cost"
         />
         <StatCard
@@ -85,41 +95,7 @@ export default async function DashboardPage() {
         </Card>
 
         {/* Recent Usage */}
-        <Card className="border-border">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Recent Usage</CardTitle>
-            <CardDescription>Latest consumption log entries</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {stats.recentUsage.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No usage logged yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {stats.recentUsage.map((log) => (
-                  <div key={log.id} className="flex items-center gap-3">
-                    <Badge variant="outline" className="text-[10px] shrink-0">
-                      {log.itemType}
-                    </Badge>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{log.itemName}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {log.notes || "No notes"}
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-sm font-medium">
-                        -{log.amount}{log.unit}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(log.createdAt).toLocaleDateString()}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <RecentUsageCard recentUsage={serializedUsage} items={items} />
       </div>
     </div>
   );
