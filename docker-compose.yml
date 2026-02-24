@@ -10,10 +10,36 @@ services:
       - AUTH_SECRET=change-me-to-a-random-secret-in-production
       - AUTH_TRUST_HOST=true
       - NEXT_PUBLIC_APP_URL=http://localhost:3000
+      - TELEGRAM_API_KEY=${TELEGRAM_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
     restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://dragons:stash@db:5432/dragonsstash
+      - WORKER_INTERVAL_MINUTES=60
+      - WORKER_TEMP_DIR=/tmp/zips
+      - TDLIB_STATE_DIR=/data/tdlib
+      - WORKER_MAX_ZIP_SIZE_MB=4096
+      - LOG_LEVEL=info
+    volumes:
+      - tdlib_state:/data/tdlib
+      - tmp_zips:/tmp/zips
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
 
   db:
     image: postgres:16-alpine
@@ -34,3 +60,5 @@ services:
 
 volumes:
   postgres_data:
+  tdlib_state:
+  tmp_zips:

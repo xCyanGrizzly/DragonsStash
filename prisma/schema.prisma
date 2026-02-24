@@ -349,3 +349,189 @@ model UserSettings {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
+
+// ───────────────────────────────────────
+// Telegram ingestion models
+// ───────────────────────────────────────
+
+enum AuthState {
+  PENDING
+  AWAITING_CODE
+  AWAITING_PASSWORD
+  AUTHENTICATED
+  EXPIRED
+}
+
+enum ChannelType {
+  SOURCE
+  DESTINATION
+}
+
+enum ChannelRole {
+  READER
+  WRITER
+}
+
+enum ArchiveType {
+  ZIP
+  RAR
+}
+
+enum IngestionStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model TelegramAccount {
+  id          String    @id @default(cuid())
+  phone       String    @unique
+  displayName String?
+  isActive    Boolean   @default(true)
+  authState   AuthState @default(PENDING)
+  authCode    String?
+  lastSeenAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  channelMaps   AccountChannelMap[]
+  ingestionRuns IngestionRun[]
+
+  @@index([isActive])
+  @@map("telegram_accounts")
+}
+
+model TelegramChannel {
+  id         String      @id @default(cuid())
+  telegramId BigInt      @unique
+  title      String
+  type       ChannelType
+  isForum    Boolean     @default(false)
+  isActive   Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  accountMaps AccountChannelMap[]
+  packages    Package[]
+
+  @@index([type, isActive])
+  @@map("telegram_channels")
+}
+
+model AccountChannelMap {
+  id                     String      @id @default(cuid())
+  accountId              String
+  channelId              String
+  role                   ChannelRole @default(READER)
+  lastProcessedMessageId BigInt?
+  createdAt              DateTime    @default(now())
+
+  account        TelegramAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  channel        TelegramChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  topicProgress  TopicProgress[]
+
+  @@unique([accountId, channelId])
+  @@index([accountId])
+  @@index([channelId])
+  @@map("account_channel_map")
+}
+
+model Package {
+  id              String      @id @default(cuid())
+  contentHash     String      @unique
+  fileName        String
+  fileSize        BigInt
+  archiveType     ArchiveType
+  creator         String?
+  sourceChannelId String
+  sourceMessageId BigInt
+  sourceTopicId   BigInt?
+  destChannelId   String?
+  destMessageId   BigInt?
+  isMultipart     Boolean     @default(false)
+  partCount       Int         @default(1)
+  fileCount       Int         @default(0)
+  previewData     Bytes?      // JPEG thumbnail from nearby Telegram photo (stored as raw bytes)
+  previewMsgId    BigInt?     // Telegram message ID of the matched photo
+  indexedAt        DateTime   @default(now())
+  createdAt       DateTime    @default(now())
+
+  sourceChannel  TelegramChannel @relation(fields: [sourceChannelId], references: [id])
+  files          PackageFile[]
+  ingestionRun   IngestionRun?   @relation(fields: [ingestionRunId], references: [id])
+  ingestionRunId String?
+
+  @@index([sourceChannelId])
+  @@index([destChannelId])
+  @@index([fileName])
+  @@index([indexedAt])
+  @@index([archiveType])
+  @@index([creator])
+  @@map("packages")
+}
+
+model PackageFile {
+  id               String @id @default(cuid())
+  packageId        String
+  path             String
+  fileName         String
+  extension        String?
+  compressedSize   BigInt  @default(0)
+  uncompressedSize BigInt  @default(0)
+  crc32            String?
+
+  package Package @relation(fields: [packageId], references: [id], onDelete: Cascade)
+
+  @@index([packageId])
+  @@index([extension])
+  @@index([fileName])
+  @@map("package_files")
+}
+
+model IngestionRun {
+  id              String          @id @default(cuid())
+  accountId       String
+  status          IngestionStatus @default(RUNNING)
+  startedAt       DateTime        @default(now())
+  finishedAt      DateTime?
+  messagesScanned Int             @default(0)
+  zipsFound       Int             @default(0)
+  zipsDuplicate   Int             @default(0)
+  zipsIngested    Int             @default(0)
+  errorMessage    String?
+
+  // Live activity tracking — written by worker in real-time
+  currentActivity String?         // Human-readable: "Downloading pack.zip (part 2/5)"
+  currentStep     String?         // Machine-readable step key
+  currentChannel  String?         // Channel title being processed
+  currentFile     String?         // File currently being processed
+  currentFileNum  Int?            // Which archive set (1-indexed)
+  totalFiles      Int?            // Total archive sets found
+  downloadedBytes BigInt?         // Current download progress in bytes
+  totalBytes      BigInt?         // Total size of current download
+  downloadPercent Int?            // 0-100
+  lastActivityAt  DateTime?       // When activity was last updated
+
+  account  TelegramAccount @relation(fields: [accountId], references: [id])
+  packages Package[]
+
+  @@index([accountId])
+  @@index([status])
+  @@index([startedAt])
+  @@map("ingestion_runs")
+}
+
+model TopicProgress {
+  id                     String  @id @default(cuid())
+  accountChannelMapId    String
+  topicId                BigInt
+  topicName              String?
+  lastProcessedMessageId BigInt?
+
+  accountChannelMap AccountChannelMap @relation(fields: [accountChannelMapId], references: [id], onDelete: Cascade)
+
+  @@unique([accountChannelMapId, topicId])
+  @@index([accountChannelMapId])
+  @@map("topic_progress")
+}

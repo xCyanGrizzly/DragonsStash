@@ -1,5 +1,6 @@
 # dependencies
 /node_modules
+worker/node_modules
 /.pnp
 .pnp.*
 .yarn/*
@@ -48,3 +49,7 @@ src/generated
 # ide
 .idea
 .vscode
+
+# temp files
+nul
+tmpclaude-*

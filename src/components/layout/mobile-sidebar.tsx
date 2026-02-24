@@ -8,6 +8,8 @@ import {
   Droplets,
   Paintbrush,
   Gem,
+  FileBox,
+  Send,
   ClipboardList,
   Building2,
   MapPin,
@@ -18,7 +20,7 @@ import { cn } from "@/lib/utils";
 import { APP_NAME } from "@/lib/constants";
 import { SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
-const icons = { LayoutDashboard, Cylinder, Droplets, Paintbrush, Gem, ClipboardList, Building2, MapPin, Settings };
+const icons = { LayoutDashboard, Cylinder, Droplets, Paintbrush, Gem, FileBox, Send, ClipboardList, Building2, MapPin, Settings };
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: "LayoutDashboard" as const },
@@ -26,6 +28,8 @@ const navItems = [
   { label: "Resins", href: "/resins", icon: "Droplets" as const },
   { label: "Paints", href: "/paints", icon: "Paintbrush" as const },
   { label: "Supplies", href: "/supplies", icon: "Gem" as const },
+  { label: "STL Files", href: "/stls", icon: "FileBox" as const },
+  { label: "Telegram", href: "/telegram", icon: "Send" as const },
   { label: "Usage", href: "/usage", icon: "ClipboardList" as const },
   { label: "Vendors", href: "/vendors", icon: "Building2" as const },
   { label: "Locations", href: "/locations", icon: "MapPin" as const },
