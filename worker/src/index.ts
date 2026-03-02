@@ -4,6 +4,7 @@ import { logger } from "./util/logger.js";
 import { markStaleRunsAsFailed } from "./db/queries.js";
 import { cleanupTempDir } from "./worker.js";
 import { startScheduler, stopScheduler } from "./scheduler.js";
+import { startFetchListener, stopFetchListener } from "./fetch-listener.js";
 import { db, pool } from "./db/client.js";
 
 const log = logger.child({ module: "main" });
@@ -20,6 +21,9 @@ async function main(): Promise<void> {
   await cleanupTempDir();
   await markStaleRunsAsFailed();
 
+  // Start the fetch listener (pg_notify for on-demand channel fetching)
+  await startFetchListener();
+
   // Start the scheduler
   await startScheduler();
 }
@@ -28,6 +32,7 @@ async function main(): Promise<void> {
 function shutdown(signal: string): void {
   log.info({ signal }, "Shutdown signal received");
   stopScheduler();
+  stopFetchListener();
 
   // Close DB connections
   Promise.all([db.$disconnect(), pool.end()])

@@ -57,17 +57,19 @@ export function groupArchiveSets(messages: TelegramMessage[]): ArchiveSet[] {
       // Check if any single entry is the "final part" of a legacy split
       const allEntries = [...multipartEntries, ...singleEntries];
 
-      // Check time span — skip if parts span too long
-      const dates = allEntries.map((e) => e.msg.date.getTime());
-      const span = Math.max(...dates) - Math.min(...dates);
-      const maxSpanMs = config.multipartTimeoutHours * 60 * 60 * 1000;
+      // Check time span — skip if parts span too long (0 = no limit)
+      if (config.multipartTimeoutHours > 0) {
+        const dates = allEntries.map((e) => e.msg.date.getTime());
+        const span = Math.max(...dates) - Math.min(...dates);
+        const maxSpanMs = config.multipartTimeoutHours * 60 * 60 * 1000;
 
-      if (span > maxSpanMs) {
-        log.warn(
-          { baseName, format, span: span / 3600000 },
-          "Multipart set spans too long, skipping"
-        );
-        continue;
+        if (span > maxSpanMs) {
+          log.warn(
+            { baseName, format, span: span / 3600000 },
+            "Multipart set spans too long, skipping"
+          );
+          continue;
+        }
       }
 
       // Sort by part number (singles get a very high number so they come last — they're the final part)

@@ -3,9 +3,10 @@
 import { type ColumnDef } from "@tanstack/react-table";
 import {
   MoreHorizontal,
-  Pencil,
   Trash2,
   Power,
+  ArrowDownToLine,
+  ArrowUpFromLine,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,15 +20,15 @@ import {
 import type { ChannelRow } from "@/lib/telegram/admin-queries";
 
 interface ChannelColumnsProps {
-  onEdit: (channel: ChannelRow) => void;
   onToggleActive: (id: string) => void;
   onDelete: (id: string) => void;
+  onSetType: (id: string, type: "SOURCE" | "DESTINATION") => void;
 }
 
 export function getChannelColumns({
-  onEdit,
   onToggleActive,
   onDelete,
+  onSetType,
 }: ChannelColumnsProps): ColumnDef<ChannelRow, unknown>[] {
   return [
     {
@@ -105,10 +106,21 @@ export function getChannelColumns({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onEdit(row.original)}>
-              <Pencil className="mr-2 h-3.5 w-3.5" />
-              Edit
-            </DropdownMenuItem>
+            {row.original.type === "SOURCE" ? (
+              <DropdownMenuItem
+                onClick={() => onSetType(row.original.id, "DESTINATION")}
+              >
+                <ArrowDownToLine className="mr-2 h-3.5 w-3.5" />
+                Set as Destination
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem
+                onClick={() => onSetType(row.original.id, "SOURCE")}
+              >
+                <ArrowUpFromLine className="mr-2 h-3.5 w-3.5" />
+                Set as Source
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               onClick={() => onToggleActive(row.original.id)}
             >

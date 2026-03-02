@@ -384,6 +384,13 @@ enum IngestionStatus {
   CANCELLED
 }
 
+enum FetchStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
 model TelegramAccount {
   id          String    @id @default(cuid())
   phone       String    @unique
@@ -397,6 +404,7 @@ model TelegramAccount {
 
   channelMaps   AccountChannelMap[]
   ingestionRuns IngestionRun[]
+  fetchRequests ChannelFetchRequest[]
 
   @@index([isActive])
   @@map("telegram_accounts")
@@ -534,4 +542,27 @@ model TopicProgress {
   @@unique([accountChannelMapId, topicId])
   @@index([accountChannelMapId])
   @@map("topic_progress")
+}
+
+model GlobalSetting {
+  key       String   @id @db.VarChar(64)
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+
+  @@map("global_settings")
+}
+
+model ChannelFetchRequest {
+  id         String      @id @default(cuid())
+  accountId  String
+  status     FetchStatus @default(PENDING)
+  resultJson String?     @db.Text
+  error      String?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  account TelegramAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, status])
+  @@map("channel_fetch_requests")
 }

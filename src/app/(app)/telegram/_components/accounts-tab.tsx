@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useEffect, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Plus, Play } from "lucide-react";
 import { toast } from "sonner";
 import { getAccountColumns } from "./account-columns";
 import { AccountModal } from "./account-modal";
 import { AccountLinksDrawer } from "./account-links-drawer";
 import { AuthCodeDialog } from "./auth-code-dialog";
+import { ChannelPickerDialog } from "./channel-picker-dialog";
 import { deleteAccount, toggleAccountActive, triggerIngestion } from "../actions";
 import { DataTable } from "@/components/shared/data-table";
 import { DeleteDialog } from "@/components/shared/delete-dialog";
@@ -19,12 +21,27 @@ interface AccountsTabProps {
 }
 
 export function AccountsTab({ accounts }: AccountsTabProps) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [modalOpen, setModalOpen] = useState(false);
   const [editAccount, setEditAccount] = useState<AccountRow | undefined>();
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [linksAccountId, setLinksAccountId] = useState<string | null>(null);
   const [authCodeAccount, setAuthCodeAccount] = useState<AccountRow | null>(null);
+  const [fetchChannelsAccountId, setFetchChannelsAccountId] = useState<string | null>(null);
+
+  // Auto-refresh when accounts are in transitional states (PENDING, AWAITING_CODE, AWAITING_PASSWORD)
+  const hasTransitional = accounts.some(
+    (a) => a.authState === "PENDING" || a.authState === "AWAITING_CODE" || a.authState === "AWAITING_PASSWORD"
+  );
+
+  useEffect(() => {
+    if (!hasTransitional) return;
+    const interval = setInterval(() => {
+      router.refresh();
+    }, 3_000);
+    return () => clearInterval(interval);
+  }, [hasTransitional, router]);
 
   const columns = getAccountColumns({
     onEdit: (account) => {
@@ -48,6 +65,7 @@ export function AccountsTab({ accounts }: AccountsTabProps) {
         else toast.error(result.error);
       });
     },
+    onFetchChannels: (id) => setFetchChannelsAccountId(id),
   });
 
   const { table } = useDataTable({
@@ -133,6 +151,14 @@ export function AccountsTab({ accounts }: AccountsTabProps) {
         open={!!authCodeAccount}
         onOpenChange={(open) => {
           if (!open) setAuthCodeAccount(null);
+        }}
+      />
+
+      <ChannelPickerDialog
+        accountId={fetchChannelsAccountId}
+        open={!!fetchChannelsAccountId}
+        onOpenChange={(open) => {
+          if (!open) setFetchChannelsAccountId(null);
         }}
       />
     </div>

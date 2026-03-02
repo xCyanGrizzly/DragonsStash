@@ -1,12 +1,13 @@
 import path from "path";
-import { unlink, readdir } from "fs/promises";
+import { unlink, readdir, mkdir, rm } from "fs/promises";
 import { config } from "./util/config.js";
 import { childLogger } from "./util/logger.js";
 import { tryAcquireLock, releaseLock } from "./db/locks.js";
 import {
   getSourceChannelMappings,
-  getDestinationChannel,
+  getGlobalDestinationChannel,
   packageExistsByHash,
+  packageExistsBySourceMessage,
   createPackageWithFiles,
   createIngestionRun,
   completeIngestionRun,
@@ -16,9 +17,19 @@ import {
   setChannelForum,
   getTopicProgress,
   upsertTopicProgress,
+  upsertChannel,
+  ensureAccountChannelLink,
+  getGlobalSetting,
+  getChannelFetchRequest,
+  updateFetchRequestStatus,
+  getAccountLinkedChannelIds,
+  getExistingChannelsByTelegramId,
+  getAccountById,
+  deleteOrphanedPackageByHash,
 } from "./db/queries.js";
 import type { ActivityUpdate } from "./db/queries.js";
 import { createTdlibClient, closeTdlibClient } from "./tdlib/client.js";
+import { getAccountChats, joinChatByInviteLink } from "./tdlib/chats.js";
 import { getChannelMessages, downloadFile, downloadPhotoThumbnail } from "./tdlib/download.js";
 import type { DownloadProgress, ChannelScanResult } from "./tdlib/download.js";
 import { isChatForum, getForumTopicList, getTopicMessages } from "./tdlib/topics.js";
@@ -29,12 +40,202 @@ import { extractCreatorFromFileName } from "./archive/creator.js";
 import { hashParts } from "./archive/hash.js";
 import { readZipCentralDirectory } from "./archive/zip-reader.js";
 import { readRarContents } from "./archive/rar-reader.js";
-import { byteLevelSplit } from "./archive/split.js";
+import { byteLevelSplit, concatenateFiles } from "./archive/split.js";
 import { uploadToChannel } from "./upload/channel.js";
 import type { TelegramAccount, TelegramChannel } from "@prisma/client";
 import type { Client } from "tdl";
 
 const log = childLogger("worker");
+
+/**
+ * Authenticate a PENDING account by creating a TDLib client.
+ * TDLib will send an SMS code to the phone number, and the client.login()
+ * callbacks set the authState to AWAITING_CODE. Once the admin enters the
+ * code via the UI, pollForAuthCode picks it up and completes the login.
+ *
+ * After successful auth:
+ * 1. Fetches channels from Telegram and writes as a ChannelFetchRequest
+ *    (so the admin can select sources in the UI)
+ * 2. Auto-joins the destination group if an invite link is configured
+ */
+export async function authenticateAccount(
+  account: TelegramAccount
+): Promise<void> {
+  const aLog = childLogger("auth", { accountId: account.id, phone: account.phone });
+  aLog.info("Starting authentication flow");
+
+  let client: Client | undefined;
+  try {
+    client = await createTdlibClient({
+      id: account.id,
+      phone: account.phone,
+    });
+    aLog.info("Authentication successful");
+
+    // Auto-fetch channels and create a fetch request result
+    aLog.info("Fetching channels from Telegram...");
+    await createAutoFetchRequest(client, account.id, aLog);
+
+    // Auto-join the destination group if an invite link exists
+    const inviteLink = await getGlobalSetting("destination_invite_link");
+    if (inviteLink) {
+      aLog.info("Attempting to join destination group via invite link...");
+      try {
+        await joinChatByInviteLink(client, inviteLink);
+        // Link this account as WRITER to the destination channel
+        const destChannel = await getGlobalDestinationChannel();
+        if (destChannel) {
+          await ensureAccountChannelLink(account.id, destChannel.id, "WRITER");
+          aLog.info({ destChannel: destChannel.title }, "Joined destination group and linked as WRITER");
+        }
+      } catch (err) {
+        // May already be a member — that's fine
+        aLog.warn({ err }, "Could not join destination group (may already be a member)");
+        // Still try to link as WRITER
+        const destChannel = await getGlobalDestinationChannel();
+        if (destChannel) {
+          await ensureAccountChannelLink(account.id, destChannel.id, "WRITER");
+        }
+      }
+    }
+  } catch (err) {
+    aLog.error({ err }, "Authentication failed");
+  } finally {
+    if (client) {
+      await closeTdlibClient(client);
+    }
+  }
+}
+
+/**
+ * Process a ChannelFetchRequest: fetch channels from Telegram,
+ * enrich with DB state, and write the result JSON.
+ * Called by the fetch listener (pg_notify) and by authenticateAccount.
+ */
+export async function processFetchRequest(requestId: string): Promise<void> {
+  const aLog = childLogger("fetch-request", { requestId });
+  const request = await getChannelFetchRequest(requestId);
+
+  if (!request || request.status !== "PENDING") {
+    aLog.warn("Fetch request not found or not pending, skipping");
+    return;
+  }
+
+  await updateFetchRequestStatus(requestId, "IN_PROGRESS");
+  aLog.info({ accountId: request.accountId }, "Processing fetch request");
+
+  const client = await createTdlibClient({
+    id: request.account.id,
+    phone: request.account.phone,
+  });
+
+  try {
+    const chats = await getAccountChats(client);
+
+    // Enrich with DB state
+    const linkedTelegramIds = await getAccountLinkedChannelIds(request.accountId);
+    const existingChannels = await getExistingChannelsByTelegramId();
+
+    const enrichedChats = chats.map((chat) => {
+      const telegramIdStr = chat.chatId.toString();
+      return {
+        chatId: telegramIdStr,
+        title: chat.title,
+        type: chat.type,
+        isForum: chat.isForum,
+        memberCount: chat.memberCount ?? null,
+        alreadyLinked: linkedTelegramIds.has(telegramIdStr),
+        existingChannelId: existingChannels.get(telegramIdStr) ?? null,
+      };
+    });
+
+    // Also upsert channel metadata while we have the data
+    for (const chat of chats) {
+      try {
+        await upsertChannel({
+          telegramId: chat.chatId,
+          title: chat.title,
+          type: "SOURCE",
+          isForum: chat.isForum,
+        });
+      } catch {
+        // Non-critical — metadata sync can fail silently
+      }
+    }
+
+    await updateFetchRequestStatus(requestId, "COMPLETED", {
+      resultJson: JSON.stringify(enrichedChats),
+    });
+
+    aLog.info(
+      { total: chats.length, linked: [...linkedTelegramIds].length },
+      "Fetch request completed"
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    aLog.error({ err }, "Fetch request failed");
+    await updateFetchRequestStatus(requestId, "FAILED", { error: message });
+  } finally {
+    await closeTdlibClient(client);
+  }
+}
+
+/**
+ * Internal helper called after authentication to auto-create a fetch request
+ * with the channel list (so the UI can show the picker immediately).
+ */
+async function createAutoFetchRequest(
+  client: Client,
+  accountId: string,
+  aLog: ReturnType<typeof childLogger>
+): Promise<void> {
+  const chats = await getAccountChats(client);
+
+  const linkedTelegramIds = await getAccountLinkedChannelIds(accountId);
+  const existingChannels = await getExistingChannelsByTelegramId();
+
+  const enrichedChats = chats.map((chat) => {
+    const telegramIdStr = chat.chatId.toString();
+    return {
+      chatId: telegramIdStr,
+      title: chat.title,
+      type: chat.type,
+      isForum: chat.isForum,
+      memberCount: chat.memberCount ?? null,
+      alreadyLinked: linkedTelegramIds.has(telegramIdStr),
+      existingChannelId: existingChannels.get(telegramIdStr) ?? null,
+    };
+  });
+
+  // Upsert channel metadata
+  for (const chat of chats) {
+    try {
+      await upsertChannel({
+        telegramId: chat.chatId,
+        title: chat.title,
+        type: "SOURCE",
+        isForum: chat.isForum,
+      });
+    } catch {
+      // Non-critical
+    }
+  }
+
+  // Create the fetch request record with the result already filled in
+  const { db } = await import("./db/client.js");
+  await db.channelFetchRequest.create({
+    data: {
+      accountId,
+      status: "COMPLETED",
+      resultJson: JSON.stringify(enrichedChats),
+    },
+  });
+
+  aLog.info(
+    { total: chats.length },
+    "Auto-fetch request created with channel list"
+  );
+}
 
 /**
  * Throttle DB writes for download progress to avoid hammering the DB.
@@ -140,17 +341,18 @@ export async function runWorkerForAccount(
     };
 
     try {
-      // 4. Get assigned source channels and destination
+      // 4. Get assigned source channels and global destination
       const channelMappings = await getSourceChannelMappings(account.id);
-      const destChannel = await getDestinationChannel(account.id);
+      const destChannel = await getGlobalDestinationChannel();
 
       if (!destChannel) {
-        throw new Error("No active destination channel configured");
+        throw new Error("No global destination channel configured — set one in the admin UI");
       }
 
       for (const mapping of channelMappings) {
         const channel = mapping.channel;
 
+        try {
         // ── Check if channel is a forum ──
         const forum = await isChatForum(client, channel.telegramId);
         if (forum !== channel.isForum) {
@@ -198,61 +400,63 @@ export async function runWorkerForAccount(
           );
 
           for (const topic of topics) {
-            const progress = topicProgressList.find(
-              (tp) => tp.topicId === topic.topicId
-            );
-
-            await updateRunActivity(activeRunId, {
-              currentActivity: `Scanning topic "${topic.name}" in "${channel.title}"`,
-              currentStep: "scanning",
-              currentChannel: `${channel.title} › ${topic.name}`,
-              currentFile: null,
-              currentFileNum: null,
-              totalFiles: null,
-              downloadedBytes: null,
-              totalBytes: null,
-              downloadPercent: null,
-            });
-
-            const scanResult = await getTopicMessages(
-              client,
-              channel.telegramId,
-              topic.topicId,
-              progress?.lastProcessedMessageId
-            );
-
-            if (scanResult.archives.length === 0) {
-              accountLog.debug(
-                { channelId: channel.id, topic: topic.name },
-                "No new archives in topic"
+            try {
+              const progress = topicProgressList.find(
+                (tp) => tp.topicId === topic.topicId
               );
-              continue;
-            }
 
-            accountLog.info(
-              { topic: topic.name, archives: scanResult.archives.length, photos: scanResult.photos.length },
-              "Found messages in topic"
-            );
+              await updateRunActivity(activeRunId, {
+                currentActivity: `Scanning topic "${topic.name}" in "${channel.title}"`,
+                currentStep: "scanning",
+                currentChannel: `${channel.title} › ${topic.name}`,
+                currentFile: null,
+                currentFileNum: null,
+                totalFiles: null,
+                downloadedBytes: null,
+                totalBytes: null,
+                downloadPercent: null,
+              });
 
-            // Process archives with topic creator
-            pipelineCtx.topicCreator = topic.name;
-            pipelineCtx.sourceTopicId = topic.topicId;
-            pipelineCtx.channelTitle = `${channel.title} › ${topic.name}`;
-
-            await processArchiveSets(pipelineCtx, scanResult, run.id);
-
-            // Update topic progress
-            const allMsgIds = [
-              ...scanResult.archives.map((m) => m.id),
-              ...scanResult.photos.map((p) => p.id),
-            ];
-            if (allMsgIds.length > 0) {
-              const maxId = allMsgIds.reduce((a, b) => (a > b ? a : b));
-              await upsertTopicProgress(
-                mapping.id,
+              const scanResult = await getTopicMessages(
+                client,
+                channel.telegramId,
                 topic.topicId,
-                topic.name,
-                maxId
+                progress?.lastProcessedMessageId
+              );
+
+              if (scanResult.archives.length === 0) {
+                accountLog.debug(
+                  { channelId: channel.id, topic: topic.name },
+                  "No new archives in topic"
+                );
+                continue;
+              }
+
+              accountLog.info(
+                { topic: topic.name, archives: scanResult.archives.length, photos: scanResult.photos.length },
+                "Found messages in topic"
+              );
+
+              // Process archives with topic creator
+              pipelineCtx.topicCreator = topic.name;
+              pipelineCtx.sourceTopicId = topic.topicId;
+              pipelineCtx.channelTitle = `${channel.title} › ${topic.name}`;
+
+              const maxProcessedId = await processArchiveSets(pipelineCtx, scanResult, run.id, progress?.lastProcessedMessageId);
+
+              // Only advance progress to the highest successfully processed message
+              if (maxProcessedId) {
+                await upsertTopicProgress(
+                  mapping.id,
+                  topic.topicId,
+                  topic.name,
+                  maxProcessedId
+                );
+              }
+            } catch (topicErr) {
+              accountLog.warn(
+                { err: topicErr, channelId: channel.id, topic: topic.name, topicId: topic.topicId.toString() },
+                "Failed to process topic, skipping"
               );
             }
           }
@@ -296,17 +500,18 @@ export async function runWorkerForAccount(
           pipelineCtx.sourceTopicId = null;
           pipelineCtx.channelTitle = channel.title;
 
-          await processArchiveSets(pipelineCtx, scanResult, run.id);
+          const maxProcessedId = await processArchiveSets(pipelineCtx, scanResult, run.id, mapping.lastProcessedMessageId);
 
-          // Update last processed message
-          const allMsgIds = [
-            ...scanResult.archives.map((m) => m.id),
-            ...scanResult.photos.map((p) => p.id),
-          ];
-          if (allMsgIds.length > 0) {
-            const maxId = allMsgIds.reduce((a, b) => (a > b ? a : b));
-            await updateLastProcessedMessage(mapping.id, maxId);
+          // Only advance progress to the highest successfully processed message
+          if (maxProcessedId) {
+            await updateLastProcessedMessage(mapping.id, maxProcessedId);
           }
+        }
+        } catch (channelErr) {
+          accountLog.warn(
+            { err: channelErr, channelId: channel.id, title: channel.title },
+            "Failed to process channel, skipping to next"
+          );
         }
       }
 
@@ -332,16 +537,37 @@ export async function runWorkerForAccount(
 /**
  * Process a scan result through the archive pipeline:
  * group → download → hash → dedup → metadata → split → upload → preview → index.
+ *
+ * Returns the highest message ID that was successfully processed (ingested or
+ * confirmed duplicate). The caller should only advance the progress boundary
+ * to this value — never to the max of all scanned messages.
  */
 async function processArchiveSets(
   ctx: PipelineContext,
   scanResult: ChannelScanResult,
-  ingestionRunId: string
-): Promise<void> {
+  ingestionRunId: string,
+  lastProcessedMessageId?: bigint | null
+): Promise<bigint | null> {
   const { client, runId, channelTitle, channel, throttled, counters, accountLog } = ctx;
 
   // Group into archive sets
-  const archiveSets = groupArchiveSets(scanResult.archives);
+  let archiveSets = groupArchiveSets(scanResult.archives);
+
+  // Filter out sets where ALL parts are at or below the boundary (already processed)
+  if (lastProcessedMessageId) {
+    const totalBefore = archiveSets.length;
+    archiveSets = archiveSets.filter((set) =>
+      set.parts.some((p) => p.id > lastProcessedMessageId)
+    );
+    const filtered = totalBefore - archiveSets.length;
+    if (filtered > 0) {
+      accountLog.info(
+        { filtered, remaining: archiveSets.length },
+        "Filtered out already-processed archive sets"
+      );
+    }
+  }
+
   counters.zipsFound += archiveSets.length;
 
   // Match preview photos to archive sets
@@ -369,16 +595,38 @@ async function processArchiveSets(
     zipsFound: counters.zipsFound,
   });
 
+  // Track the highest message ID that was successfully processed
+  let maxProcessedId: bigint | null = null;
+
   for (let setIdx = 0; setIdx < archiveSets.length; setIdx++) {
-    await processOneArchiveSet(
-      ctx,
-      archiveSets[setIdx],
-      setIdx,
-      archiveSets.length,
-      previewMatches,
-      ingestionRunId
-    );
+    try {
+      await processOneArchiveSet(
+        ctx,
+        archiveSets[setIdx],
+        setIdx,
+        archiveSets.length,
+        previewMatches,
+        ingestionRunId
+      );
+
+      // Set completed (ingested or confirmed duplicate) — advance watermark
+      const setMaxId = archiveSets[setIdx].parts.reduce(
+        (max, p) => (p.id > max ? p.id : max),
+        0n
+      );
+      if (setMaxId > (maxProcessedId ?? 0n)) {
+        maxProcessedId = setMaxId;
+      }
+    } catch (setErr) {
+      // If a set fails, do NOT advance the watermark past it
+      accountLog.warn(
+        { err: setErr, baseName: archiveSets[setIdx].baseName },
+        "Archive set failed, watermark will not advance past this set"
+      );
+    }
   }
+
+  return maxProcessedId;
 }
 
 /**
@@ -400,17 +648,43 @@ async function processOneArchiveSet(
 
   counters.messagesScanned += archiveSet.parts.length;
   const archiveName = archiveSet.parts[0].fileName;
+
+  // ── Early skip: check if this archive set was already ingested ──
+  // This avoids re-downloading large archives that were processed in a prior run.
+  const alreadyIngested = await packageExistsBySourceMessage(
+    channel.id,
+    archiveSet.parts[0].id
+  );
+  if (alreadyIngested) {
+    counters.zipsDuplicate++;
+    accountLog.debug(
+      { fileName: archiveName, sourceMessageId: Number(archiveSet.parts[0].id) },
+      "Archive already ingested (by source message), skipping"
+    );
+    await updateRunActivity(runId, {
+      currentActivity: `Skipped ${archiveName} (already ingested)`,
+      currentStep: "deduplicating",
+      currentChannel: channelTitle,
+      currentFile: archiveName,
+      currentFileNum: setIdx + 1,
+      totalFiles: totalSets,
+      zipsDuplicate: counters.zipsDuplicate,
+    });
+    return;
+  }
+
   const tempPaths: string[] = [];
   let splitPaths: string[] = [];
+
+  // Per-set subdirectory so uploaded files keep their original filenames
+  const setDir = path.join(config.tempDir, `${ingestionRunId}_${archiveSet.parts[0].id}`);
+  await mkdir(setDir, { recursive: true });
 
   try {
     // ── Downloading ──
     for (let partIdx = 0; partIdx < archiveSet.parts.length; partIdx++) {
       const part = archiveSet.parts[partIdx];
-      const tempPath = path.join(
-        config.tempDir,
-        `${ingestionRunId}_${part.id}_${part.fileName}`
-      );
+      const tempPath = path.join(setDir, part.fileName);
 
       const partLabel = archiveSet.parts.length > 1
         ? ` (part ${partIdx + 1}/${archiveSet.parts.length})`
@@ -526,14 +800,33 @@ async function processOneArchiveSet(
       accountLog.warn({ err, baseName: archiveSet.baseName }, "Failed to read archive metadata, ingesting without file list");
     }
 
-    // ── Splitting (if needed) ──
-    let uploadPaths = tempPaths;
+    // ── Splitting / Repacking (if needed) ──
+    let uploadPaths = [...tempPaths];
     const totalSize = archiveSet.parts.reduce(
       (sum, p) => sum + p.fileSize,
       0n
     );
+    const MAX_UPLOAD_SIZE = 2n * 1024n * 1024n * 1024n;
+    const hasOversizedPart = archiveSet.parts.some((p) => p.fileSize > MAX_UPLOAD_SIZE);
 
-    if (!archiveSet.isMultipart && totalSize > 2n * 1024n * 1024n * 1024n) {
+    if (hasOversizedPart) {
+      // Full repack: concatenate all parts → single file → re-split into uniform 2GB chunks
+      await updateRunActivity(runId, {
+        currentActivity: `Repacking ${archiveName} (parts >2GB, concatenating + re-splitting)`,
+        currentStep: "splitting",
+        currentChannel: channelTitle,
+        currentFile: archiveName,
+        currentFileNum: setIdx + 1,
+        totalFiles: totalSets,
+      });
+      const concatPath = path.join(setDir, `${archiveSet.baseName}.concat`);
+      await concatenateFiles(tempPaths, concatPath);
+      splitPaths = await byteLevelSplit(concatPath);
+      uploadPaths = splitPaths;
+      // Clean up the concat intermediate file
+      await unlink(concatPath).catch(() => {});
+    } else if (!archiveSet.isMultipart && totalSize > MAX_UPLOAD_SIZE) {
+      // Single file >2GB: split directly
       await updateRunActivity(runId, {
         currentActivity: `Splitting ${archiveName} for upload (>2GB)`,
         currentStep: "splitting",
@@ -595,6 +888,9 @@ async function processOneArchiveSet(
       totalFiles: totalSets,
     });
 
+    // Clean up any orphaned record (same hash but no dest upload) before creating
+    await deleteOrphanedPackageByHash(contentHash);
+
     await createPackageWithFiles({
       contentHash,
       fileName: archiveName,
@@ -632,8 +928,9 @@ async function processOneArchiveSet(
       "Archive ingested"
     );
   } finally {
-    // ALWAYS delete temp files
+    // ALWAYS delete temp files and the set directory
     await deleteFiles([...tempPaths, ...splitPaths]);
+    await rm(setDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -648,16 +945,16 @@ async function deleteFiles(paths: string[]): Promise<void> {
 }
 
 /**
- * Clean up any leftover temp files from previous runs.
+ * Clean up any leftover temp files/directories from previous runs.
  */
 export async function cleanupTempDir(): Promise<void> {
   try {
-    const files = await readdir(config.tempDir);
-    for (const file of files) {
-      await unlink(path.join(config.tempDir, file)).catch(() => {});
+    const entries = await readdir(config.tempDir);
+    for (const entry of entries) {
+      await rm(path.join(config.tempDir, entry), { recursive: true, force: true }).catch(() => {});
     }
-    if (files.length > 0) {
-      log.info({ count: files.length }, "Cleaned up stale temp files");
+    if (entries.length > 0) {
+      log.info({ count: entries.length }, "Cleaned up stale temp files");
     }
   } catch {
     // Directory might not exist yet

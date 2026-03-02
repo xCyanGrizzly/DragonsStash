@@ -9,8 +9,8 @@ export const config = {
   telegramApiHash: process.env.TELEGRAM_API_HASH ?? "",
   /** Maximum jitter added to scheduler interval (in minutes) */
   jitterMinutes: 5,
-  /** Maximum time between multipart archive parts (in hours) */
-  multipartTimeoutHours: 24,
+  /** Maximum time span for multipart archive parts (in hours). 0 = no limit. */
+  multipartTimeoutHours: parseInt(process.env.MULTIPART_TIMEOUT_HOURS ?? "0", 10),
   /** Delay between Telegram API calls (in ms) to avoid rate limits */
   apiDelayMs: 1000,
   /** Max retries for rate-limited requests */

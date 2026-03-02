@@ -1,5 +1,5 @@
 import type { Client } from "tdl";
-import { readFile, rename, stat } from "fs/promises";
+import { readFile, rename, copyFile, unlink, stat } from "fs/promises";
 import { config } from "../util/config.js";
 import { childLogger } from "../util/logger.js";
 import { isArchiveAttachment } from "../archive/detect.js";
@@ -69,19 +69,26 @@ export interface ChannelScanResult {
 }
 
 /**
- * Fetch messages from a channel since a given message ID.
+ * Fetch messages from a channel, stopping once we've scanned past the
+ * last-processed boundary (with one page of lookback for multipart safety).
  * Collects both archive attachments AND photo messages (for preview matching).
  * Returns messages in chronological order (oldest first).
+ *
+ * When `lastProcessedMessageId` is null (first run), scans everything.
+ * The worker applies a post-grouping filter to skip fully-processed sets,
+ * and keeps `packageExistsBySourceMessage` as a safety net.
  */
 export async function getChannelMessages(
   client: Client,
   chatId: bigint,
-  fromMessageId?: bigint | null,
+  lastProcessedMessageId?: bigint | null,
   limit = 100
 ): Promise<ChannelScanResult> {
   const archives: TelegramMessage[] = [];
   const photos: TelegramPhoto[] = [];
-  let currentFromId = fromMessageId ? Number(fromMessageId) : 0;
+  const boundary = lastProcessedMessageId ? Number(lastProcessedMessageId) : null;
+
+  let currentFromId = 0;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -114,8 +121,6 @@ export async function getChannelMessages(
       const photo = msg.content?.photo;
       const caption = msg.content?.caption?.text ?? "";
       if (photo?.sizes && photo.sizes.length > 0) {
-        // Pick the smallest size for thumbnail (type "s" or "m")
-        // TDLib photo sizes are ordered from smallest to largest
         const smallest = photo.sizes[0];
         photos.push({
           id: BigInt(msg.id),
@@ -128,13 +133,22 @@ export async function getChannelMessages(
     }
 
     currentFromId = result.messages[result.messages.length - 1].id;
+
+    // Stop scanning once we've gone past the boundary (this page is the lookback)
+    if (boundary && currentFromId < boundary) break;
+
     if (result.messages.length < 100) break;
 
     // Rate limit delay
     await sleep(config.apiDelayMs);
   }
 
-  // Return in chronological order (oldest first)
+  log.info(
+    { chatId: chatId.toString(), archives: archives.length, photos: photos.length },
+    "Channel scan complete"
+  );
+
+  // Reverse to chronological order (oldest first) so worker processes old→new
   return {
     archives: archives.reverse(),
     photos: photos.reverse(),
@@ -380,8 +394,23 @@ async function verifyAndMove(
     "File verified and complete"
   );
 
-  // Move from TDLib's cache to our temp directory
-  await rename(localPath, destPath);
+  // Move from TDLib's cache to our temp directory.
+  // Use rename first (fast, same filesystem), fall back to copy+delete
+  // when source and destination are on different filesystems (EXDEV).
+  try {
+    await rename(localPath, destPath);
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "EXDEV") {
+      log.debug(
+        { fileId, fileName },
+        "Cross-device rename — falling back to copy + unlink"
+      );
+      await copyFile(localPath, destPath);
+      await unlink(localPath);
+    } else {
+      throw err;
+    }
+  }
 }
 
 function sleep(ms: number): Promise<void> {

@@ -1,15 +1,22 @@
 import { config } from "./util/config.js";
 import { childLogger } from "./util/logger.js";
-import { getActiveAccounts } from "./db/queries.js";
-import { runWorkerForAccount } from "./worker.js";
+import { withTdlibMutex } from "./util/mutex.js";
+import { getActiveAccounts, getPendingAccounts } from "./db/queries.js";
+import { runWorkerForAccount, authenticateAccount } from "./worker.js";
 
 const log = childLogger("scheduler");
 
 let running = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
+let cycleCount = 0;
 
 /**
- * Run one ingestion cycle: process all active, authenticated accounts sequentially.
+ * Run one ingestion cycle:
+ * 1. Authenticate any PENDING accounts (triggers SMS code flow + auto-fetch channels)
+ * 2. Process all active AUTHENTICATED accounts for ingestion
+ *
+ * All TDLib operations are wrapped in the mutex to ensure only one client
+ * runs at a time (also shared with the fetch listener for on-demand requests).
  */
 async function runCycle(): Promise<void> {
   if (running) {
@@ -18,20 +25,38 @@ async function runCycle(): Promise<void> {
   }
 
   running = true;
-  log.info("Starting ingestion cycle");
+  cycleCount++;
+  log.info({ cycle: cycleCount }, "Starting ingestion cycle");
 
   try {
+    // ── Phase 1: Authenticate pending accounts ──
+    const pendingAccounts = await getPendingAccounts();
+    if (pendingAccounts.length > 0) {
+      log.info(
+        { count: pendingAccounts.length },
+        "Found pending accounts, starting authentication"
+      );
+      for (const account of pendingAccounts) {
+        await withTdlibMutex(`auth:${account.phone}`, () =>
+          authenticateAccount(account)
+        );
+      }
+    }
+
+    // ── Phase 2: Ingest for authenticated accounts ──
     const accounts = await getActiveAccounts();
 
     if (accounts.length === 0) {
-      log.info("No active authenticated accounts, nothing to do");
+      log.info("No active authenticated accounts, nothing to ingest");
       return;
     }
 
     log.info({ accountCount: accounts.length }, "Processing accounts");
 
     for (const account of accounts) {
-      await runWorkerForAccount(account);
+      await withTdlibMutex(`ingest:${account.phone}`, () =>
+        runWorkerForAccount(account)
+      );
     }
 
     log.info("Ingestion cycle complete");

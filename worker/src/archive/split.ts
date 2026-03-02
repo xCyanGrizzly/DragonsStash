@@ -46,3 +46,35 @@ export async function byteLevelSplit(filePath: string): Promise<string[]> {
   log.info({ filePath, parts: parts.length }, "File split complete");
   return parts;
 }
+
+/**
+ * Concatenate multiple files into a single output file by streaming
+ * each input sequentially. Used for repacking multipart archives
+ * that have oversized parts (>2GB) before re-splitting.
+ */
+export async function concatenateFiles(
+  inputPaths: string[],
+  outputPath: string
+): Promise<void> {
+  const out = createWriteStream(outputPath);
+
+  for (let i = 0; i < inputPaths.length; i++) {
+    log.info(
+      { part: i + 1, total: inputPaths.length, file: path.basename(inputPaths[i]) },
+      "Concatenating part"
+    );
+    await pipeline(createReadStream(inputPaths[i]), out, { end: false });
+  }
+
+  // Close the output stream
+  await new Promise<void>((resolve, reject) => {
+    out.end(() => resolve());
+    out.on("error", reject);
+  });
+
+  const stats = await stat(outputPath);
+  log.info(
+    { outputPath, totalBytes: stats.size, parts: inputPaths.length },
+    "Concatenation complete"
+  );
+}

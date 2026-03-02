@@ -19,6 +19,8 @@ services:
     build:
       context: .
       dockerfile: worker/Dockerfile
+    env_file:
+      - .env.local
     environment:
       - DATABASE_URL=postgresql://dragons:stash@db:5432/dragonsstash
       - WORKER_INTERVAL_MINUTES=5
@@ -26,8 +28,6 @@ services:
       - TDLIB_STATE_DIR=/data/tdlib
       - WORKER_MAX_ZIP_SIZE_MB=4096
       - LOG_LEVEL=debug
-      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
-      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
     volumes:
       - tdlib_dev_state:/data/tdlib
       - tmp_dev_zips:/tmp/zips

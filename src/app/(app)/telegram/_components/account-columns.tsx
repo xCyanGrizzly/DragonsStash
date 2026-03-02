@@ -9,6 +9,7 @@ import {
   Link2,
   Play,
   KeyRound,
+  Download,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,7 @@ interface AccountColumnsProps {
   onViewLinks: (id: string) => void;
   onTriggerSync: (id: string) => void;
   onEnterCode: (account: AccountRow) => void;
+  onFetchChannels: (id: string) => void;
 }
 
 export function getAccountColumns({
@@ -45,6 +47,7 @@ export function getAccountColumns({
   onViewLinks,
   onTriggerSync,
   onEnterCode,
+  onFetchChannels,
 }: AccountColumnsProps): ColumnDef<AccountRow, unknown>[] {
   return [
     {
@@ -156,6 +159,13 @@ export function getAccountColumns({
             <DropdownMenuItem onClick={() => onViewLinks(row.original.id)}>
               <Link2 className="mr-2 h-3.5 w-3.5" />
               Manage Channels
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => onFetchChannels(row.original.id)}
+              disabled={row.original.authState !== "AUTHENTICATED"}
+            >
+              <Download className="mr-2 h-3.5 w-3.5" />
+              Fetch Channels
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onTriggerSync(row.original.id)}>
               <Play className="mr-2 h-3.5 w-3.5" />

@@ -258,6 +258,44 @@ export async function deleteChannel(id: string): Promise<ActionResult> {
   }
 }
 
+export async function setChannelType(
+  id: string,
+  type: "SOURCE" | "DESTINATION"
+): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  if (!admin.success) return admin;
+
+  const existing = await prisma.telegramChannel.findUnique({ where: { id } });
+  if (!existing) return { success: false, error: "Channel not found" };
+
+  try {
+    await prisma.telegramChannel.update({
+      where: { id },
+      data: { type },
+    });
+    revalidatePath(REVALIDATE_PATH);
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to update channel type" };
+  }
+}
+
+export async function triggerChannelSync(): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  if (!admin.success) return admin;
+
+  try {
+    // Signal the worker to do a channel sync via pg_notify
+    await prisma.$queryRawUnsafe(
+      `SELECT pg_notify('channel_sync', 'requested')`
+    );
+    revalidatePath(REVALIDATE_PATH);
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to trigger channel sync" };
+  }
+}
+
 // ── Account-Channel link actions ──
 
 export async function linkChannel(
@@ -317,29 +355,271 @@ export async function triggerIngestion(
   if (!admin.success) return admin;
 
   try {
-    const res = await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/ingestion/trigger`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": process.env.INGESTION_API_KEY || "",
-        },
-        body: JSON.stringify({ accountId }),
-      }
-    );
+    // Find eligible accounts
+    const where: { isActive: boolean; authState: "AUTHENTICATED"; id?: string } = {
+      isActive: true,
+      authState: "AUTHENTICATED",
+    };
+    if (accountId) where.id = accountId;
 
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      return {
-        success: false,
-        error: (data as { error?: string }).error || "Failed to trigger ingestion",
-      };
+    const accounts = await prisma.telegramAccount.findMany({
+      where,
+      select: { id: true },
+    });
+
+    if (accounts.length === 0) {
+      return { success: false, error: "No eligible accounts found" };
+    }
+
+    // Create ingestion runs — the worker picks these up
+    for (const account of accounts) {
+      const existing = await prisma.ingestionRun.findFirst({
+        where: { accountId: account.id, status: "RUNNING" },
+      });
+      if (!existing) {
+        await prisma.ingestionRun.create({
+          data: { accountId: account.id, status: "RUNNING" },
+        });
+      }
+    }
+
+    // pg_notify for immediate worker pickup
+    try {
+      await prisma.$queryRawUnsafe(
+        `SELECT pg_notify('ingestion_trigger', $1)`,
+        accounts.map((a) => a.id).join(",")
+      );
+    } catch {
+      // Best-effort
     }
 
     revalidatePath(REVALIDATE_PATH);
     return { success: true, data: undefined };
   } catch {
     return { success: false, error: "Failed to trigger ingestion" };
+  }
+}
+
+// ── Channel selection (from fetch results) ──
+
+export async function saveChannelSelections(
+  accountId: string,
+  channels: { telegramId: string; title: string; isForum: boolean }[]
+): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  if (!admin.success) return admin;
+
+  const existing = await prisma.telegramAccount.findUnique({
+    where: { id: accountId },
+  });
+  if (!existing) return { success: false, error: "Account not found" };
+
+  try {
+    let linked = 0;
+    for (const ch of channels) {
+      // Upsert the channel record
+      const channel = await prisma.telegramChannel.upsert({
+        where: { telegramId: BigInt(ch.telegramId) },
+        create: {
+          telegramId: BigInt(ch.telegramId),
+          title: ch.title,
+          type: "SOURCE",
+          isForum: ch.isForum,
+        },
+        update: {
+          title: ch.title,
+          isForum: ch.isForum,
+        },
+      });
+
+      // Create READER link (idempotent)
+      try {
+        await prisma.accountChannelMap.create({
+          data: { accountId, channelId: channel.id, role: "READER" },
+        });
+        linked++;
+      } catch (err: unknown) {
+        // Unique constraint = already linked, that's fine
+        if (!(err instanceof Error && err.message.includes("Unique constraint"))) {
+          throw err;
+        }
+      }
+    }
+
+    revalidatePath(REVALIDATE_PATH);
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to save channel selections" };
+  }
+}
+
+// ── Global destination channel ──
+
+export async function setGlobalDestination(
+  channelId: string
+): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  if (!admin.success) return admin;
+
+  const channel = await prisma.telegramChannel.findUnique({
+    where: { id: channelId },
+  });
+  if (!channel) return { success: false, error: "Channel not found" };
+
+  try {
+    // Set the channel type to DESTINATION
+    await prisma.telegramChannel.update({
+      where: { id: channelId },
+      data: { type: "DESTINATION" },
+    });
+
+    // Save as global destination
+    await prisma.globalSetting.upsert({
+      where: { key: "destination_channel_id" },
+      create: { key: "destination_channel_id", value: channelId },
+      update: { value: channelId },
+    });
+
+    // Auto-create WRITER links for all active authenticated accounts
+    const accounts = await prisma.telegramAccount.findMany({
+      where: { isActive: true, authState: "AUTHENTICATED" },
+      select: { id: true },
+    });
+
+    for (const account of accounts) {
+      try {
+        await prisma.accountChannelMap.create({
+          data: { accountId: account.id, channelId, role: "WRITER" },
+        });
+      } catch {
+        // Already linked — ignore
+      }
+    }
+
+    // Signal worker to generate invite link
+    try {
+      await prisma.$queryRawUnsafe(
+        `SELECT pg_notify('generate_invite', $1)`,
+        channelId
+      );
+    } catch {
+      // Best-effort
+    }
+
+    revalidatePath(REVALIDATE_PATH);
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to set global destination" };
+  }
+}
+
+export async function createDestinationChannel(
+  telegramId: string,
+  title: string
+): Promise<ActionResult<{ id: string }>> {
+  const admin = await requireAdmin();
+  if (!admin.success) return admin;
+
+  try {
+    // Create the channel as DESTINATION
+    const channel = await prisma.telegramChannel.upsert({
+      where: { telegramId: BigInt(telegramId) },
+      create: {
+        telegramId: BigInt(telegramId),
+        title,
+        type: "DESTINATION",
+      },
+      update: {
+        title,
+        type: "DESTINATION",
+      },
+    });
+
+    // Set as global destination
+    await prisma.globalSetting.upsert({
+      where: { key: "destination_channel_id" },
+      create: { key: "destination_channel_id", value: channel.id },
+      update: { value: channel.id },
+    });
+
+    // Auto-create WRITER links for all active authenticated accounts
+    const accounts = await prisma.telegramAccount.findMany({
+      where: { isActive: true, authState: "AUTHENTICATED" },
+      select: { id: true },
+    });
+
+    for (const account of accounts) {
+      try {
+        await prisma.accountChannelMap.create({
+          data: { accountId: account.id, channelId: channel.id, role: "WRITER" },
+        });
+      } catch {
+        // Already linked
+      }
+    }
+
+    // Signal worker to generate invite link
+    try {
+      await prisma.$queryRawUnsafe(
+        `SELECT pg_notify('generate_invite', $1)`,
+        channel.id
+      );
+    } catch {
+      // Best-effort
+    }
+
+    revalidatePath(REVALIDATE_PATH);
+    return { success: true, data: { id: channel.id } };
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes("Unique constraint failed")
+    ) {
+      return { success: false, error: "A channel with this Telegram ID already exists" };
+    }
+    return { success: false, error: "Failed to create destination channel" };
+  }
+}
+
+/**
+ * Request the worker to create a new Telegram supergroup as the destination.
+ * Uses ChannelFetchRequest as a generic DB-mediated request with pg_notify.
+ * Returns the requestId so the UI can poll for completion.
+ */
+export async function createDestinationViaWorker(
+  title: string
+): Promise<ActionResult<{ requestId: string }>> {
+  const admin = await requireAdmin();
+  if (!admin.success) return admin;
+
+  if (!title.trim()) return { success: false, error: "Title is required" };
+
+  try {
+    // Need at least one authenticated account for TDLib
+    const hasAccount = await prisma.telegramAccount.findFirst({
+      where: { isActive: true, authState: "AUTHENTICATED" },
+      select: { id: true },
+    });
+    if (!hasAccount) {
+      return { success: false, error: "At least one authenticated account is needed to create a Telegram group" };
+    }
+
+    // Create a fetch request to track progress (reusing the model as a generic worker request)
+    const fetchRequest = await prisma.channelFetchRequest.create({
+      data: {
+        accountId: hasAccount.id,
+        status: "PENDING",
+      },
+    });
+
+    // Signal worker via pg_notify
+    await prisma.$queryRawUnsafe(
+      `SELECT pg_notify('create_destination', $1)`,
+      JSON.stringify({ requestId: fetchRequest.id, title: title.trim() })
+    );
+
+    return { success: true, data: { requestId: fetchRequest.id } };
+  } catch {
+    return { success: false, error: "Failed to request destination creation" };
   }
 }

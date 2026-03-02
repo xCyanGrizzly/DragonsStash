@@ -80,6 +80,42 @@ export type AccountChannelLinkRow = Awaited<
   ReturnType<typeof listAccountChannelLinks>
 >[number];
 
+// ── Global destination ──
+
+export async function getGlobalDestination() {
+  try {
+    const setting = await prisma.globalSetting.findUnique({
+      where: { key: "destination_channel_id" },
+    });
+    if (!setting) return null;
+
+    const channel = await prisma.telegramChannel.findUnique({
+      where: { id: setting.value },
+      select: { id: true, title: true, telegramId: true, isActive: true },
+    });
+
+    if (!channel) return null;
+
+    // Also get the invite link if it exists
+    const inviteSetting = await prisma.globalSetting.findUnique({
+      where: { key: "destination_invite_link" },
+    });
+
+    return {
+      id: channel.id,
+      title: channel.title,
+      telegramId: channel.telegramId.toString(),
+      isActive: channel.isActive,
+      inviteLink: inviteSetting?.value ?? null,
+    };
+  } catch (error) {
+    console.error("Failed to fetch global destination (restart dev server if schema changed):", error);
+    return null;
+  }
+}
+
+export type GlobalDestination = Awaited<ReturnType<typeof getGlobalDestination>>;
+
 export async function getUnlinkedChannels(accountId: string) {
   const linked = await prisma.accountChannelMap.findMany({
     where: { accountId },

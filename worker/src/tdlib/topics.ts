@@ -125,29 +125,43 @@ export async function getForumTopicList(
 }
 
 /**
- * Fetch messages from a specific forum topic (thread).
- * Uses getMessageThreadHistory to scan within a topic.
+ * Fetch messages from a specific forum topic (thread), stopping once
+ * we've scanned past the last-processed boundary (with one page of lookback).
+ * Uses searchChatMessages with message_thread_id to scan within a topic.
+ *
+ * Returns messages in chronological order (oldest first).
+ *
+ * When `lastProcessedMessageId` is null (first run), scans everything.
+ * The worker applies a post-grouping filter to skip fully-processed sets,
+ * and keeps `packageExistsBySourceMessage` as a safety net.
  */
 export async function getTopicMessages(
   client: Client,
   chatId: bigint,
   topicId: bigint,
-  fromMessageId?: bigint | null,
+  lastProcessedMessageId?: bigint | null,
   limit = 100
 ): Promise<ChannelScanResult> {
   const archives: TelegramMessage[] = [];
   const photos: TelegramPhoto[] = [];
-  let currentFromId = fromMessageId ? Number(fromMessageId) : 0;
+  const boundary = lastProcessedMessageId ? Number(lastProcessedMessageId) : null;
+
+  let currentFromId = 0;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = (await client.invoke({
-      _: "getMessageThreadHistory",
+      _: "searchChatMessages",
       chat_id: Number(chatId),
-      message_id: Number(topicId),
+      query: "",
+      message_thread_id: Number(topicId),
       from_message_id: currentFromId,
       offset: 0,
       limit: Math.min(limit, 100),
+      filter: null,
+      sender_id: null,
+      saved_messages_topic_id: 0,
     })) as {
       messages?: {
         id: number;
@@ -206,11 +220,21 @@ export async function getTopicMessages(
     }
 
     currentFromId = result.messages[result.messages.length - 1].id;
+
+    // Stop scanning once we've gone past the boundary (this page is the lookback)
+    if (boundary && currentFromId < boundary) break;
+
     if (result.messages.length < 100) break;
 
     await sleep(config.apiDelayMs);
   }
 
+  log.info(
+    { chatId: chatId.toString(), topicId: topicId.toString(), archives: archives.length, photos: photos.length },
+    "Topic scan complete"
+  );
+
+  // Reverse to chronological order (oldest first) so worker processes old→new
   return {
     archives: archives.reverse(),
     photos: photos.reverse(),

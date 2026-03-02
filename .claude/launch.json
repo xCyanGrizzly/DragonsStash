@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "nextjs-dev",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "npx next dev --port 3001"],
+      "port": 3001
+    }
+  ]
+}

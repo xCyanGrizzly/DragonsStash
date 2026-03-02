@@ -1,32 +1,29 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { getChannelColumns } from "./channel-columns";
-import { ChannelModal } from "./channel-modal";
-import { deleteChannel, toggleChannelActive } from "../actions";
+import { DestinationCard } from "./destination-card";
+import {
+  deleteChannel,
+  toggleChannelActive,
+  setChannelType,
+} from "../actions";
 import { DataTable } from "@/components/shared/data-table";
 import { DeleteDialog } from "@/components/shared/delete-dialog";
-import { Button } from "@/components/ui/button";
-import type { ChannelRow } from "@/lib/telegram/admin-queries";
+import type { ChannelRow, GlobalDestination } from "@/lib/telegram/admin-queries";
 import { useDataTable } from "@/hooks/use-data-table";
 
 interface ChannelsTabProps {
   channels: ChannelRow[];
+  globalDestination: GlobalDestination;
 }
 
-export function ChannelsTab({ channels }: ChannelsTabProps) {
+export function ChannelsTab({ channels, globalDestination }: ChannelsTabProps) {
   const [isPending, startTransition] = useTransition();
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editChannel, setEditChannel] = useState<ChannelRow | undefined>();
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const columns = getChannelColumns({
-    onEdit: (channel) => {
-      setEditChannel(channel);
-      setModalOpen(true);
-    },
     onToggleActive: (id) => {
       startTransition(async () => {
         const result = await toggleChannelActive(id);
@@ -35,6 +32,13 @@ export function ChannelsTab({ channels }: ChannelsTabProps) {
       });
     },
     onDelete: (id) => setDeleteId(id),
+    onSetType: (id, type) => {
+      startTransition(async () => {
+        const result = await setChannelType(id, type);
+        if (result.success) toast.success(`Channel set as ${type.toLowerCase()}`);
+        else toast.error(result.error);
+      });
+    },
   });
 
   const { table } = useDataTable({
@@ -58,30 +62,17 @@ export function ChannelsTab({ channels }: ChannelsTabProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <Button
-          onClick={() => {
-            setEditChannel(undefined);
-            setModalOpen(true);
-          }}
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          Add Channel
-        </Button>
-      </div>
+      <DestinationCard destination={globalDestination} />
+
+      {channels.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Source channels are added per-account via the &quot;Fetch Channels&quot; button on the Accounts tab.
+        </p>
+      )}
 
       <DataTable
         table={table}
-        emptyMessage="No channels configured. Add a Telegram channel to start ingesting."
-      />
-
-      <ChannelModal
-        open={modalOpen}
-        onOpenChange={(open) => {
-          setModalOpen(open);
-          if (!open) setEditChannel(undefined);
-        }}
-        channel={editChannel}
+        emptyMessage="No channels yet. Use &quot;Fetch Channels&quot; on an account to discover and add source channels."
       />
 
       <DeleteDialog

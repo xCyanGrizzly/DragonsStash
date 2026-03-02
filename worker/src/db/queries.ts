@@ -1,10 +1,21 @@
 import { db } from "./client.js";
-import type { ArchiveType } from "@prisma/client";
+import type { ArchiveType, FetchStatus } from "@prisma/client";
 
 export async function getActiveAccounts() {
   return db.telegramAccount.findMany({
     where: { isActive: true, authState: "AUTHENTICATED" },
   });
+}
+
+export async function getPendingAccounts() {
+  return db.telegramAccount.findMany({
+    where: { isActive: true, authState: "PENDING" },
+  });
+}
+
+export async function hasAnyChannels(): Promise<boolean> {
+  const count = await db.telegramChannel.count();
+  return count > 0;
 }
 
 export async function getSourceChannelMappings(accountId: string) {
@@ -18,24 +29,64 @@ export async function getSourceChannelMappings(accountId: string) {
   });
 }
 
-export async function getDestinationChannel(accountId: string) {
-  const mapping = await db.accountChannelMap.findFirst({
-    where: {
-      accountId,
-      role: "WRITER",
-      channel: { type: "DESTINATION", isActive: true },
-    },
-    include: { channel: true },
+// ── Global destination channel ──
+
+export async function getGlobalDestinationChannel() {
+  const setting = await db.globalSetting.findUnique({
+    where: { key: "destination_channel_id" },
   });
-  return mapping?.channel ?? null;
+  if (!setting) return null;
+  return db.telegramChannel.findFirst({
+    where: { id: setting.value, type: "DESTINATION", isActive: true },
+  });
+}
+
+export async function getGlobalSetting(key: string): Promise<string | null> {
+  const setting = await db.globalSetting.findUnique({ where: { key } });
+  return setting?.value ?? null;
+}
+
+export async function setGlobalSetting(key: string, value: string) {
+  return db.globalSetting.upsert({
+    where: { key },
+    create: { key, value },
+    update: { value },
+  });
 }
 
 export async function packageExistsByHash(contentHash: string) {
-  const pkg = await db.package.findUnique({
-    where: { contentHash },
+  const pkg = await db.package.findFirst({
+    where: { contentHash, destMessageId: { not: null } },
     select: { id: true },
   });
   return pkg !== null;
+}
+
+/**
+ * Check if a package already exists for a given source message ID
+ * AND was successfully uploaded to the destination (destMessageId is set).
+ * Used as an early skip before downloading.
+ */
+export async function packageExistsBySourceMessage(
+  sourceChannelId: string,
+  sourceMessageId: bigint
+): Promise<boolean> {
+  const pkg = await db.package.findFirst({
+    where: { sourceChannelId, sourceMessageId, destMessageId: { not: null } },
+    select: { id: true },
+  });
+  return pkg !== null;
+}
+
+/**
+ * Delete orphaned Package rows that have the same content hash but never
+ * completed the upload (destMessageId is null). Called before creating a
+ * new complete record to avoid unique constraint violations.
+ */
+export async function deleteOrphanedPackageByHash(contentHash: string): Promise<void> {
+  await db.package.deleteMany({
+    where: { contentHash, destMessageId: null },
+  });
 }
 
 export interface CreatePackageInput {
@@ -228,6 +279,57 @@ export async function getAccountAuthCode(accountId: string) {
   return account;
 }
 
+// ── Channel sync (auto-discovery from Telegram) ──
+
+export interface UpsertChannelInput {
+  telegramId: bigint;
+  title: string;
+  type: "SOURCE" | "DESTINATION";
+  isForum: boolean;
+}
+
+/**
+ * Upsert a channel by telegramId. Returns the channel record.
+ * If it already exists, update title and forum status.
+ */
+export async function upsertChannel(input: UpsertChannelInput) {
+  return db.telegramChannel.upsert({
+    where: { telegramId: input.telegramId },
+    create: {
+      telegramId: input.telegramId,
+      title: input.title,
+      type: input.type,
+      isForum: input.isForum,
+    },
+    update: {
+      title: input.title,
+      isForum: input.isForum,
+    },
+  });
+}
+
+/**
+ * Link an account to a channel if not already linked.
+ * Uses a try/catch on unique constraint to make it idempotent.
+ */
+export async function ensureAccountChannelLink(
+  accountId: string,
+  channelId: string,
+  role: "READER" | "WRITER"
+) {
+  try {
+    return await db.accountChannelMap.create({
+      data: { accountId, channelId, role },
+    });
+  } catch (err: unknown) {
+    // Already linked — ignore unique constraint violation
+    if (err instanceof Error && err.message.includes("Unique constraint")) {
+      return null;
+    }
+    throw err;
+  }
+}
+
 // ── Forum / Topic progress ──
 
 export async function setChannelForum(channelId: string, isForum: boolean) {
@@ -267,4 +369,51 @@ export async function upsertTopicProgress(
       lastProcessedMessageId,
     },
   });
+}
+
+// ── Channel fetch requests (DB-mediated communication with web app) ──
+
+export async function getChannelFetchRequest(requestId: string) {
+  return db.channelFetchRequest.findUnique({
+    where: { id: requestId },
+    include: { account: true },
+  });
+}
+
+export async function updateFetchRequestStatus(
+  requestId: string,
+  status: FetchStatus,
+  extra?: { resultJson?: string; error?: string }
+) {
+  return db.channelFetchRequest.update({
+    where: { id: requestId },
+    data: {
+      status,
+      resultJson: extra?.resultJson ?? undefined,
+      error: extra?.error ?? undefined,
+    },
+  });
+}
+
+export async function getAccountLinkedChannelIds(accountId: string): Promise<Set<string>> {
+  const links = await db.accountChannelMap.findMany({
+    where: { accountId },
+    select: { channel: { select: { telegramId: true } } },
+  });
+  return new Set(links.map((l) => l.channel.telegramId.toString()));
+}
+
+export async function getExistingChannelsByTelegramId(): Promise<Map<string, string>> {
+  const channels = await db.telegramChannel.findMany({
+    select: { id: true, telegramId: true },
+  });
+  const map = new Map<string, string>();
+  for (const ch of channels) {
+    map.set(ch.telegramId.toString(), ch.id);
+  }
+  return map;
+}
+
+export async function getAccountById(accountId: string) {
+  return db.telegramAccount.findUnique({ where: { id: accountId } });
 }
