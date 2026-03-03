@@ -58,7 +58,7 @@ CREATE UNIQUE INDEX "bot_subscriptions_telegramUserId_pattern_key" ON "bot_subsc
 CREATE INDEX "bot_subscriptions_telegramUserId_idx" ON "bot_subscriptions"("telegramUserId");
 
 -- AddForeignKey
-ALTER TABLE "telegram_links" ADD CONSTRAINT "telegram_links_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "telegram_links" ADD CONSTRAINT "telegram_links_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "bot_send_requests" ADD CONSTRAINT "bot_send_requests_packageId_fkey" FOREIGN KEY ("packageId") REFERENCES "packages"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
