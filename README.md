@@ -28,6 +28,14 @@ A self-hosted inventory management system for 3D printing filament, SLA resin, a
 - **Upload verification** — confirms files reached the destination before marking them complete
 - **Preview matching** — associates photo messages with their corresponding archive sets
 
+### Telegram Bot
+
+- **Direct delivery** — send any indexed package to a linked Telegram account with one click from the UI
+- **Account linking** — users link their Telegram account via a one-time code from Settings
+- **Package search** — search or browse indexed packages directly from conversation with the bot
+- **Subscription notifications** — subscribe to keyword patterns and get notified when matching packages arrive
+- **Automatic forwarding** — the bot copies files from the destination channel, no manual download needed
+
 ## Tech Stack
 
 - **Framework**: Next.js 16 (App Router)
@@ -38,6 +46,7 @@ A self-hosted inventory management system for 3D printing filament, SLA resin, a
 - **Tables**: TanStack Table v8 with server-side pagination
 - **Validation**: Zod v4 + React Hook Form
 - **Worker**: Node.js + TDLib (via tdl)
+- **Bot**: Node.js + TDLib (bot token auth)
 - **Archive handling**: unrar, zlib
 
 ## Quick Start
@@ -110,11 +119,29 @@ Run the entire application from Docker:
 
 ```bash
 cp .env.example .env
-# Edit .env — set TELEGRAM_API_ID, TELEGRAM_API_HASH, and a secure AUTH_SECRET
+# Edit .env — set AUTH_SECRET (required)
 docker compose up -d
 ```
 
 The app will be available at [http://localhost:3000](http://localhost:3000).
+
+### Adding Telegram Services
+
+The worker and bot run as optional profiles so `docker compose up` works with just the app + database:
+
+```bash
+# App + DB + Telegram worker (needs TELEGRAM_API_ID + TELEGRAM_API_HASH in .env)
+docker compose --profile telegram up -d
+
+# App + DB + Worker + Bot (also needs BOT_TOKEN in .env)
+docker compose --profile full up -d
+
+# Or just the bot (alongside app + db)
+docker compose --profile bot up -d
+```
+
+> **Tip:** Create a bot token via [@BotFather](https://t.me/BotFather) on Telegram and set `BOT_TOKEN` in `.env`.
+> Get Telegram API credentials from [my.telegram.org/apps](https://my.telegram.org/apps).
 
 ### Seeding the Database
 
@@ -157,6 +184,7 @@ docker compose build worker && docker compose up -d worker --force-recreate
 
 ```bash
 docker compose logs -f worker   # Worker logs
+docker compose logs -f bot      # Bot logs
 docker compose logs -f app      # App logs
 docker compose logs -f db       # Database logs
 ```
@@ -174,10 +202,13 @@ src/
       paints/        # Paint CRUD
       vendors/       # Vendor management
       locations/     # Location management
-      settings/      # User preferences
+      settings/      # User preferences + Telegram link
+      stls/          # STL package browser
+      telegram/      # Telegram admin (accounts, channels, bot sends)
     api/
       auth/          # NextAuth API routes
       health/        # Health check endpoint
+      telegram/bot/  # Bot send API endpoints
   components/
     layout/          # Sidebar, header, navigation
     shared/          # Reusable data table components
@@ -197,6 +228,14 @@ worker/
     util/            # Config, logger
     worker.ts        # Main processing pipeline
     index.ts         # Entry point + scheduler
+bot/
+  src/
+    commands.ts      # Bot command handlers (/search, /link, /subscribe, etc.)
+    send-listener.ts # pg_notify listener for send requests + subscriptions
+    tdlib/           # TDLib client with bot token auth
+    db/              # Database queries for links, packages, subscriptions
+    util/            # Config, logger
+    index.ts         # Entry point
 prisma/
   schema.prisma      # Database schema
   seed.ts            # Seed data
@@ -230,6 +269,16 @@ Environment variables (see `.env.example`):
 | `WORKER_MAX_ZIP_SIZE_MB` | Max archive size to process (MB) | `4096` |
 | `MULTIPART_TIMEOUT_HOURS` | Max time span for multipart set parts (0 = no limit) | `0` |
 | `LOG_LEVEL` | Worker log level (`debug`, `info`, `warn`, `error`) | `info` |
+
+### Telegram Bot
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `BOT_TOKEN` | Bot token from [@BotFather](https://t.me/BotFather) | Optional (bot disabled if unset) |
+| `TELEGRAM_API_ID` | Same API ID as worker | Required (if bot enabled) |
+| `TELEGRAM_API_HASH` | Same API hash as worker | Required (if bot enabled) |
+| `BOT_TDLIB_STATE_DIR` | TDLib state directory for bot | `/data/tdlib_bot` |
+| `LOG_LEVEL` | Bot log level | `info` |
 
 ## Health Check
 

@@ -5,14 +5,17 @@ import { PageHeader } from "@/components/shared/page-header";
 import { AccountsTab } from "./accounts-tab";
 import { ChannelsTab } from "./channels-tab";
 import { WorkerStatusPanel } from "./worker-status-panel";
+import { BotSendsTab } from "./bot-sends-tab";
 import type { AccountRow, ChannelRow, GlobalDestination } from "@/lib/telegram/admin-queries";
 import type { IngestionAccountStatus } from "@/lib/telegram/types";
+import type { SendHistoryRow } from "@/types/telegram.types";
 
 interface TelegramAdminProps {
   accounts: AccountRow[];
   channels: ChannelRow[];
   ingestionStatus: IngestionAccountStatus[];
   globalDestination: GlobalDestination;
+  sendHistory: SendHistoryRow[];
 }
 
 export function TelegramAdmin({
@@ -20,6 +23,7 @@ export function TelegramAdmin({
   channels,
   ingestionStatus,
   globalDestination,
+  sendHistory,
 }: TelegramAdminProps) {
   return (
     <div className="space-y-4">
@@ -38,6 +42,9 @@ export function TelegramAdmin({
           <TabsTrigger value="channels">
             Channels ({channels.length})
           </TabsTrigger>
+          <TabsTrigger value="sends">
+            Bot Sends ({sendHistory.length})
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="accounts">
@@ -45,6 +52,9 @@ export function TelegramAdmin({
         </TabsContent>
         <TabsContent value="channels">
           <ChannelsTab channels={channels} globalDestination={globalDestination} />
+        </TabsContent>
+        <TabsContent value="sends">
+          <BotSendsTab history={sendHistory} />
         </TabsContent>
       </Tabs>
     </div>

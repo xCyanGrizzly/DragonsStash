@@ -4,6 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // ───────────────────────────────────────
@@ -34,9 +35,10 @@ model User {
   supplies  Supply[]
   vendors   Vendor[]
   locations Location[]
-  usageLogs UsageLog[]
-  tags      Tag[]
-  settings  UserSettings?
+  usageLogs    UsageLog[]
+  tags         Tag[]
+  settings     UserSettings?
+  telegramLink TelegramLink?
 }
 
 model Account {
@@ -469,6 +471,7 @@ model Package {
   files          PackageFile[]
   ingestionRun   IngestionRun?   @relation(fields: [ingestionRunId], references: [id])
   ingestionRunId String?
+  sendRequests   BotSendRequest[]
 
   @@index([sourceChannelId])
   @@index([destChannelId])
@@ -565,4 +568,62 @@ model ChannelFetchRequest {
 
   @@index([accountId, status])
   @@map("channel_fetch_requests")
+}
+
+// ───────────────────────────────────────
+// Telegram Bot models
+// ───────────────────────────────────────
+
+enum BotSendStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+}
+
+/// Links a NextAuth user to a Telegram user ID.
+/// Created when a user sends /link <code> to the bot.
+model TelegramLink {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  telegramUserId BigInt   @unique
+  telegramName   String?  @db.VarChar(128)
+  createdAt      DateTime @default(now())
+
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sendRequests BotSendRequest[]
+
+  @@map("telegram_links")
+}
+
+/// A queued request to send a package to a Telegram user via the bot.
+model BotSendRequest {
+  id               String        @id @default(cuid())
+  packageId        String
+  telegramLinkId   String
+  requestedByUserId String
+  status           BotSendStatus @default(PENDING)
+  error            String?
+  createdAt        DateTime      @default(now())
+  completedAt      DateTime?
+
+  package       Package       @relation(fields: [packageId], references: [id])
+  telegramLink  TelegramLink  @relation(fields: [telegramLinkId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([telegramLinkId])
+  @@index([createdAt])
+  @@map("bot_send_requests")
+}
+
+/// Subscriptions for new-package notifications via the bot.
+model BotSubscription {
+  id             String   @id @default(cuid())
+  telegramUserId BigInt
+  pattern        String   @db.VarChar(256)
+  createdAt      DateTime @default(now())
+
+  @@unique([telegramUserId, pattern])
+  @@index([telegramUserId])
+  @@map("bot_subscriptions")
 }

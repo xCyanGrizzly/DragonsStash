@@ -6,9 +6,11 @@ node_modules
 .env.*
 !.env.example
 *.md
-Dockerfile
+LICENSE
+telegram_test.html
 docker-compose*.yml
 .dockerignore
 .claude
 .vscode
 .idea
+tmp_zips

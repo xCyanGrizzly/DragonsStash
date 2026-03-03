@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { PackageRow } from "./package-columns";
+import { SendToTelegramButton } from "./send-to-telegram-button";
 
 interface FileItem {
   id: string;
@@ -306,6 +307,14 @@ export function PackageFilesDrawer({ pkg, open, onOpenChange }: PackageFilesDraw
               <DialogDescription className="mt-1">
                 {total.toLocaleString()} file{total !== 1 ? "s" : ""} in archive
               </DialogDescription>
+              {pkg && (
+                <div className="mt-2">
+                  <SendToTelegramButton
+                    packageId={pkg.id}
+                    packageName={pkg.fileName}
+                  />
+                </div>
+              )}
             </div>
           </div>
 

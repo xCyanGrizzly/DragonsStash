@@ -116,7 +116,7 @@ export interface CreatePackageInput {
 }
 
 export async function createPackageWithFiles(input: CreatePackageInput) {
-  return db.package.create({
+  const pkg = await db.package.create({
     data: {
       contentHash: input.contentHash,
       fileName: input.fileName,
@@ -139,6 +139,22 @@ export async function createPackageWithFiles(input: CreatePackageInput) {
       },
     },
   });
+
+  // Notify the bot service about the new package (for subscription alerts)
+  try {
+    await db.$queryRawUnsafe(
+      `SELECT pg_notify('new_package', $1)`,
+      JSON.stringify({
+        packageId: pkg.id,
+        fileName: input.fileName,
+        creator: input.creator ?? null,
+      })
+    );
+  } catch {
+    // Best-effort — don't fail the ingestion if notification fails
+  }
+
+  return pkg;
 }
 
 export async function createIngestionRun(accountId: string) {

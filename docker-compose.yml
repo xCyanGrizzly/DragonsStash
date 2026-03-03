@@ -4,29 +4,46 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "${APP_PORT:-3000}:3000"
     environment:
-      - DATABASE_URL=postgresql://dragons:stash@db:5432/dragonsstash
-      - AUTH_SECRET=change-me-to-a-random-secret-in-production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-dragons}:${POSTGRES_PASSWORD:-stash}@db:5432/${POSTGRES_DB:-dragonsstash}
+      - AUTH_SECRET=${AUTH_SECRET:?Set AUTH_SECRET in .env}
       - AUTH_TRUST_HOST=true
-      - NEXT_PUBLIC_APP_URL=http://localhost:3000
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       - TELEGRAM_API_KEY=${TELEGRAM_API_KEY:-}
+      - BOT_TOKEN=${BOT_TOKEN:-}
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - frontend
 
   worker:
+    profiles: ["telegram", "full"]
     build:
       context: .
       dockerfile: worker/Dockerfile
     environment:
-      - DATABASE_URL=postgresql://dragons:stash@db:5432/dragonsstash
-      - WORKER_INTERVAL_MINUTES=60
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-dragons}:${POSTGRES_PASSWORD:-stash}@db:5432/${POSTGRES_DB:-dragonsstash}
+      - TELEGRAM_API_ID=${TELEGRAM_API_ID:?Set TELEGRAM_API_ID in .env}
+      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH:?Set TELEGRAM_API_HASH in .env}
+      - WORKER_INTERVAL_MINUTES=${WORKER_INTERVAL_MINUTES:-60}
       - WORKER_TEMP_DIR=/tmp/zips
       - TDLIB_STATE_DIR=/data/tdlib
-      - WORKER_MAX_ZIP_SIZE_MB=4096
-      - LOG_LEVEL=info
+      - WORKER_MAX_ZIP_SIZE_MB=${WORKER_MAX_ZIP_SIZE_MB:-4096}
+      - MULTIPART_TIMEOUT_HOURS=${MULTIPART_TIMEOUT_HOURS:-0}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - tdlib_state:/data/tdlib
       - tmp_zips:/tmp/zips
@@ -40,25 +57,63 @@ services:
           memory: 1G
         reservations:
           memory: 256M
+    networks:
+      - backend
+
+  bot:
+    profiles: ["bot", "full"]
+    build:
+      context: .
+      dockerfile: bot/Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-dragons}:${POSTGRES_PASSWORD:-stash}@db:5432/${POSTGRES_DB:-dragonsstash}
+      - BOT_TOKEN=${BOT_TOKEN:?Set BOT_TOKEN in .env}
+      - TELEGRAM_API_ID=${TELEGRAM_API_ID:?Set TELEGRAM_API_ID in .env}
+      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH:?Set TELEGRAM_API_HASH in .env}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - tdlib_bot_state:/data/tdlib
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+    networks:
+      - backend
 
   db:
     image: postgres:16-alpine
-    ports:
-      - "5432:5432"
     environment:
-      POSTGRES_USER: dragons
-      POSTGRES_PASSWORD: stash
-      POSTGRES_DB: dragonsstash
+      POSTGRES_USER: ${POSTGRES_USER:-dragons}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stash}
+      POSTGRES_DB: ${POSTGRES_DB:-dragonsstash}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dragons -d dragonsstash"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dragons} -d ${POSTGRES_DB:-dragonsstash}"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    networks:
+      - frontend
+      - backend
 
 volumes:
   postgres_data:
   tdlib_state:
+  tdlib_bot_state:
   tmp_zips:
+
+networks:
+  frontend:
+  backend:

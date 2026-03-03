@@ -4,25 +4,26 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: dragons
-      POSTGRES_PASSWORD: stash
-      POSTGRES_DB: dragonsstash
+      POSTGRES_USER: ${POSTGRES_USER:-dragons}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stash}
+      POSTGRES_DB: ${POSTGRES_DB:-dragonsstash}
     volumes:
       - postgres_dev_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dragons -d dragonsstash"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dragons} -d ${POSTGRES_DB:-dragonsstash}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   worker:
+    profiles: ["telegram", "full"]
     build:
       context: .
       dockerfile: worker/Dockerfile
     env_file:
       - .env.local
     environment:
-      - DATABASE_URL=postgresql://dragons:stash@db:5432/dragonsstash
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-dragons}:${POSTGRES_PASSWORD:-stash}@db:5432/${POSTGRES_DB:-dragonsstash}
       - WORKER_INTERVAL_MINUTES=5
       - WORKER_TEMP_DIR=/tmp/zips
       - TDLIB_STATE_DIR=/data/tdlib
@@ -35,7 +36,24 @@ services:
       db:
         condition: service_healthy
 
+  bot:
+    profiles: ["bot", "full"]
+    build:
+      context: .
+      dockerfile: bot/Dockerfile
+    env_file:
+      - .env.local
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-dragons}:${POSTGRES_PASSWORD:-stash}@db:5432/${POSTGRES_DB:-dragonsstash}
+      - LOG_LEVEL=debug
+    volumes:
+      - tdlib_dev_bot_state:/data/tdlib
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   postgres_dev_data:
   tdlib_dev_state:
+  tdlib_dev_bot_state:
   tmp_dev_zips:

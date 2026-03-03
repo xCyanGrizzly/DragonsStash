@@ -5,6 +5,7 @@ import { FileArchive, Eye, ImageIcon } from "lucide-react";
 import { DataTableColumnHeader } from "@/components/shared/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SendToTelegramButton } from "./send-to-telegram-button";
 
 export interface PackageRow {
   id: string;
@@ -139,14 +140,21 @@ export function getPackageColumns({
     {
       id: "actions",
       cell: ({ row }) => (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => onViewFiles(row.original)}
-        >
-          <Eye className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-0.5">
+          <SendToTelegramButton
+            packageId={row.original.id}
+            packageName={row.original.fileName}
+            variant="icon"
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => onViewFiles(row.original)}
+          >
+            <Eye className="h-4 w-4" />
+          </Button>
+        </div>
       ),
       enableHiding: false,
     },
