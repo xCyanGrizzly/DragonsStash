@@ -15,6 +15,9 @@ const eslintConfig = defineConfig([
     // Non-app scripts and seed — not part of Next.js build
     "scripts/**",
     "prisma/seed.ts",
+    // Separate services with their own build
+    "worker/**",
+    "bot/**",
   ]),
 ]);
 
