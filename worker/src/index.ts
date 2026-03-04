@@ -13,6 +13,11 @@ async function main(): Promise<void> {
   log.info("DragonsStash Telegram Worker starting");
   log.info({ config: { ...config, databaseUrl: "***" } }, "Configuration loaded");
 
+  if (!config.telegramApiId || !config.telegramApiHash) {
+    log.fatal("TELEGRAM_API_ID and TELEGRAM_API_HASH are both required");
+    process.exit(1);
+  }
+
   // Ensure temp directory exists
   await mkdir(config.tempDir, { recursive: true });
   await mkdir(config.tdlibStateDir, { recursive: true });
