@@ -10,11 +10,11 @@ if [ "$AUTH_SECRET" = "change-me-to-a-random-secret-in-production" ] || [ -z "$A
 fi
 
 echo "Running database migrations..."
-npx prisma migrate deploy
+./node_modules/.bin/prisma migrate deploy
 
 if [ "$SEED_DATABASE" = "true" ]; then
   echo "Seeding database..."
-  npx prisma db seed || echo "Seeding skipped or already done."
+  ./node_modules/.bin/prisma db seed || echo "Seeding skipped or already done."
 fi
 
 echo "Starting application..."
