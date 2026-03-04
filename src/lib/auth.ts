@@ -18,12 +18,12 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id!;
-        // Fetch the role from the database to pick up first-user ADMIN promotion
+        // Fetch the role from the database to ensure token reflects current role
         const dbUser = await prisma.user.findUnique({
           where: { id: user.id! },
           select: { role: true },
         });
-        token.role = dbUser?.role ?? user.role ?? "USER";
+        token.role = dbUser?.role ?? user.role ?? "ADMIN";
       }
       return token;
     },
@@ -38,17 +38,11 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
   events: {
     async createUser({ user }) {
       if (user.id) {
-        // First user to register becomes ADMIN (self-hosted owner)
-        const adminExists = await prisma.user.findFirst({
-          where: { role: "ADMIN" },
-          select: { id: true },
+        // Self-hosted: all users are admins
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { role: "ADMIN" },
         });
-        if (!adminExists) {
-          await prisma.user.update({
-            where: { id: user.id },
-            data: { role: "ADMIN" },
-          });
-        }
 
         await prisma.userSettings.upsert({
           where: { userId: user.id },
