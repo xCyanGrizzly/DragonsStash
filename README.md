@@ -125,18 +125,15 @@ docker compose up -d
 
 The app will be available at [http://localhost:3000](http://localhost:3000).
 
-### Adding Telegram Services
+### Adding the Telegram Bot
 
-The worker and bot run as optional profiles so `docker compose up` works with just the app + database:
+The worker starts by default with `docker compose up`. The bot runs as an optional profile:
 
 ```bash
-# App + DB + Telegram worker (needs TELEGRAM_API_ID + TELEGRAM_API_HASH in .env)
-docker compose --profile telegram up -d
-
 # App + DB + Worker + Bot (also needs BOT_TOKEN in .env)
 docker compose --profile full up -d
 
-# Or just the bot (alongside app + db)
+# Or just the bot (alongside app + db + worker)
 docker compose --profile bot up -d
 ```
 
