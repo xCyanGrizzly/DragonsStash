@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
 import {
   LayoutDashboard,
   Cylinder,
@@ -20,7 +21,7 @@ import {
   PanelLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { APP_NAME } from "@/lib/constants";
+import { APP_NAME, NAV_ITEMS } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -38,23 +39,13 @@ const icons = {
   Settings,
 } as const;
 
-const navItems = [
-  { label: "Dashboard", href: "/dashboard", icon: "LayoutDashboard" as const },
-  { label: "Filaments", href: "/filaments", icon: "Cylinder" as const },
-  { label: "Resins", href: "/resins", icon: "Droplets" as const },
-  { label: "Paints", href: "/paints", icon: "Paintbrush" as const },
-  { label: "Supplies", href: "/supplies", icon: "Gem" as const },
-  { label: "STL Files", href: "/stls", icon: "FileBox" as const },
-  { label: "Telegram", href: "/telegram", icon: "Send" as const },
-  { label: "Usage", href: "/usage", icon: "ClipboardList" as const },
-  { label: "Vendors", href: "/vendors", icon: "Building2" as const },
-  { label: "Locations", href: "/locations", icon: "MapPin" as const },
-  { label: "Settings", href: "/settings", icon: "Settings" as const },
-];
-
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const { data: session } = useSession();
+  const isAdmin = session?.user?.role === "ADMIN";
+
+  const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
 
   return (
     <aside
@@ -73,7 +64,7 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 space-y-1 p-2">
-        {navItems.map((item) => {
+        {visibleItems.map((item) => {
           const Icon = icons[item.icon];
           const isActive = pathname.startsWith(item.href);
 

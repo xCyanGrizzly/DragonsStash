@@ -21,12 +21,16 @@ export async function registerUser(input: unknown): Promise<ActionResult<{ id: s
 
   const hashedPassword = await bcrypt.hash(parsed.data.password, 10);
 
+  // First user to register becomes ADMIN (self-hosted owner)
+  const userCount = await prisma.user.count();
+  const role = userCount === 0 ? "ADMIN" : "USER";
+
   const user = await prisma.user.create({
     data: {
       name: parsed.data.name,
       email: parsed.data.email,
       hashedPassword,
-      role: "USER",
+      role,
       settings: {
         create: {
           lowStockThreshold: 10,
