@@ -31,7 +31,6 @@ services:
       - frontend
 
   worker:
-    profiles: ["telegram", "full"]
     build:
       context: .
       dockerfile: worker/Dockerfile
