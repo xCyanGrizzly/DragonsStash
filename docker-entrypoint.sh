@@ -10,7 +10,10 @@ if [ "$AUTH_SECRET" = "change-me-to-a-random-secret-in-production" ] || [ -z "$A
 fi
 
 echo "Running database migrations..."
-./node_modules/.bin/prisma migrate deploy
+if ! ./node_modules/.bin/prisma migrate deploy; then
+  echo "ERROR: Database migration failed. Check DATABASE_URL and database connectivity."
+  exit 1
+fi
 
 if [ "$SEED_DATABASE" = "true" ]; then
   echo "Seeding database..."

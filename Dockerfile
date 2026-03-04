@@ -30,19 +30,19 @@ RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
 # Copy public assets
-COPY --from=builder /app/public ./public
-
-# Copy prisma schema + migrations for runtime migrate deploy
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 # Copy standalone build output
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# Copy prisma schema + migrations for runtime migrate deploy
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts ./prisma.config.ts
+
 # Copy node_modules for prisma CLI (needed for migrate deploy at startup).
 # Copying the full directory ensures all transitive dependencies are present.
-COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 # Recreate the .bin/prisma symlink so Node resolves __dirname to prisma/build/,
 # where the WASM files live (COPY dereferences symlinks, breaking WASM resolution)
 RUN mkdir -p ./node_modules/.bin && \

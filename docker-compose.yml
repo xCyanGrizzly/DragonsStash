@@ -10,9 +10,13 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-dragons}:${POSTGRES_PASSWORD:-stash}@db:5432/${POSTGRES_DB:-dragonsstash}
       - AUTH_SECRET=${AUTH_SECRET:?Set AUTH_SECRET in .env}
       - AUTH_TRUST_HOST=true
+      - AUTH_GITHUB_ID=${AUTH_GITHUB_ID:-}
+      - AUTH_GITHUB_SECRET=${AUTH_GITHUB_SECRET:-}
       - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       - TELEGRAM_API_KEY=${TELEGRAM_API_KEY:-}
       - BOT_TOKEN=${BOT_TOKEN:-}
+      - BOT_USERNAME=${BOT_USERNAME:-}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
     depends_on:
       db:
         condition: service_healthy
@@ -21,7 +25,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 60s
     restart: unless-stopped
     deploy:
       resources:
