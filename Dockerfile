@@ -45,6 +45,7 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
+COPY --from=builder /app/node_modules/valibot ./node_modules/valibot
 # Create the .bin/prisma symlink so Node resolves __dirname to prisma/build/,
 # where the WASM files live (COPY dereferences symlinks, breaking WASM resolution)
 RUN mkdir -p ./node_modules/.bin && \
