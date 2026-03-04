@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    pull_policy: build
+    pull_policy: never
     ports:
       - "${APP_PORT:-3000}:3000"
     environment:
@@ -35,7 +35,7 @@ services:
     build:
       context: .
       dockerfile: worker/Dockerfile
-    pull_policy: build
+    pull_policy: never
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-dragons}:${POSTGRES_PASSWORD:-stash}@db:5432/${POSTGRES_DB:-dragonsstash}
       - TELEGRAM_API_ID=${TELEGRAM_API_ID:-}
@@ -67,7 +67,7 @@ services:
     build:
       context: .
       dockerfile: bot/Dockerfile
-    pull_policy: build
+    pull_policy: never
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-dragons}:${POSTGRES_PASSWORD:-stash}@db:5432/${POSTGRES_DB:-dragonsstash}
       - BOT_TOKEN=${BOT_TOKEN:-}
