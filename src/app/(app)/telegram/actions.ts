@@ -453,7 +453,7 @@ export async function saveChannelSelections(
   try {
     let linked = 0;
     for (const ch of channels) {
-      // Upsert the channel record (new channels default to disabled)
+      // Upsert the channel record and activate it (user explicitly selected it)
       const channel = await prisma.telegramChannel.upsert({
         where: { telegramId: BigInt(ch.telegramId) },
         create: {
@@ -461,11 +461,12 @@ export async function saveChannelSelections(
           title: ch.title,
           type: "SOURCE",
           isForum: ch.isForum,
-          isActive: false,
+          isActive: true,
         },
         update: {
           title: ch.title,
           isForum: ch.isForum,
+          isActive: true,
         },
       });
 
