@@ -45,33 +45,20 @@ export async function POST(request: Request) {
     );
   }
 
-  // Create ingestion runs marked as RUNNING — the worker will pick these up
-  // when it next polls, or we use pg_notify for immediate pickup
-  for (const account of accounts) {
-    // Only create if no run is already RUNNING for this account
-    const existing = await prisma.ingestionRun.findFirst({
-      where: { accountId: account.id, status: "RUNNING" },
-    });
-    if (!existing) {
-      await prisma.ingestionRun.create({
-        data: { accountId: account.id, status: "RUNNING" },
-      });
-    }
-  }
-
-  // Send pg_notify for immediate worker pickup
+  // Send pg_notify for immediate worker pickup.
+  // The worker creates its own IngestionRun records with proper activity tracking.
   try {
     await prisma.$queryRawUnsafe(
       `SELECT pg_notify('ingestion_trigger', $1)`,
-      accounts.map((a) => a.id).join(",")
+      accounts.map((a: { id: string }) => a.id).join(",")
     );
   } catch {
-    // pg_notify is best-effort — worker will pick up on next cycle anyway
+    // pg_notify is best-effort — worker will pick up on next scheduled cycle anyway
   }
 
   return NextResponse.json({
     triggered: true,
-    accountIds: accounts.map((a) => a.id),
-    message: `Ingestion queued for ${accounts.length} account(s)`,
+    accountIds: accounts.map((a: { id: string }) => a.id),
+    message: `Ingestion triggered for ${accounts.length} account(s)`,
   });
 }

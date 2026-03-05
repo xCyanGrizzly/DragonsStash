@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useTransition } from "react";
 import {
   Loader2,
   CheckCircle2,
@@ -14,10 +14,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { triggerIngestion } from "../actions";
 import type { IngestionAccountStatus } from "@/lib/telegram/types";
 
 interface WorkerStatusPanelProps {
   initialStatus: IngestionAccountStatus[];
+  initialIntervalMinutes?: number;
 }
 
 const AUTH_STATE_CONFIG: Record<
@@ -39,14 +42,27 @@ const AUTH_STATE_CONFIG: Record<
   EXPIRED: { label: "Expired", color: "text-red-500", icon: "x" },
 };
 
-export function WorkerStatusPanel({ initialStatus }: WorkerStatusPanelProps) {
+export function WorkerStatusPanel({ initialStatus, initialIntervalMinutes = 60 }: WorkerStatusPanelProps) {
   const [accounts, setAccounts] = useState(initialStatus);
   const [error, setError] = useState(false);
   const [nextRunCountdown, setNextRunCountdown] = useState<string | null>(null);
+  const [workerIntervalMinutes, setWorkerIntervalMinutes] = useState(initialIntervalMinutes);
+  const [isPending, startTransition] = useTransition();
 
   // Find active run
   const activeRun = accounts.find((a) => a.currentRun);
   const isRunning = !!activeRun;
+
+  const handleSyncNow = useCallback(() => {
+    startTransition(async () => {
+      const result = await triggerIngestion();
+      if (result.success) {
+        toast.success("Sync triggered — worker will start shortly");
+      } else {
+        toast.error(result.error ?? "Failed to trigger sync");
+      }
+    });
+  }, []);
 
   // Poll for status
   useEffect(() => {
@@ -60,6 +76,9 @@ export function WorkerStatusPanel({ initialStatus }: WorkerStatusPanelProps) {
         const data = await res.json();
         if (mounted) {
           setAccounts(data.accounts ?? []);
+          if (data.workerIntervalMinutes) {
+            setWorkerIntervalMinutes(data.workerIntervalMinutes);
+          }
           setError(false);
         }
       } catch {
@@ -86,7 +105,7 @@ export function WorkerStatusPanel({ initialStatus }: WorkerStatusPanelProps) {
       return;
     }
 
-    // Estimate next run based on last run finish time + interval (5 min + up to 5 min jitter)
+    // Estimate next run based on last run finish time + configured interval + up to 5 min jitter
     const lastFinished = accounts
       .filter((a) => a.lastRun?.finishedAt)
       .map((a) => new Date(a.lastRun!.finishedAt!).getTime())
@@ -97,7 +116,7 @@ export function WorkerStatusPanel({ initialStatus }: WorkerStatusPanelProps) {
       return;
     }
 
-    const intervalMs = 5 * 60 * 1000; // 5 min base
+    const intervalMs = workerIntervalMinutes * 60 * 1000;
     const estimatedNext = lastFinished + intervalMs;
 
     const tick = () => {
@@ -116,7 +135,7 @@ export function WorkerStatusPanel({ initialStatus }: WorkerStatusPanelProps) {
     tick();
     const interval = setInterval(tick, 1_000);
     return () => clearInterval(interval);
-  }, [isRunning, accounts]);
+  }, [isRunning, accounts, workerIntervalMinutes]);
 
   if (accounts.length === 0 && !error) {
     return (
@@ -182,7 +201,12 @@ export function WorkerStatusPanel({ initialStatus }: WorkerStatusPanelProps) {
         ) : isRunning && activeRun?.currentRun ? (
           <RunningStatus run={activeRun.currentRun} />
         ) : (
-          <IdleStatus accounts={accounts} nextRunCountdown={nextRunCountdown} />
+          <IdleStatus
+            accounts={accounts}
+            nextRunCountdown={nextRunCountdown}
+            onSyncNow={handleSyncNow}
+            isSyncing={isPending}
+          />
         )}
       </CardContent>
     </Card>
@@ -256,9 +280,13 @@ function RunningStatus({
 function IdleStatus({
   accounts,
   nextRunCountdown,
+  onSyncNow,
+  isSyncing,
 }: {
   accounts: IngestionAccountStatus[];
   nextRunCountdown: string | null;
+  onSyncNow: () => void;
+  isSyncing: boolean;
 }) {
   const lastRun = accounts
     .filter((a) => a.lastRun)
@@ -321,14 +349,32 @@ function IdleStatus({
         )}
       </div>
 
-      {nextRunCountdown && hasAuthenticated && (
-        <div className="flex items-center gap-1.5 shrink-0">
-          <RefreshCw className="h-3 w-3 text-muted-foreground" />
-          <span className="text-xs text-muted-foreground tabular-nums">
-            Next: {nextRunCountdown}
-          </span>
-        </div>
-      )}
+      <div className="flex items-center gap-2 shrink-0">
+        {nextRunCountdown && hasAuthenticated && (
+          <div className="flex items-center gap-1.5">
+            <RefreshCw className="h-3 w-3 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground tabular-nums">
+              Next: {nextRunCountdown}
+            </span>
+          </div>
+        )}
+        {hasAuthenticated && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs px-2"
+            onClick={onSyncNow}
+            disabled={isSyncing}
+          >
+            {isSyncing ? (
+              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+            ) : (
+              <RefreshCw className="h-3 w-3 mr-1" />
+            )}
+            Sync Now
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

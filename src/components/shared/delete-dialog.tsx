@@ -18,6 +18,8 @@ interface DeleteDialogProps {
   description?: string;
   onConfirm: () => void;
   isLoading?: boolean;
+  confirmLabel?: string;
+  confirmLoadingLabel?: string;
 }
 
 export function DeleteDialog({
@@ -27,6 +29,8 @@ export function DeleteDialog({
   description = "This action cannot be undone.",
   onConfirm,
   isLoading,
+  confirmLabel = "Delete",
+  confirmLoadingLabel,
 }: DeleteDialogProps) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -42,7 +46,7 @@ export function DeleteDialog({
             disabled={isLoading}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            {isLoading ? "Deleting..." : "Delete"}
+            {isLoading ? (confirmLoadingLabel ?? `${confirmLabel}...`) : confirmLabel}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

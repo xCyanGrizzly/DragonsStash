@@ -16,6 +16,7 @@ interface TelegramAdminProps {
   ingestionStatus: IngestionAccountStatus[];
   globalDestination: GlobalDestination;
   sendHistory: SendHistoryRow[];
+  workerIntervalMinutes: number;
 }
 
 export function TelegramAdmin({
@@ -24,6 +25,7 @@ export function TelegramAdmin({
   ingestionStatus,
   globalDestination,
   sendHistory,
+  workerIntervalMinutes,
 }: TelegramAdminProps) {
   return (
     <div className="space-y-4">
@@ -32,7 +34,7 @@ export function TelegramAdmin({
         description="Manage Telegram accounts, channels, and ingestion"
       />
 
-      <WorkerStatusPanel initialStatus={ingestionStatus} />
+      <WorkerStatusPanel initialStatus={ingestionStatus} initialIntervalMinutes={workerIntervalMinutes} />
 
       <Tabs defaultValue="accounts" className="space-y-4">
         <TabsList>

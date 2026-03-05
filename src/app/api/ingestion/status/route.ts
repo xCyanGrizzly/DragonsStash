@@ -9,5 +9,9 @@ export async function GET(request: Request) {
   if ("error" in authResult) return authResult.error;
 
   const accounts = await getIngestionStatus();
-  return NextResponse.json({ accounts });
+  const workerIntervalMinutes = parseInt(
+    process.env.WORKER_INTERVAL_MINUTES ?? "60",
+    10
+  );
+  return NextResponse.json({ accounts, workerIntervalMinutes });
 }

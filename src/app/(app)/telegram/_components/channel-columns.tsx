@@ -7,6 +7,7 @@ import {
   Power,
   ArrowDownToLine,
   ArrowUpFromLine,
+  RefreshCcw,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,12 +24,14 @@ interface ChannelColumnsProps {
   onToggleActive: (id: string) => void;
   onDelete: (id: string) => void;
   onSetType: (id: string, type: "SOURCE" | "DESTINATION") => void;
+  onRescan: (id: string) => void;
 }
 
 export function getChannelColumns({
   onToggleActive,
   onDelete,
   onSetType,
+  onRescan,
 }: ChannelColumnsProps): ColumnDef<ChannelRow, unknown>[] {
   return [
     {
@@ -119,6 +122,14 @@ export function getChannelColumns({
               >
                 <ArrowUpFromLine className="mr-2 h-3.5 w-3.5" />
                 Set as Source
+              </DropdownMenuItem>
+            )}
+            {row.original.type === "SOURCE" && (
+              <DropdownMenuItem
+                onClick={() => onRescan(row.original.id)}
+              >
+                <RefreshCcw className="mr-2 h-3.5 w-3.5" />
+                Rescan Channel
               </DropdownMenuItem>
             )}
             <DropdownMenuItem
