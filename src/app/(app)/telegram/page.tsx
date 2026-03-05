@@ -25,7 +25,7 @@ export default async function TelegramPage() {
     }),
   ]);
 
-  const serializedHistory = sendHistory.map((r) => ({
+  const serializedHistory = sendHistory.map((r: typeof sendHistory[number]) => ({
     id: r.id,
     packageName: r.package.fileName,
     recipientName: r.telegramLink.telegramName,

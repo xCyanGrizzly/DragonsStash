@@ -8,6 +8,7 @@ import {
   deleteChannel,
   toggleChannelActive,
   setChannelType,
+  rescanChannel,
 } from "../actions";
 import { DataTable } from "@/components/shared/data-table";
 import { DeleteDialog } from "@/components/shared/delete-dialog";
@@ -22,6 +23,7 @@ interface ChannelsTabProps {
 export function ChannelsTab({ channels, globalDestination }: ChannelsTabProps) {
   const [isPending, startTransition] = useTransition();
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [rescanId, setRescanId] = useState<string | null>(null);
 
   const columns = getChannelColumns({
     onToggleActive: (id) => {
@@ -39,6 +41,7 @@ export function ChannelsTab({ channels, globalDestination }: ChannelsTabProps) {
         else toast.error(result.error);
       });
     },
+    onRescan: (id) => setRescanId(id),
   });
 
   const { table } = useDataTable({
@@ -54,6 +57,19 @@ export function ChannelsTab({ channels, globalDestination }: ChannelsTabProps) {
       if (result.success) {
         toast.success("Channel deleted");
         setDeleteId(null);
+      } else {
+        toast.error(result.error);
+      }
+    });
+  };
+
+  const handleRescan = () => {
+    if (!rescanId) return;
+    startTransition(async () => {
+      const result = await rescanChannel(rescanId);
+      if (result.success) {
+        toast.success("Channel scan progress reset — it will be fully rescanned on the next sync");
+        setRescanId(null);
       } else {
         toast.error(result.error);
       }
@@ -81,6 +97,16 @@ export function ChannelsTab({ channels, globalDestination }: ChannelsTabProps) {
         title="Delete Channel"
         description="This will permanently delete this channel and unlink it from all accounts. Existing packages will NOT be deleted."
         onConfirm={handleDelete}
+        isLoading={isPending}
+      />
+
+      <DeleteDialog
+        open={!!rescanId}
+        onOpenChange={(open) => !open && setRescanId(null)}
+        title="Rescan Channel"
+        description="This will reset all scan progress for this channel. On the next sync the worker will re-process every message from the beginning. Packages that are already in the library will be skipped (deduplication by hash), but any missing files will be re-downloaded and re-uploaded. This may take a long time for large channels."
+        confirmLabel="Rescan"
+        onConfirm={handleRescan}
         isLoading={isPending}
       />
     </div>

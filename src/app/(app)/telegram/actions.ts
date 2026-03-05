@@ -297,6 +297,52 @@ export async function triggerChannelSync(): Promise<ActionResult> {
   }
 }
 
+/**
+ * Reset all scan progress for a channel so the worker will re-process it
+ * from the very beginning on the next ingestion cycle.
+ *
+ * This clears:
+ *   - `lastProcessedMessageId` on every AccountChannelMap linked to this channel
+ *   - All TopicProgress records for those maps (for forum channels)
+ */
+export async function rescanChannel(channelId: string): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  if (!admin.success) return admin;
+
+  const channel = await prisma.telegramChannel.findUnique({
+    where: { id: channelId },
+  });
+  if (!channel) return { success: false, error: "Channel not found" };
+
+  try {
+    // Find all account-channel maps for this channel
+    const maps = await prisma.accountChannelMap.findMany({
+      where: { channelId },
+      select: { id: true },
+    });
+
+    const mapIds = maps.map((m) => m.id);
+
+    // Delete all topic progress records for these maps (forum channels)
+    if (mapIds.length > 0) {
+      await prisma.topicProgress.deleteMany({
+        where: { accountChannelMapId: { in: mapIds } },
+      });
+    }
+
+    // Reset the scan cursor so the worker re-processes from the start
+    await prisma.accountChannelMap.updateMany({
+      where: { channelId },
+      data: { lastProcessedMessageId: null },
+    });
+
+    revalidatePath(REVALIDATE_PATH);
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to reset channel scan progress" };
+  }
+}
+
 // ── Account-Channel link actions ──
 
 export async function linkChannel(
@@ -377,7 +423,7 @@ export async function triggerIngestion(
     try {
       await prisma.$queryRawUnsafe(
         `SELECT pg_notify('ingestion_trigger', $1)`,
-        accounts.map((a) => a.id).join(",")
+        accounts.map((a: { id: string }) => a.id).join(",")
       );
     } catch {
       // Best-effort

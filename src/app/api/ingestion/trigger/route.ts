@@ -50,7 +50,7 @@ export async function POST(request: Request) {
   try {
     await prisma.$queryRawUnsafe(
       `SELECT pg_notify('ingestion_trigger', $1)`,
-      accounts.map((a) => a.id).join(",")
+      accounts.map((a: { id: string }) => a.id).join(",")
     );
   } catch {
     // pg_notify is best-effort — worker will pick up on next scheduled cycle anyway
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     triggered: true,
-    accountIds: accounts.map((a) => a.id),
+    accountIds: accounts.map((a: { id: string }) => a.id),
     message: `Ingestion triggered for ${accounts.length} account(s)`,
   });
 }
