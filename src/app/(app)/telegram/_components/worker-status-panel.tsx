@@ -233,6 +233,11 @@ function RunningStatus({
             </span>
           </span>
         )}
+        {run.messagesScanned > 0 && (
+          <span>
+            <span className="text-foreground tabular-nums">{run.messagesScanned}</span> messages
+          </span>
+        )}
         {run.zipsIngested > 0 && (
           <span>
             <span className="text-foreground tabular-nums">{run.zipsIngested}</span> ingested
