@@ -11,12 +11,23 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let cycleCount = 0;
 
 /**
+ * Maximum time for a single ingestion cycle (ms).
+ * After this, new accounts won't be started (in-progress work finishes).
+ * Default: 4 hours. Configurable via WORKER_CYCLE_TIMEOUT_MINUTES.
+ */
+const CYCLE_TIMEOUT_MS = (parseInt(process.env.WORKER_CYCLE_TIMEOUT_MINUTES ?? "240", 10)) * 60 * 1000;
+
+/**
  * Run one ingestion cycle:
  * 1. Authenticate any PENDING accounts (triggers SMS code flow + auto-fetch channels)
  * 2. Process all active AUTHENTICATED accounts for ingestion
  *
  * All TDLib operations are wrapped in the mutex to ensure only one client
  * runs at a time (also shared with the fetch listener for on-demand requests).
+ *
+ * The cycle has a configurable timeout (WORKER_CYCLE_TIMEOUT_MINUTES, default 4h).
+ * Once the timeout elapses, no new accounts will be started but any in-progress
+ * account processing is allowed to finish its current archive set.
  */
 async function runCycle(): Promise<void> {
   if (running) {
@@ -26,7 +37,8 @@ async function runCycle(): Promise<void> {
 
   running = true;
   cycleCount++;
-  log.info({ cycle: cycleCount }, "Starting ingestion cycle");
+  const cycleStart = Date.now();
+  log.info({ cycle: cycleCount, timeoutMinutes: CYCLE_TIMEOUT_MS / 60_000 }, "Starting ingestion cycle");
 
   try {
     // ── Phase 1: Authenticate pending accounts ──
@@ -37,6 +49,10 @@ async function runCycle(): Promise<void> {
         "Found pending accounts, starting authentication"
       );
       for (const account of pendingAccounts) {
+        if (Date.now() - cycleStart > CYCLE_TIMEOUT_MS) {
+          log.warn("Cycle timeout reached during authentication phase, stopping");
+          break;
+        }
         await withTdlibMutex(`auth:${account.phone}`, () =>
           authenticateAccount(account)
         );
@@ -54,12 +70,22 @@ async function runCycle(): Promise<void> {
     log.info({ accountCount: accounts.length }, "Processing accounts");
 
     for (const account of accounts) {
+      if (Date.now() - cycleStart > CYCLE_TIMEOUT_MS) {
+        log.warn(
+          { elapsed: Math.round((Date.now() - cycleStart) / 60_000), timeoutMinutes: CYCLE_TIMEOUT_MS / 60_000 },
+          "Cycle timeout reached, skipping remaining accounts"
+        );
+        break;
+      }
       await withTdlibMutex(`ingest:${account.phone}`, () =>
         runWorkerForAccount(account)
       );
     }
 
-    log.info("Ingestion cycle complete");
+    log.info(
+      { elapsed: Math.round((Date.now() - cycleStart) / 1000) },
+      "Ingestion cycle complete"
+    );
   } catch (err) {
     log.error({ err }, "Ingestion cycle failed");
   } finally {

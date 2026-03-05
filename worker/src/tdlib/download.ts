@@ -8,6 +8,12 @@ import type { TelegramPhoto } from "../preview/match.js";
 
 const log = childLogger("download");
 
+/** Maximum number of pages to scan per channel/topic to prevent infinite loops */
+export const MAX_SCAN_PAGES = 5000;
+
+/** Timeout for a single TDLib API call (ms) */
+export const INVOKE_TIMEOUT_MS = 120_000; // 2 minutes
+
 interface TdPhotoSize {
   type: string;
   photo: {
@@ -72,6 +78,44 @@ export interface ChannelScanResult {
 export type ScanProgressCallback = (messagesScanned: number) => void;
 
 /**
+ * Invoke a TDLib method with a timeout to prevent indefinite hangs.
+ * If TDLib does not respond within the timeout, the promise rejects.
+ */
+export async function invokeWithTimeout<T>(
+  client: Client,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  request: Record<string, any>,
+  timeoutMs = INVOKE_TIMEOUT_MS
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`TDLib invoke timed out after ${timeoutMs}ms for ${request._}`));
+      }
+    }, timeoutMs);
+
+    (client.invoke(request) as Promise<T>)
+      .then((result) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(result);
+        }
+      })
+      .catch((err) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          reject(err);
+        }
+      });
+  });
+}
+
+/**
  * Fetch messages from a channel, stopping once we've scanned past the
  * last-processed boundary (with one page of lookback for multipart safety).
  * Collects both archive attachments AND photo messages (for preview matching).
@@ -80,6 +124,11 @@ export type ScanProgressCallback = (messagesScanned: number) => void;
  * When `lastProcessedMessageId` is null (first run), scans everything.
  * The worker applies a post-grouping filter to skip fully-processed sets,
  * and keeps `packageExistsBySourceMessage` as a safety net.
+ *
+ * Safety features:
+ *  - Max page limit to prevent infinite loops
+ *  - Stuck detection: breaks if from_message_id stops advancing
+ *  - Timeout on each TDLib API call
  */
 export async function getChannelMessages(
   client: Client,
@@ -94,17 +143,29 @@ export async function getChannelMessages(
 
   let currentFromId = 0;
   let totalScanned = 0;
+  let pageCount = 0;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const result = (await client.invoke({
+    if (pageCount >= MAX_SCAN_PAGES) {
+      log.warn(
+        { chatId: chatId.toString(), pageCount, totalScanned },
+        "Hit max page limit for channel scan, stopping"
+      );
+      break;
+    }
+    pageCount++;
+
+    const previousFromId = currentFromId;
+
+    const result = await invokeWithTimeout<{ messages: TdMessage[] }>(client, {
       _: "getChatHistory",
       chat_id: Number(chatId),
       from_message_id: currentFromId,
       offset: 0,
       limit: Math.min(limit, 100),
       only_local: false,
-    })) as { messages: TdMessage[] };
+    });
 
     if (!result.messages || result.messages.length === 0) break;
 
@@ -144,17 +205,26 @@ export async function getChannelMessages(
 
     currentFromId = result.messages[result.messages.length - 1].id;
 
+    // Stuck detection: if from_message_id didn't advance, break to prevent infinite loop
+    if (currentFromId === previousFromId) {
+      log.warn(
+        { chatId: chatId.toString(), currentFromId, totalScanned },
+        "Pagination stuck (from_message_id not advancing), breaking"
+      );
+      break;
+    }
+
     // Stop scanning once we've gone past the boundary (this page is the lookback)
     if (boundary && currentFromId < boundary) break;
 
-    if (result.messages.length < 100) break;
+    if (result.messages.length < Math.min(limit, 100)) break;
 
     // Rate limit delay
     await sleep(config.apiDelayMs);
   }
 
   log.info(
-    { chatId: chatId.toString(), archives: archives.length, photos: photos.length, totalScanned },
+    { chatId: chatId.toString(), archives: archives.length, photos: photos.length, totalScanned, pages: pageCount },
     "Channel scan complete"
   );
 
