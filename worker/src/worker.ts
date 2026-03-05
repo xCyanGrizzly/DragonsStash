@@ -349,8 +349,14 @@ export async function runWorkerForAccount(
         throw new Error("No global destination channel configured — set one in the admin UI");
       }
 
-      for (const mapping of channelMappings) {
+      const totalChannels = channelMappings.length;
+
+      for (let chIdx = 0; chIdx < channelMappings.length; chIdx++) {
+        const mapping = channelMappings[chIdx];
         const channel = mapping.channel;
+        const channelLabel = totalChannels > 1
+          ? `[${chIdx + 1}/${totalChannels}] ${channel.title}`
+          : channel.title;
 
         try {
         // ── Check if channel is a forum ──
@@ -380,15 +386,16 @@ export async function runWorkerForAccount(
         if (forum) {
           // ── Forum channel: scan per-topic ──
           await updateRunActivity(activeRunId, {
-            currentActivity: `Enumerating topics in "${channel.title}"`,
+            currentActivity: `Enumerating topics in "${channelLabel}"`,
             currentStep: "scanning",
-            currentChannel: channel.title,
+            currentChannel: channelLabel,
             currentFile: null,
             currentFileNum: null,
             totalFiles: null,
             downloadedBytes: null,
             totalBytes: null,
             downloadPercent: null,
+            messagesScanned: counters.messagesScanned,
           });
 
           const topics = await getForumTopicList(client, channel.telegramId);
@@ -399,30 +406,49 @@ export async function runWorkerForAccount(
             "Scanning forum channel by topic"
           );
 
-          for (const topic of topics) {
+          for (let tIdx = 0; tIdx < topics.length; tIdx++) {
+            const topic = topics[tIdx];
             try {
               const progress = topicProgressList.find(
                 (tp) => tp.topicId === topic.topicId
               );
 
+              const topicLabel = `${channel.title} › ${topic.name}`;
+              const topicProgress = topics.length > 1
+                ? ` (topic ${tIdx + 1}/${topics.length})`
+                : "";
+
               await updateRunActivity(activeRunId, {
-                currentActivity: `Scanning topic "${topic.name}" in "${channel.title}"`,
+                currentActivity: `Scanning "${topicLabel}"${topicProgress}`,
                 currentStep: "scanning",
-                currentChannel: `${channel.title} › ${topic.name}`,
+                currentChannel: channelLabel,
                 currentFile: null,
                 currentFileNum: null,
                 totalFiles: null,
                 downloadedBytes: null,
                 totalBytes: null,
                 downloadPercent: null,
+                messagesScanned: counters.messagesScanned,
               });
 
               const scanResult = await getTopicMessages(
                 client,
                 channel.telegramId,
                 topic.topicId,
-                progress?.lastProcessedMessageId
+                progress?.lastProcessedMessageId,
+                100,
+                (scanned) => {
+                  throttled.update({
+                    currentActivity: `Scanning "${topicLabel}"${topicProgress} — ${scanned} messages scanned`,
+                    currentStep: "scanning",
+                    currentChannel: channelLabel,
+                    messagesScanned: counters.messagesScanned + scanned,
+                  });
+                }
               );
+
+              // Add scanned messages to global counter
+              counters.messagesScanned += scanResult.totalScanned;
 
               if (scanResult.archives.length === 0) {
                 accountLog.debug(
@@ -463,15 +489,16 @@ export async function runWorkerForAccount(
         } else {
           // ── Non-forum channel: flat scan (existing behavior) ──
           await updateRunActivity(activeRunId, {
-            currentActivity: `Scanning "${channel.title}" for new archives`,
+            currentActivity: `Scanning "${channelLabel}" for new archives`,
             currentStep: "scanning",
-            currentChannel: channel.title,
+            currentChannel: channelLabel,
             currentFile: null,
             currentFileNum: null,
             totalFiles: null,
             downloadedBytes: null,
             totalBytes: null,
             downloadPercent: null,
+            messagesScanned: counters.messagesScanned,
           });
 
           accountLog.info(
@@ -482,8 +509,20 @@ export async function runWorkerForAccount(
           const scanResult = await getChannelMessages(
             client,
             channel.telegramId,
-            mapping.lastProcessedMessageId
+            mapping.lastProcessedMessageId,
+            100,
+            (scanned) => {
+              throttled.update({
+                currentActivity: `Scanning "${channelLabel}" — ${scanned} messages scanned`,
+                currentStep: "scanning",
+                currentChannel: channelLabel,
+                messagesScanned: counters.messagesScanned + scanned,
+              });
+            }
           );
+
+          // Add scanned messages to global counter
+          counters.messagesScanned += scanResult.totalScanned;
 
           if (scanResult.archives.length === 0) {
             accountLog.debug({ channelId: channel.id }, "No new archives");
@@ -593,6 +632,7 @@ async function processArchiveSets(
     currentChannel: channelTitle,
     totalFiles: archiveSets.length,
     zipsFound: counters.zipsFound,
+    messagesScanned: counters.messagesScanned,
   });
 
   // Track the highest message ID that was successfully processed
@@ -646,7 +686,6 @@ async function processOneArchiveSet(
     throttled, counters, topicCreator, sourceTopicId, accountLog,
   } = ctx;
 
-  counters.messagesScanned += archiveSet.parts.length;
   const archiveName = archiveSet.parts[0].fileName;
 
   // ── Early skip: check if this archive set was already ingested ──

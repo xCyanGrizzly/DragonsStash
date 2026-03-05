@@ -4,7 +4,7 @@ import { childLogger } from "../util/logger.js";
 import { isArchiveAttachment } from "../archive/detect.js";
 import type { TelegramMessage } from "../archive/multipart.js";
 import type { TelegramPhoto } from "../preview/match.js";
-import type { ChannelScanResult } from "./download.js";
+import type { ChannelScanResult, ScanProgressCallback } from "./download.js";
 
 const log = childLogger("topics");
 
@@ -140,13 +140,15 @@ export async function getTopicMessages(
   chatId: bigint,
   topicId: bigint,
   lastProcessedMessageId?: bigint | null,
-  limit = 100
+  limit = 100,
+  onProgress?: ScanProgressCallback
 ): Promise<ChannelScanResult> {
   const archives: TelegramMessage[] = [];
   const photos: TelegramPhoto[] = [];
   const boundary = lastProcessedMessageId ? Number(lastProcessedMessageId) : null;
 
   let currentFromId = 0;
+  let totalScanned = 0;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -190,6 +192,8 @@ export async function getTopicMessages(
 
     if (!result.messages || result.messages.length === 0) break;
 
+    totalScanned += result.messages.length;
+
     for (const msg of result.messages) {
       // Check for archive documents
       const doc = msg.content?.document;
@@ -219,6 +223,9 @@ export async function getTopicMessages(
       }
     }
 
+    // Report scanning progress after each page
+    onProgress?.(totalScanned);
+
     currentFromId = result.messages[result.messages.length - 1].id;
 
     // Stop scanning once we've gone past the boundary (this page is the lookback)
@@ -230,7 +237,7 @@ export async function getTopicMessages(
   }
 
   log.info(
-    { chatId: chatId.toString(), topicId: topicId.toString(), archives: archives.length, photos: photos.length },
+    { chatId: chatId.toString(), topicId: topicId.toString(), archives: archives.length, photos: photos.length, totalScanned },
     "Topic scan complete"
   );
 
@@ -238,6 +245,7 @@ export async function getTopicMessages(
   return {
     archives: archives.reverse(),
     photos: photos.reverse(),
+    totalScanned,
   };
 }
 

@@ -66,7 +66,10 @@ interface TdFile {
 export interface ChannelScanResult {
   archives: TelegramMessage[];
   photos: TelegramPhoto[];
+  totalScanned: number;
 }
+
+export type ScanProgressCallback = (messagesScanned: number) => void;
 
 /**
  * Fetch messages from a channel, stopping once we've scanned past the
@@ -82,13 +85,15 @@ export async function getChannelMessages(
   client: Client,
   chatId: bigint,
   lastProcessedMessageId?: bigint | null,
-  limit = 100
+  limit = 100,
+  onProgress?: ScanProgressCallback
 ): Promise<ChannelScanResult> {
   const archives: TelegramMessage[] = [];
   const photos: TelegramPhoto[] = [];
   const boundary = lastProcessedMessageId ? Number(lastProcessedMessageId) : null;
 
   let currentFromId = 0;
+  let totalScanned = 0;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -102,6 +107,8 @@ export async function getChannelMessages(
     })) as { messages: TdMessage[] };
 
     if (!result.messages || result.messages.length === 0) break;
+
+    totalScanned += result.messages.length;
 
     for (const msg of result.messages) {
       // Check for archive documents
@@ -132,6 +139,9 @@ export async function getChannelMessages(
       }
     }
 
+    // Report scanning progress after each page
+    onProgress?.(totalScanned);
+
     currentFromId = result.messages[result.messages.length - 1].id;
 
     // Stop scanning once we've gone past the boundary (this page is the lookback)
@@ -144,7 +154,7 @@ export async function getChannelMessages(
   }
 
   log.info(
-    { chatId: chatId.toString(), archives: archives.length, photos: photos.length },
+    { chatId: chatId.toString(), archives: archives.length, photos: photos.length, totalScanned },
     "Channel scan complete"
   );
 
@@ -152,6 +162,7 @@ export async function getChannelMessages(
   return {
     archives: archives.reverse(),
     photos: photos.reverse(),
+    totalScanned,
   };
 }
 

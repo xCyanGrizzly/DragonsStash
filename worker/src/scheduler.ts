@@ -106,6 +106,19 @@ export async function startScheduler(): Promise<void> {
 }
 
 /**
+ * Trigger an immediate ingestion cycle (e.g. from the admin UI).
+ * If a cycle is already running, this is a no-op.
+ */
+export async function triggerImmediateCycle(): Promise<void> {
+  if (running) {
+    log.info("Cycle already running, ignoring trigger");
+    return;
+  }
+  log.info("Immediate cycle triggered via UI");
+  await runCycle();
+}
+
+/**
  * Stop the scheduler gracefully.
  */
 export function stopScheduler(): void {
