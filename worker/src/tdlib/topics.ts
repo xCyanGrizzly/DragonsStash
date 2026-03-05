@@ -245,6 +245,7 @@ export async function getTopicMessages(
   return {
     archives: archives.reverse(),
     photos: photos.reverse(),
+    totalScanned,
   };
 }
 

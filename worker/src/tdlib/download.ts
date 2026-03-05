@@ -66,6 +66,7 @@ interface TdFile {
 export interface ChannelScanResult {
   archives: TelegramMessage[];
   photos: TelegramPhoto[];
+  totalScanned: number;
 }
 
 export type ScanProgressCallback = (messagesScanned: number) => void;
@@ -161,6 +162,7 @@ export async function getChannelMessages(
   return {
     archives: archives.reverse(),
     photos: photos.reverse(),
+    totalScanned,
   };
 }
 

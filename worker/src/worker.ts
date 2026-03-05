@@ -448,8 +448,7 @@ export async function runWorkerForAccount(
               );
 
               // Add scanned messages to global counter
-              const topicMsgCount = scanResult.archives.length + scanResult.photos.length;
-              counters.messagesScanned += topicMsgCount;
+              counters.messagesScanned += scanResult.totalScanned;
 
               if (scanResult.archives.length === 0) {
                 accountLog.debug(
@@ -523,8 +522,7 @@ export async function runWorkerForAccount(
           );
 
           // Add scanned messages to global counter
-          const channelMsgCount = scanResult.archives.length + scanResult.photos.length;
-          counters.messagesScanned += channelMsgCount;
+          counters.messagesScanned += scanResult.totalScanned;
 
           if (scanResult.archives.length === 0) {
             accountLog.debug({ channelId: channel.id }, "No new archives");
@@ -688,7 +686,6 @@ async function processOneArchiveSet(
     throttled, counters, topicCreator, sourceTopicId, accountLog,
   } = ctx;
 
-  counters.messagesScanned += archiveSet.parts.length;
   const archiveName = archiveSet.parts[0].fileName;
 
   // ── Early skip: check if this archive set was already ingested ──
