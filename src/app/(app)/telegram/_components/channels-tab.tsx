@@ -85,10 +85,7 @@ export function ChannelsTab({ channels, globalDestination, accounts }: ChannelsT
   };
 
   const handleFetchChannels = () => {
-    if (authenticatedAccounts.length === 1) {
-      setFetchChannelsAccountId(authenticatedAccounts[0].id);
-    } else if (authenticatedAccounts.length > 1) {
-      // Use the first authenticated account by default
+    if (authenticatedAccounts.length > 0) {
       setFetchChannelsAccountId(authenticatedAccounts[0].id);
     } else {
       toast.error("No authenticated accounts available. Add and authenticate an account first.");
