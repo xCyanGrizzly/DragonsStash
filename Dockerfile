@@ -54,6 +54,7 @@ RUN chmod +x docker-entrypoint.sh
 
 USER nextjs
 
+# Default port — overridden at runtime by the PORT env var (set via docker-compose APP_PORT)
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
