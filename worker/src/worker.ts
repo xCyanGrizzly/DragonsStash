@@ -351,6 +351,10 @@ export async function runWorkerForAccount(
 
       const totalChannels = channelMappings.length;
 
+      if (totalChannels === 0) {
+        accountLog.info("No active source channels linked to this account — nothing to ingest");
+      }
+
       for (let chIdx = 0; chIdx < channelMappings.length; chIdx++) {
         const mapping = channelMappings[chIdx];
         const channel = mapping.channel;
@@ -451,8 +455,8 @@ export async function runWorkerForAccount(
               counters.messagesScanned += scanResult.totalScanned;
 
               if (scanResult.archives.length === 0) {
-                accountLog.debug(
-                  { channelId: channel.id, topic: topic.name },
+                accountLog.info(
+                  { channelId: channel.id, topic: topic.name, totalScanned: scanResult.totalScanned },
                   "No new archives in topic"
                 );
                 continue;
@@ -525,7 +529,7 @@ export async function runWorkerForAccount(
           counters.messagesScanned += scanResult.totalScanned;
 
           if (scanResult.archives.length === 0) {
-            accountLog.debug({ channelId: channel.id }, "No new archives");
+            accountLog.info({ channelId: channel.id, title: channel.title, totalScanned: scanResult.totalScanned }, "No new archives in channel");
             continue;
           }
 

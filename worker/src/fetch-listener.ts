@@ -18,6 +18,10 @@ import {
 const log = childLogger("fetch-listener");
 
 let pgClient: pg.PoolClient | null = null;
+let stopped = false;
+
+/** Delay (ms) before attempting to reconnect after a connection loss. */
+const RECONNECT_DELAY_MS = 5_000;
 
 /**
  * Start listening for pg_notify signals from the web app.
@@ -27,30 +31,75 @@ let pgClient: pg.PoolClient | null = null;
  *   - `generate_invite` — payload = channelId → generate invite link for destination
  *   - `create_destination` — payload = JSON { requestId, title } → create supergroup via TDLib
  *   - `ingestion_trigger` — trigger an immediate ingestion cycle
+ *
+ * If the underlying connection is lost, the listener automatically reconnects
+ * so that pg_notify signals are never silently dropped.
  */
 export async function startFetchListener(): Promise<void> {
-  pgClient = await pool.connect();
-  await pgClient.query("LISTEN channel_fetch");
-  await pgClient.query("LISTEN generate_invite");
-  await pgClient.query("LISTEN create_destination");
-  await pgClient.query("LISTEN ingestion_trigger");
+  stopped = false;
+  await connectListener();
+}
 
-  pgClient.on("notification", (msg) => {
-    if (msg.channel === "channel_fetch" && msg.payload) {
-      handleChannelFetch(msg.payload);
-    } else if (msg.channel === "generate_invite" && msg.payload) {
-      handleGenerateInvite(msg.payload);
-    } else if (msg.channel === "create_destination" && msg.payload) {
-      handleCreateDestination(msg.payload);
-    } else if (msg.channel === "ingestion_trigger") {
-      handleIngestionTrigger();
+async function connectListener(): Promise<void> {
+  try {
+    pgClient = await pool.connect();
+    await pgClient.query("LISTEN channel_fetch");
+    await pgClient.query("LISTEN generate_invite");
+    await pgClient.query("LISTEN create_destination");
+    await pgClient.query("LISTEN ingestion_trigger");
+
+    pgClient.on("notification", (msg) => {
+      if (msg.channel === "channel_fetch" && msg.payload) {
+        handleChannelFetch(msg.payload);
+      } else if (msg.channel === "generate_invite" && msg.payload) {
+        handleGenerateInvite(msg.payload);
+      } else if (msg.channel === "create_destination" && msg.payload) {
+        handleCreateDestination(msg.payload);
+      } else if (msg.channel === "ingestion_trigger") {
+        handleIngestionTrigger();
+      }
+    });
+
+    // Reconnect automatically when the connection ends unexpectedly
+    pgClient.on("end", () => {
+      if (!stopped) {
+        log.warn("Fetch listener connection lost — reconnecting");
+        pgClient = null;
+        scheduleReconnect();
+      }
+    });
+
+    pgClient.on("error", (err) => {
+      log.error({ err }, "Fetch listener connection error");
+      if (!stopped && pgClient) {
+        try {
+          pgClient.release(true);
+        } catch (releaseErr) {
+          log.debug({ err: releaseErr }, "Failed to release pg client after error");
+        }
+        pgClient = null;
+        scheduleReconnect();
+      }
+    });
+
+    log.info("Fetch listener started (channel_fetch, generate_invite, create_destination, ingestion_trigger)");
+  } catch (err) {
+    log.error({ err }, "Failed to start fetch listener — retrying");
+    scheduleReconnect();
+  }
+}
+
+function scheduleReconnect(): void {
+  if (stopped) return;
+  setTimeout(() => {
+    if (!stopped) {
+      connectListener();
     }
-  });
-
-  log.info("Fetch listener started (channel_fetch, generate_invite, create_destination, ingestion_trigger)");
+  }, RECONNECT_DELAY_MS);
 }
 
 export function stopFetchListener(): void {
+  stopped = true;
   if (pgClient) {
     pgClient.release();
     pgClient = null;

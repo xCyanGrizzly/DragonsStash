@@ -17,6 +17,7 @@ services:
       - BOT_TOKEN=${BOT_TOKEN:-}
       - BOT_USERNAME=${BOT_USERNAME:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - WORKER_INTERVAL_MINUTES=${WORKER_INTERVAL_MINUTES:-60}
     depends_on:
       db:
         condition: service_healthy

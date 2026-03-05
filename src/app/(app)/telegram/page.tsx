@@ -42,6 +42,7 @@ export default async function TelegramPage() {
       ingestionStatus={ingestionStatus}
       globalDestination={globalDestination}
       sendHistory={serializedHistory}
+      workerIntervalMinutes={parseInt(process.env.WORKER_INTERVAL_MINUTES ?? "60", 10)}
     />
   );
 }
