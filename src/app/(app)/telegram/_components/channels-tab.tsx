@@ -2,8 +2,10 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { Download } from "lucide-react";
 import { getChannelColumns } from "./channel-columns";
 import { DestinationCard } from "./destination-card";
+import { ChannelPickerDialog } from "./channel-picker-dialog";
 import {
   deleteChannel,
   toggleChannelActive,
@@ -12,18 +14,24 @@ import {
 } from "../actions";
 import { DataTable } from "@/components/shared/data-table";
 import { DeleteDialog } from "@/components/shared/delete-dialog";
-import type { ChannelRow, GlobalDestination } from "@/lib/telegram/admin-queries";
+import { Button } from "@/components/ui/button";
+import type { AccountRow, ChannelRow, GlobalDestination } from "@/lib/telegram/admin-queries";
 import { useDataTable } from "@/hooks/use-data-table";
 
 interface ChannelsTabProps {
   channels: ChannelRow[];
   globalDestination: GlobalDestination;
+  accounts: AccountRow[];
 }
 
-export function ChannelsTab({ channels, globalDestination }: ChannelsTabProps) {
+export function ChannelsTab({ channels, globalDestination, accounts }: ChannelsTabProps) {
   const [isPending, startTransition] = useTransition();
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [rescanId, setRescanId] = useState<string | null>(null);
+  const [fetchChannelsAccountId, setFetchChannelsAccountId] = useState<string | null>(null);
+
+  // Find the first authenticated account for "Fetch Channels"
+  const authenticatedAccounts = accounts.filter((a) => a.authState === "AUTHENTICATED" && a.isActive);
 
   const columns = getChannelColumns({
     onToggleActive: (id) => {
@@ -76,19 +84,38 @@ export function ChannelsTab({ channels, globalDestination }: ChannelsTabProps) {
     });
   };
 
+  const handleFetchChannels = () => {
+    if (authenticatedAccounts.length > 0) {
+      setFetchChannelsAccountId(authenticatedAccounts[0].id);
+    } else {
+      toast.error("No authenticated accounts available. Add and authenticate an account first.");
+    }
+  };
+
   return (
     <div className="space-y-4">
       <DestinationCard destination={globalDestination} />
 
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          onClick={handleFetchChannels}
+          disabled={authenticatedAccounts.length === 0}
+        >
+          <Download className="mr-2 h-4 w-4" />
+          Fetch Channels
+        </Button>
+      </div>
+
       {channels.length > 0 && (
         <p className="text-xs text-muted-foreground">
-          Source channels are added per-account via the &quot;Fetch Channels&quot; button on the Accounts tab.
+          Channels discovered via &quot;Fetch Channels&quot; are automatically activated as sources.
         </p>
       )}
 
       <DataTable
         table={table}
-        emptyMessage="No channels yet. Use &quot;Fetch Channels&quot; on an account to discover and add source channels."
+        emptyMessage="No channels yet. Click &quot;Fetch Channels&quot; above to discover and add source channels."
       />
 
       <DeleteDialog
@@ -108,6 +135,14 @@ export function ChannelsTab({ channels, globalDestination }: ChannelsTabProps) {
         confirmLabel="Rescan"
         onConfirm={handleRescan}
         isLoading={isPending}
+      />
+
+      <ChannelPickerDialog
+        accountId={fetchChannelsAccountId}
+        open={!!fetchChannelsAccountId}
+        onOpenChange={(open) => {
+          if (!open) setFetchChannelsAccountId(null);
+        }}
       />
     </div>
   );

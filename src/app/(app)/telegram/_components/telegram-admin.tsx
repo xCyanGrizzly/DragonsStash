@@ -53,7 +53,7 @@ export function TelegramAdmin({
           <AccountsTab accounts={accounts} />
         </TabsContent>
         <TabsContent value="channels">
-          <ChannelsTab channels={channels} globalDestination={globalDestination} />
+          <ChannelsTab channels={channels} globalDestination={globalDestination} accounts={accounts} />
         </TabsContent>
         <TabsContent value="sends">
           <BotSendsTab history={sendHistory} />
