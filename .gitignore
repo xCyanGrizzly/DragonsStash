@@ -18,6 +18,7 @@ worker/node_modules
 
 # production
 /build
+worker/dist
 
 # misc
 .DS_Store
