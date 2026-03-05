@@ -5,6 +5,7 @@ import { isArchiveAttachment } from "../archive/detect.js";
 import type { TelegramMessage } from "../archive/multipart.js";
 import type { TelegramPhoto } from "../preview/match.js";
 import type { ChannelScanResult, ScanProgressCallback } from "./download.js";
+import { invokeWithTimeout, MAX_SCAN_PAGES, INVOKE_TIMEOUT_MS } from "./download.js";
 
 const log = childLogger("topics");
 
@@ -21,16 +22,16 @@ export async function isChatForum(
   chatId: bigint
 ): Promise<boolean> {
   try {
-    const chat = (await client.invoke({
-      _: "getChat",
-      chat_id: Number(chatId),
-    })) as {
+    const chat = await invokeWithTimeout<{
       type?: {
         _: string;
         supergroup_id?: number;
         is_forum?: boolean;
       };
-    };
+    }>(client, {
+      _: "getChat",
+      chat_id: Number(chatId),
+    });
 
     if (chat.type?._ === "chatTypeSupergroup" && chat.type.is_forum) {
       return true;
@@ -38,10 +39,10 @@ export async function isChatForum(
 
     // Also check via getSupergroup for older TDLib versions
     if (chat.type?._ === "chatTypeSupergroup" && chat.type.supergroup_id) {
-      const sg = (await client.invoke({
+      const sg = await invokeWithTimeout<{ is_forum?: boolean }>(client, {
         _: "getSupergroup",
         supergroup_id: chat.type.supergroup_id,
-      })) as { is_forum?: boolean };
+      });
       return sg.is_forum === true;
     }
 
@@ -54,6 +55,7 @@ export async function isChatForum(
 
 /**
  * Get all forum topics in a supergroup.
+ * Includes stuck detection and timeout protection on API calls.
  */
 export async function getForumTopicList(
   client: Client,
@@ -63,18 +65,24 @@ export async function getForumTopicList(
   let offsetDate = 0;
   let offsetMessageId = 0;
   let offsetMessageThreadId = 0;
+  let pageCount = 0;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const result = (await client.invoke({
-      _: "getForumTopics",
-      chat_id: Number(chatId),
-      query: "",
-      offset_date: offsetDate,
-      offset_message_id: offsetMessageId,
-      offset_message_thread_id: offsetMessageThreadId,
-      limit: 100,
-    })) as {
+    if (pageCount >= MAX_SCAN_PAGES) {
+      log.warn(
+        { chatId: chatId.toString(), pageCount, topicCount: topics.length },
+        "Hit max page limit for topic enumeration, stopping"
+      );
+      break;
+    }
+    pageCount++;
+
+    const prevOffsetDate = offsetDate;
+    const prevOffsetMessageId = offsetMessageId;
+    const prevOffsetMessageThreadId = offsetMessageThreadId;
+
+    const result = await invokeWithTimeout<{
       topics?: {
         info?: {
           message_thread_id?: number;
@@ -85,7 +93,15 @@ export async function getForumTopicList(
       next_offset_date?: number;
       next_offset_message_id?: number;
       next_offset_message_thread_id?: number;
-    };
+    }>(client, {
+      _: "getForumTopics",
+      chat_id: Number(chatId),
+      query: "",
+      offset_date: offsetDate,
+      offset_message_id: offsetMessageId,
+      offset_message_thread_id: offsetMessageThreadId,
+      limit: 100,
+    });
 
     if (!result.topics || result.topics.length === 0) break;
 
@@ -113,6 +129,19 @@ export async function getForumTopicList(
     offsetMessageId = result.next_offset_message_id ?? 0;
     offsetMessageThreadId = result.next_offset_message_thread_id ?? 0;
 
+    // Stuck detection: if offsets didn't advance, break
+    if (
+      offsetDate === prevOffsetDate &&
+      offsetMessageId === prevOffsetMessageId &&
+      offsetMessageThreadId === prevOffsetMessageThreadId
+    ) {
+      log.warn(
+        { chatId: chatId.toString(), topicCount: topics.length },
+        "Topic pagination stuck (offsets not advancing), breaking"
+      );
+      break;
+    }
+
     await sleep(config.apiDelayMs);
   }
 
@@ -134,6 +163,11 @@ export async function getForumTopicList(
  * When `lastProcessedMessageId` is null (first run), scans everything.
  * The worker applies a post-grouping filter to skip fully-processed sets,
  * and keeps `packageExistsBySourceMessage` as a safety net.
+ *
+ * Safety features:
+ *  - Max page limit to prevent infinite loops
+ *  - Stuck detection: breaks if from_message_id stops advancing
+ *  - Timeout on each TDLib API call
  */
 export async function getTopicMessages(
   client: Client,
@@ -149,22 +183,23 @@ export async function getTopicMessages(
 
   let currentFromId = 0;
   let totalScanned = 0;
+  let pageCount = 0;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
+    if (pageCount >= MAX_SCAN_PAGES) {
+      log.warn(
+        { chatId: chatId.toString(), topicId: topicId.toString(), pageCount, totalScanned },
+        "Hit max page limit for topic scan, stopping"
+      );
+      break;
+    }
+    pageCount++;
+
+    const previousFromId = currentFromId;
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = (await client.invoke({
-      _: "searchChatMessages",
-      chat_id: Number(chatId),
-      query: "",
-      message_thread_id: Number(topicId),
-      from_message_id: currentFromId,
-      offset: 0,
-      limit: Math.min(limit, 100),
-      filter: null,
-      sender_id: null,
-      saved_messages_topic_id: 0,
-    })) as {
+    const result = await invokeWithTimeout<{
       messages?: {
         id: number;
         date: number;
@@ -188,7 +223,18 @@ export async function getTopicMessages(
           caption?: { text?: string };
         };
       }[];
-    };
+    }>(client, {
+      _: "searchChatMessages",
+      chat_id: Number(chatId),
+      query: "",
+      message_thread_id: Number(topicId),
+      from_message_id: currentFromId,
+      offset: 0,
+      limit: Math.min(limit, 100),
+      filter: null,
+      sender_id: null,
+      saved_messages_topic_id: 0,
+    });
 
     if (!result.messages || result.messages.length === 0) break;
 
@@ -228,16 +274,25 @@ export async function getTopicMessages(
 
     currentFromId = result.messages[result.messages.length - 1].id;
 
+    // Stuck detection: if from_message_id didn't advance, break to prevent infinite loop
+    if (currentFromId === previousFromId) {
+      log.warn(
+        { chatId: chatId.toString(), topicId: topicId.toString(), currentFromId, totalScanned },
+        "Topic pagination stuck (from_message_id not advancing), breaking"
+      );
+      break;
+    }
+
     // Stop scanning once we've gone past the boundary (this page is the lookback)
     if (boundary && currentFromId < boundary) break;
 
-    if (result.messages.length < 100) break;
+    if (result.messages.length < Math.min(limit, 100)) break;
 
     await sleep(config.apiDelayMs);
   }
 
   log.info(
-    { chatId: chatId.toString(), topicId: topicId.toString(), archives: archives.length, photos: photos.length, totalScanned },
+    { chatId: chatId.toString(), topicId: topicId.toString(), archives: archives.length, photos: photos.length, totalScanned, pages: pageCount },
     "Topic scan complete"
   );
 
