@@ -88,18 +88,29 @@ export async function invokeWithTimeout<T>(
   timeoutMs = INVOKE_TIMEOUT_MS
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    let settled = false;
+
     const timer = setTimeout(() => {
-      reject(new Error(`TDLib invoke timed out after ${timeoutMs}ms for ${request._}`));
+      if (!settled) {
+        settled = true;
+        reject(new Error(`TDLib invoke timed out after ${timeoutMs}ms for ${request._}`));
+      }
     }, timeoutMs);
 
     (client.invoke(request) as Promise<T>)
       .then((result) => {
-        clearTimeout(timer);
-        resolve(result);
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(result);
+        }
       })
       .catch((err) => {
-        clearTimeout(timer);
-        reject(err);
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          reject(err);
+        }
       });
   });
 }

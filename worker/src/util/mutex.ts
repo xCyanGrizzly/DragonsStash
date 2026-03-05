@@ -27,10 +27,6 @@ export async function withTdlibMutex<T>(
   if (locked) {
     log.info({ waiting: label, holder }, "Waiting for TDLib mutex");
     await new Promise<void>((resolve, reject) => {
-      const entry = { resolve, reject, label };
-      queue.push(entry);
-
-      // Timeout: reject if we've been waiting too long
       const timer = setTimeout(() => {
         const idx = queue.indexOf(entry);
         if (idx !== -1) {
@@ -42,12 +38,15 @@ export async function withTdlibMutex<T>(
         }
       }, MUTEX_WAIT_TIMEOUT_MS);
 
-      // Wrap resolve to clear the timer
-      const origResolve = entry.resolve;
-      entry.resolve = () => {
-        clearTimeout(timer);
-        origResolve();
+      const entry = {
+        resolve: () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        reject,
+        label,
       };
+      queue.push(entry);
     });
   }
 
