@@ -173,6 +173,7 @@ export async function createChannel(
         telegramId: BigInt(parsed.data.telegramId),
         title: parsed.data.title,
         type: parsed.data.type,
+        isActive: false,
       },
     });
     revalidatePath(REVALIDATE_PATH);
@@ -371,19 +372,8 @@ export async function triggerIngestion(
       return { success: false, error: "No eligible accounts found" };
     }
 
-    // Create ingestion runs — the worker picks these up
-    for (const account of accounts) {
-      const existing = await prisma.ingestionRun.findFirst({
-        where: { accountId: account.id, status: "RUNNING" },
-      });
-      if (!existing) {
-        await prisma.ingestionRun.create({
-          data: { accountId: account.id, status: "RUNNING" },
-        });
-      }
-    }
-
-    // pg_notify for immediate worker pickup
+    // Signal the worker to run an immediate ingestion cycle via pg_notify.
+    // The worker will create its own IngestionRun records with proper activity tracking.
     try {
       await prisma.$queryRawUnsafe(
         `SELECT pg_notify('ingestion_trigger', $1)`,
@@ -417,7 +407,7 @@ export async function saveChannelSelections(
   try {
     let linked = 0;
     for (const ch of channels) {
-      // Upsert the channel record
+      // Upsert the channel record (new channels default to disabled)
       const channel = await prisma.telegramChannel.upsert({
         where: { telegramId: BigInt(ch.telegramId) },
         create: {
@@ -425,6 +415,7 @@ export async function saveChannelSelections(
           title: ch.title,
           type: "SOURCE",
           isForum: ch.isForum,
+          isActive: false,
         },
         update: {
           title: ch.title,
@@ -467,10 +458,10 @@ export async function setGlobalDestination(
   if (!channel) return { success: false, error: "Channel not found" };
 
   try {
-    // Set the channel type to DESTINATION
+    // Set the channel type to DESTINATION and ensure it's active
     await prisma.telegramChannel.update({
       where: { id: channelId },
-      data: { type: "DESTINATION" },
+      data: { type: "DESTINATION", isActive: true },
     });
 
     // Save as global destination
@@ -521,17 +512,19 @@ export async function createDestinationChannel(
   if (!admin.success) return admin;
 
   try {
-    // Create the channel as DESTINATION
+    // Create the channel as DESTINATION (active by default — needed for uploads)
     const channel = await prisma.telegramChannel.upsert({
       where: { telegramId: BigInt(telegramId) },
       create: {
         telegramId: BigInt(telegramId),
         title,
         type: "DESTINATION",
+        isActive: true,
       },
       update: {
         title,
         type: "DESTINATION",
+        isActive: true,
       },
     });
 

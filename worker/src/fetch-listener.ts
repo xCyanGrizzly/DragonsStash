@@ -5,6 +5,7 @@ import { withTdlibMutex } from "./util/mutex.js";
 import { processFetchRequest } from "./worker.js";
 import { generateInviteLink, createSupergroup } from "./tdlib/chats.js";
 import { createTdlibClient, closeTdlibClient } from "./tdlib/client.js";
+import { triggerImmediateCycle } from "./scheduler.js";
 import {
   getGlobalDestinationChannel,
   getGlobalSetting,
@@ -25,12 +26,14 @@ let pgClient: pg.PoolClient | null = null;
  *   - `channel_fetch` — payload = requestId → fetch channels for an account
  *   - `generate_invite` — payload = channelId → generate invite link for destination
  *   - `create_destination` — payload = JSON { requestId, title } → create supergroup via TDLib
+ *   - `ingestion_trigger` — trigger an immediate ingestion cycle
  */
 export async function startFetchListener(): Promise<void> {
   pgClient = await pool.connect();
   await pgClient.query("LISTEN channel_fetch");
   await pgClient.query("LISTEN generate_invite");
   await pgClient.query("LISTEN create_destination");
+  await pgClient.query("LISTEN ingestion_trigger");
 
   pgClient.on("notification", (msg) => {
     if (msg.channel === "channel_fetch" && msg.payload) {
@@ -39,10 +42,12 @@ export async function startFetchListener(): Promise<void> {
       handleGenerateInvite(msg.payload);
     } else if (msg.channel === "create_destination" && msg.payload) {
       handleCreateDestination(msg.payload);
+    } else if (msg.channel === "ingestion_trigger") {
+      handleIngestionTrigger();
     }
   });
 
-  log.info("Fetch listener started (channel_fetch, generate_invite, create_destination)");
+  log.info("Fetch listener started (channel_fetch, generate_invite, create_destination, ingestion_trigger)");
 }
 
 export function stopFetchListener(): void {
@@ -138,12 +143,13 @@ function handleCreateDestination(payload: string): void {
           const result = await createSupergroup(client, parsed.title);
           log.info({ chatId: result.chatId.toString(), title: result.title }, "Supergroup created");
 
-          // Upsert it as a DESTINATION channel in the DB
+          // Upsert it as a DESTINATION channel in the DB (active by default)
           const channel = await upsertChannel({
             telegramId: result.chatId,
             title: result.title,
             type: "DESTINATION",
             isForum: false,
+            isActive: true,
           });
 
           // Set as global destination
@@ -201,6 +207,19 @@ function handleCreateDestination(payload: string): void {
           // Best-effort
         }
       }
+    }
+  });
+}
+
+// ── Ingestion trigger handler ──
+
+function handleIngestionTrigger(): void {
+  fetchQueue = fetchQueue.then(async () => {
+    try {
+      log.info("Ingestion trigger received from UI");
+      await triggerImmediateCycle();
+    } catch (err) {
+      log.error({ err }, "Failed to trigger immediate ingestion cycle");
     }
   });
 }

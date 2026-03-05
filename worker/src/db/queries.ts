@@ -302,11 +302,15 @@ export interface UpsertChannelInput {
   title: string;
   type: "SOURCE" | "DESTINATION";
   isForum: boolean;
+  isActive?: boolean;
 }
 
 /**
  * Upsert a channel by telegramId. Returns the channel record.
  * If it already exists, update title and forum status.
+ * New channels default to disabled (isActive: false) so the admin must
+ * explicitly enable them before the worker processes them.
+ * Pass isActive: true for DESTINATION channels that must be active immediately.
  */
 export async function upsertChannel(input: UpsertChannelInput) {
   return db.telegramChannel.upsert({
@@ -316,6 +320,7 @@ export async function upsertChannel(input: UpsertChannelInput) {
       title: input.title,
       type: input.type,
       isForum: input.isForum,
+      isActive: input.isActive ?? false,
     },
     update: {
       title: input.title,
