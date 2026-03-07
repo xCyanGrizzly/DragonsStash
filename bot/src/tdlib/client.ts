@@ -33,7 +33,7 @@ export async function createBotClient(): Promise<tdl.Client> {
 
   await client.login(() => ({
     type: "bot",
-    token: config.botToken,
+    getToken: () => Promise.resolve(config.botToken),
   }));
 
   log.info("Bot client authenticated successfully");
@@ -54,7 +54,10 @@ export async function closeBotClient(): Promise<void> {
 
 /**
  * Forward a message from a channel to a user's DM.
- * Uses copyMessage to make it appear as sent by the bot.
+ * Uses forwardMessages with send_copy to make it appear as sent by the bot.
+ *
+ * The fromChatId is the TDLib chat ID stored in the DB — already in the correct
+ * format (negative for supergroups/channels, e.g. -1001234567890).
  */
 export async function copyMessageToUser(
   fromChatId: bigint,
@@ -63,14 +66,10 @@ export async function copyMessageToUser(
 ): Promise<void> {
   if (!client) throw new Error("Bot client not initialized");
 
-  // TDLib uses negative chat IDs for channels/supergroups
-  // The telegramId from the DB is the raw Telegram ID; for channels it needs -100 prefix
-  const fromChatIdNum = Number(-100n * 1n) + Number(fromChatId);
-
   await client.invoke({
     _: "forwardMessages",
     chat_id: Number(toUserId),
-    from_chat_id: Number(fromChatId) > 0 ? -Number(fromChatId) : Number(fromChatId),
+    from_chat_id: Number(fromChatId),
     message_ids: [Number(messageId)],
     send_copy: true,
     remove_caption: false,

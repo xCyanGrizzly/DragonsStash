@@ -716,6 +716,29 @@ async function processOneArchiveSet(
     return;
   }
 
+  // ── Size guard: skip archives that exceed WORKER_MAX_ZIP_SIZE_MB ──
+  const totalArchiveSize = archiveSet.parts.reduce((sum, p) => sum + p.fileSize, 0n);
+  const maxSizeBytes = BigInt(config.maxZipSizeMB) * 1024n * 1024n;
+  if (totalArchiveSize > maxSizeBytes) {
+    accountLog.warn(
+      {
+        fileName: archiveName,
+        totalSizeMB: Number(totalArchiveSize / (1024n * 1024n)),
+        maxSizeMB: config.maxZipSizeMB,
+      },
+      "Archive exceeds max size limit, skipping"
+    );
+    await updateRunActivity(runId, {
+      currentActivity: `Skipped ${archiveName} (exceeds ${config.maxZipSizeMB}MB limit)`,
+      currentStep: "skipping",
+      currentChannel: channelTitle,
+      currentFile: archiveName,
+      currentFileNum: setIdx + 1,
+      totalFiles: totalSets,
+    });
+    return;
+  }
+
   const tempPaths: string[] = [];
   let splitPaths: string[] = [];
 

@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useTransition } from "react";
-import { Database, AlertTriangle, Link2, Plus, Loader2 } from "lucide-react";
+import { Database, AlertTriangle, Link2, Plus, Loader2, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
-import { createDestinationViaWorker } from "../actions";
+import { createDestinationViaWorker, setGlobalDestination } from "../actions";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,10 +17,19 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import type { GlobalDestination } from "@/lib/telegram/admin-queries";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { GlobalDestination, ChannelRow } from "@/lib/telegram/admin-queries";
 
 interface DestinationCardProps {
   destination: GlobalDestination;
+  channels?: ChannelRow[];
 }
 
 type CreateState =
@@ -29,11 +38,17 @@ type CreateState =
   | { phase: "done"; title: string; telegramId: string }
   | { phase: "error"; message: string };
 
-export function DestinationCard({ destination }: DestinationCardProps) {
+export function DestinationCard({ destination, channels = [] }: DestinationCardProps) {
   const [isPending, startTransition] = useTransition();
   const [createOpen, setCreateOpen] = useState(false);
   const [title, setTitle] = useState("dragonsstash db");
   const [createState, setCreateState] = useState<CreateState>({ phase: "idle" });
+  const [selectedChannelId, setSelectedChannelId] = useState<string>("");
+
+  // Channels that can be assigned as destination (SOURCE channels only, exclude current destination)
+  const assignableChannels = channels.filter(
+    (c) => c.type === "SOURCE" && c.id !== destination?.id
+  );
 
   // Poll for worker result when creating
   useEffect(() => {
@@ -103,6 +118,21 @@ export function DestinationCard({ destination }: DestinationCardProps) {
     });
   };
 
+  const handleAssignExisting = () => {
+    if (!selectedChannelId) return;
+
+    startTransition(async () => {
+      const result = await setGlobalDestination(selectedChannelId);
+      if (result.success) {
+        toast.success("Channel set as destination!");
+        setCreateOpen(false);
+        setSelectedChannelId("");
+      } else {
+        toast.error(result.error ?? "Failed to set destination");
+      }
+    });
+  };
+
   const handleOpenChange = (open: boolean) => {
     setCreateOpen(open);
     if (!open) {
@@ -110,6 +140,7 @@ export function DestinationCard({ destination }: DestinationCardProps) {
       if (createState.phase !== "creating") {
         setCreateState({ phase: "idle" });
       }
+      setSelectedChannelId("");
     }
   };
 
@@ -132,19 +163,23 @@ export function DestinationCard({ destination }: DestinationCardProps) {
             </div>
             <Button size="sm" onClick={() => setCreateOpen(true)}>
               <Plus className="mr-2 h-3.5 w-3.5" />
-              Create Destination
+              Set Destination
             </Button>
           </CardContent>
         </Card>
 
-        <CreateDestinationDialog
+        <DestinationDialog
           open={createOpen}
           onOpenChange={handleOpenChange}
           title={title}
           setTitle={setTitle}
-          onSubmit={handleCreate}
+          onSubmitCreate={handleCreate}
           createState={createState}
           isPending={isPending}
+          assignableChannels={assignableChannels}
+          selectedChannelId={selectedChannelId}
+          setSelectedChannelId={setSelectedChannelId}
+          onSubmitAssign={handleAssignExisting}
         />
       </>
     );
@@ -187,46 +222,59 @@ export function DestinationCard({ destination }: DestinationCardProps) {
         </CardContent>
       </Card>
 
-      <CreateDestinationDialog
+      <DestinationDialog
         open={createOpen}
         onOpenChange={handleOpenChange}
         title={title}
         setTitle={setTitle}
-        onSubmit={handleCreate}
+        onSubmitCreate={handleCreate}
         createState={createState}
         isPending={isPending}
+        assignableChannels={assignableChannels}
+        selectedChannelId={selectedChannelId}
+        setSelectedChannelId={setSelectedChannelId}
+        onSubmitAssign={handleAssignExisting}
       />
     </>
   );
 }
 
-function CreateDestinationDialog({
+function DestinationDialog({
   open,
   onOpenChange,
   title,
   setTitle,
-  onSubmit,
+  onSubmitCreate,
   createState,
   isPending,
+  assignableChannels,
+  selectedChannelId,
+  setSelectedChannelId,
+  onSubmitAssign,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   setTitle: (v: string) => void;
-  onSubmit: () => void;
+  onSubmitCreate: () => void;
   createState: CreateState;
   isPending: boolean;
+  assignableChannels: ChannelRow[];
+  selectedChannelId: string;
+  setSelectedChannelId: (v: string) => void;
+  onSubmitAssign: () => void;
 }) {
   const isCreating = createState.phase === "creating";
+  const hasAssignable = assignableChannels.length > 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create Destination Channel</DialogTitle>
+          <DialogTitle>Set Destination Channel</DialogTitle>
           <DialogDescription>
-            A private Telegram group will be created automatically using one of
-            your authenticated accounts. All accounts will write archives here.
+            Choose an existing channel or create a new private group. All
+            accounts will write archives to this destination.
           </DialogDescription>
         </DialogHeader>
 
@@ -241,46 +289,111 @@ function CreateDestinationDialog({
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {createState.phase === "error" && (
-              <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
-                <p className="text-sm text-destructive">{createState.message}</p>
+          <Tabs defaultValue={hasAssignable ? "existing" : "create"} className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="existing" disabled={!hasAssignable}>
+                <ArrowRight className="mr-1.5 h-3.5 w-3.5" />
+                Use Existing
+              </TabsTrigger>
+              <TabsTrigger value="create">
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                Create New
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="existing" className="space-y-4 pt-2">
+              {createState.phase === "error" && (
+                <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+                  <p className="text-sm text-destructive">{createState.message}</p>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label>Select Channel</Label>
+                <Select
+                  value={selectedChannelId}
+                  onValueChange={setSelectedChannelId}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pick a channel..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {assignableChannels.map((ch) => (
+                      <SelectItem key={ch.id} value={ch.id}>
+                        {ch.title}{" "}
+                        <span className="text-muted-foreground text-xs">
+                          ({ch.telegramId})
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  The selected channel will become the destination. All accounts
+                  will be linked as writers automatically.
+                </p>
               </div>
-            )}
 
-            <div className="space-y-2">
-              <Label htmlFor="dest-title">Group Name</Label>
-              <Input
-                id="dest-title"
-                placeholder="e.g. dragonsstash db"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                This will be the name of the Telegram group. You can rename it later in Telegram.
-              </p>
-            </div>
-          </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => onOpenChange(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={onSubmitAssign}
+                  disabled={isPending || !selectedChannelId}
+                >
+                  {isPending && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  Set as Destination
+                </Button>
+              </DialogFooter>
+            </TabsContent>
+
+            <TabsContent value="create" className="space-y-4 pt-2">
+              {createState.phase === "error" && (
+                <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+                  <p className="text-sm text-destructive">{createState.message}</p>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="dest-title">Group Name</Label>
+                <Input
+                  id="dest-title"
+                  placeholder="e.g. dragonsstash db"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  A new private Telegram group will be created using one of your
+                  authenticated accounts. You can rename it later in Telegram.
+                </p>
+              </div>
+
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => onOpenChange(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={onSubmitCreate}
+                  disabled={isPending || !title.trim()}
+                >
+                  {isPending && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  Create Group
+                </Button>
+              </DialogFooter>
+            </TabsContent>
+          </Tabs>
         )}
-
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isCreating}
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={onSubmit}
-            disabled={isPending || isCreating || !title.trim()}
-          >
-            {(isPending || isCreating) && (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            )}
-            Create Group
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

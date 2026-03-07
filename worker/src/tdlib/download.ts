@@ -2,6 +2,7 @@ import type { Client } from "tdl";
 import { readFile, rename, copyFile, unlink, stat } from "fs/promises";
 import { config } from "../util/config.js";
 import { childLogger } from "../util/logger.js";
+import { withFloodWait } from "../util/retry.js";
 import { isArchiveAttachment } from "../archive/detect.js";
 import type { TelegramMessage } from "../archive/multipart.js";
 import type { TelegramPhoto } from "../preview/match.js";
@@ -78,8 +79,12 @@ export interface ChannelScanResult {
 export type ScanProgressCallback = (messagesScanned: number) => void;
 
 /**
- * Invoke a TDLib method with a timeout to prevent indefinite hangs.
+ * Invoke a TDLib method with a timeout to prevent indefinite hangs,
+ * and automatic retry on FLOOD_WAIT rate-limit errors.
+ *
  * If TDLib does not respond within the timeout, the promise rejects.
+ * If Telegram returns a rate limit error, sleeps for the required
+ * duration and retries (up to maxRetries times).
  */
 export async function invokeWithTimeout<T>(
   client: Client,
@@ -87,32 +92,40 @@ export async function invokeWithTimeout<T>(
   request: Record<string, any>,
   timeoutMs = INVOKE_TIMEOUT_MS
 ): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    let settled = false;
+  return withFloodWait(
+    () =>
+      new Promise<T>((resolve, reject) => {
+        let settled = false;
 
-    const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`TDLib invoke timed out after ${timeoutMs}ms for ${request._}`));
-      }
-    }, timeoutMs);
+        const timer = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            reject(
+              new Error(
+                `TDLib invoke timed out after ${timeoutMs}ms for ${request._}`
+              )
+            );
+          }
+        }, timeoutMs);
 
-    (client.invoke(request) as Promise<T>)
-      .then((result) => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve(result);
-        }
-      })
-      .catch((err) => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          reject(err);
-        }
-      });
-  });
+        (client.invoke(request) as Promise<T>)
+          .then((result) => {
+            if (!settled) {
+              settled = true;
+              clearTimeout(timer);
+              resolve(result);
+            }
+          })
+          .catch((err) => {
+            if (!settled) {
+              settled = true;
+              clearTimeout(timer);
+              reject(err);
+            }
+          });
+      }),
+    `TDLib:${request._}`
+  );
 }
 
 /**
@@ -415,15 +428,20 @@ export async function downloadFile(
     client.on("update", handleUpdate);
 
     // Start async download (non-blocking — progress via updateFile events)
-    client
-      .invoke({
-        _: "downloadFile",
-        file_id: numericId,
-        priority: 32,
-        offset: 0,
-        limit: 0,
-        synchronous: false,
-      })
+    // Wrapped in withFloodWait: if the initial invoke is rate-limited,
+    // it will sleep and retry before the download event loop begins.
+    withFloodWait(
+      () =>
+        client.invoke({
+          _: "downloadFile",
+          file_id: numericId,
+          priority: 32,
+          offset: 0,
+          limit: 0,
+          synchronous: false,
+        }),
+      `downloadFile:${fileName}`
+    )
       .then((result: unknown) => {
         // If the file was already cached locally, invoke returns immediately
         const file = result as TdFile | undefined;

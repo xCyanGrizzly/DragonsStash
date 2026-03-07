@@ -12,29 +12,78 @@ import { copyMessageToUser, sendTextMessage, sendPhotoMessage } from "./tdlib/cl
 const log = childLogger("send-listener");
 
 let pgClient: pg.PoolClient | null = null;
+let stopped = false;
+
+/** Delay (ms) before attempting to reconnect after a connection loss. */
+const RECONNECT_DELAY_MS = 5_000;
 
 /**
  * Start listening for pg_notify signals:
  *   - `bot_send` — payload = requestId → send a package to a user
  *   - `new_package` — payload = JSON { packageId, fileName, creator } → notify subscribers
+ *
+ * If the underlying connection is lost, the listener automatically reconnects
+ * so that pg_notify signals are never silently dropped.
  */
 export async function startSendListener(): Promise<void> {
-  pgClient = await pool.connect();
-  await pgClient.query("LISTEN bot_send");
-  await pgClient.query("LISTEN new_package");
+  stopped = false;
+  await connectListener();
+}
 
-  pgClient.on("notification", (msg) => {
-    if (msg.channel === "bot_send" && msg.payload) {
-      handleBotSend(msg.payload);
-    } else if (msg.channel === "new_package" && msg.payload) {
-      handleNewPackage(msg.payload);
+async function connectListener(): Promise<void> {
+  try {
+    pgClient = await pool.connect();
+    await pgClient.query("LISTEN bot_send");
+    await pgClient.query("LISTEN new_package");
+
+    pgClient.on("notification", (msg) => {
+      if (msg.channel === "bot_send" && msg.payload) {
+        handleBotSend(msg.payload);
+      } else if (msg.channel === "new_package" && msg.payload) {
+        handleNewPackage(msg.payload);
+      }
+    });
+
+    // Reconnect automatically when the connection ends unexpectedly
+    pgClient.on("end", () => {
+      if (!stopped) {
+        log.warn("Send listener connection lost — reconnecting");
+        pgClient = null;
+        scheduleReconnect();
+      }
+    });
+
+    pgClient.on("error", (err) => {
+      log.error({ err }, "Send listener connection error");
+      if (!stopped && pgClient) {
+        try {
+          pgClient.release(true);
+        } catch (releaseErr) {
+          log.debug({ err: releaseErr }, "Failed to release pg client after error");
+        }
+        pgClient = null;
+        scheduleReconnect();
+      }
+    });
+
+    log.info("Send listener started (bot_send, new_package)");
+  } catch (err) {
+    log.error({ err }, "Failed to start send listener — retrying");
+    scheduleReconnect();
+  }
+}
+
+function scheduleReconnect(): void {
+  if (stopped) return;
+  setTimeout(() => {
+    if (!stopped) {
+      connectListener();
     }
-  });
-
-  log.info("Send listener started (bot_send, new_package)");
+  }, RECONNECT_DELAY_MS);
 }
 
 export function stopSendListener(): void {
+  stopped = true;
   if (pgClient) {
     pgClient.release();
     pgClient = null;

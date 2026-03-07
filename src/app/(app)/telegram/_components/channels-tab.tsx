@@ -94,7 +94,7 @@ export function ChannelsTab({ channels, globalDestination, accounts }: ChannelsT
 
   return (
     <div className="space-y-4">
-      <DestinationCard destination={globalDestination} />
+      <DestinationCard destination={globalDestination} channels={channels} />
 
       <div className="flex items-center gap-2">
         <Button

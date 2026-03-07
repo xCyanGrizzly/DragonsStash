@@ -3,6 +3,7 @@ import { stat } from "fs/promises";
 import type { Client } from "tdl";
 import { config } from "../util/config.js";
 import { childLogger } from "../util/logger.js";
+import { withFloodWait } from "../util/retry.js";
 
 const log = childLogger("upload");
 
@@ -84,24 +85,29 @@ async function sendAndWaitForUpload(
   fileName: string,
   fileSizeMB: number
 ): Promise<bigint> {
-  // Send the message — this returns a temporary message immediately
-  const tempMsg = (await client.invoke({
-    _: "sendMessage",
-    chat_id: Number(chatId),
-    input_message_content: {
-      _: "inputMessageDocument",
-      document: {
-        _: "inputFileLocal",
-        path: filePath,
-      },
-      caption: caption
-        ? {
-            _: "formattedText",
-            text: caption,
-          }
-        : undefined,
-    },
-  })) as { id: number };
+  // Send the message — this returns a temporary message immediately.
+  // Wrapped in withFloodWait to handle Telegram rate limits on upload.
+  const tempMsg = (await withFloodWait(
+    () =>
+      client.invoke({
+        _: "sendMessage",
+        chat_id: Number(chatId),
+        input_message_content: {
+          _: "inputMessageDocument",
+          document: {
+            _: "inputFileLocal",
+            path: filePath,
+          },
+          caption: caption
+            ? {
+                _: "formattedText",
+                text: caption,
+              }
+            : undefined,
+        },
+      }),
+    "sendMessage:upload"
+  )) as { id: number };
 
   const tempMsgId = tempMsg.id;
 

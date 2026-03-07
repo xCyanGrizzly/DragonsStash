@@ -1,6 +1,7 @@
 import type { Client } from "tdl";
 import { childLogger } from "../util/logger.js";
 import { config } from "../util/config.js";
+import { withFloodWait } from "../util/retry.js";
 
 const log = childLogger("chats");
 
@@ -29,11 +30,14 @@ export async function getAccountChats(
 
   while (hasMore) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = (await client.invoke({
-      _: "getChats",
-      chat_list: { _: "chatListMain" },
-      limit: 100,
-    })) as { chat_ids: number[] };
+    const result = (await withFloodWait(
+      () => client.invoke({
+        _: "getChats",
+        chat_list: { _: "chatListMain" },
+        limit: 100,
+      }),
+      "getChats"
+    )) as { chat_ids: number[] };
 
     if (!result.chat_ids || result.chat_ids.length === 0) {
       break;
@@ -42,10 +46,13 @@ export async function getAccountChats(
     for (const chatId of result.chat_ids) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const chat = (await client.invoke({
-          _: "getChat",
-          chat_id: chatId,
-        })) as any;
+        const chat = (await withFloodWait(
+          () => client.invoke({
+            _: "getChat",
+            chat_id: chatId,
+          }),
+          "getChat"
+        )) as any;
 
         const chatType = chat.type?._;
         let type: TelegramChatInfo["type"] = "other";
@@ -55,10 +62,13 @@ export async function getAccountChats(
           // Get supergroup details to check if it's a channel or group
           try {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const sg = (await client.invoke({
-              _: "getSupergroup",
-              supergroup_id: chat.type.supergroup_id,
-            })) as any;
+            const sg = (await withFloodWait(
+              () => client.invoke({
+                _: "getSupergroup",
+                supergroup_id: chat.type.supergroup_id,
+              }),
+              "getSupergroup"
+            )) as any;
 
             type = sg.is_channel ? "channel" : "supergroup";
             isForum = sg.is_forum ?? false;
@@ -109,12 +119,15 @@ export async function generateInviteLink(
   chatId: bigint
 ): Promise<string> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result = (await client.invoke({
-    _: "createChatInviteLink",
-    chat_id: Number(chatId),
-    name: "DragonsStash Auto-Join",
-    creates_join_request: false,
-  })) as any;
+  const result = (await withFloodWait(
+    () => client.invoke({
+      _: "createChatInviteLink",
+      chat_id: Number(chatId),
+      name: "DragonsStash Auto-Join",
+      creates_join_request: false,
+    }),
+    "createChatInviteLink"
+  )) as any;
 
   const link = result.invite_link as string;
   log.info({ chatId: chatId.toString(), link }, "Generated invite link");
@@ -130,13 +143,16 @@ export async function createSupergroup(
   title: string
 ): Promise<{ chatId: bigint; title: string }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result = (await client.invoke({
-    _: "createNewSupergroupChat",
-    title,
-    is_forum: false,
-    is_channel: false,
-    description: "DragonsStash archive destination — all accounts write here",
-  })) as any;
+  const result = (await withFloodWait(
+    () => client.invoke({
+      _: "createNewSupergroupChat",
+      title,
+      is_forum: false,
+      is_channel: false,
+      description: "DragonsStash archive destination — all accounts write here",
+    }),
+    "createNewSupergroupChat"
+  )) as any;
 
   const chatId = BigInt(result.id);
   log.info({ chatId: chatId.toString(), title }, "Created new supergroup");
@@ -150,10 +166,13 @@ export async function joinChatByInviteLink(
   client: Client,
   inviteLink: string
 ): Promise<void> {
-  await client.invoke({
-    _: "joinChatByInviteLink",
-    invite_link: inviteLink,
-  });
+  await withFloodWait(
+    () => client.invoke({
+      _: "joinChatByInviteLink",
+      invite_link: inviteLink,
+    }),
+    "joinChatByInviteLink"
+  );
   log.info({ inviteLink }, "Joined chat by invite link");
 }
 

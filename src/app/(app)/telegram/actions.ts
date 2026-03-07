@@ -270,6 +270,13 @@ export async function setChannelType(
   if (!existing) return { success: false, error: "Channel not found" };
 
   try {
+    if (type === "DESTINATION") {
+      // Setting as destination: use the full global destination logic
+      // so it updates the global settings key, creates WRITER links, etc.
+      return await setGlobalDestination(id);
+    }
+
+    // Setting as SOURCE — just change the type
     await prisma.telegramChannel.update({
       where: { id },
       data: { type },
