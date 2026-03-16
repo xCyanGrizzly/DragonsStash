@@ -182,7 +182,7 @@ async function handleNewPackage(payload: string): Promise<void> {
       userSubs.set(key, patterns);
     }
 
-    const creator = data.creator ? ` by ${data.creator}` : "";
+    const creator = data.creator ? ` by ${escapeHtml(data.creator)}` : "";
     for (const [telegramUserId, patterns] of userSubs) {
       const msg = [
         `🔔 <b>New package matching your subscriptions:</b>`,

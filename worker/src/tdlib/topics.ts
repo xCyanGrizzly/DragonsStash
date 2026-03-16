@@ -107,12 +107,10 @@ export async function getForumTopicList(
 
     for (const t of result.topics) {
       if (!t.info?.message_thread_id) continue;
-      // Skip the "General" topic — it's not creator-specific
-      if (t.info.is_general) continue;
 
       topics.push({
         topicId: BigInt(t.info.message_thread_id),
-        name: t.info.name ?? "Unnamed",
+        name: t.info.is_general ? "General" : (t.info.name ?? "Unnamed"),
       });
     }
 

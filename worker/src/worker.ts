@@ -559,9 +559,11 @@ export async function runWorkerForAccount(
       }
 
       // ── Done ──
+      await throttled.flush();
       await completeIngestionRun(activeRunId, counters);
       accountLog.info({ counters }, "Ingestion run completed");
     } finally {
+      await throttled.flush();
       await closeTdlibClient(client);
     }
   } catch (err) {

@@ -288,22 +288,6 @@ export async function setChannelType(
   }
 }
 
-export async function triggerChannelSync(): Promise<ActionResult> {
-  const admin = await requireAdmin();
-  if (!admin.success) return admin;
-
-  try {
-    // Signal the worker to do a channel sync via pg_notify
-    await prisma.$queryRawUnsafe(
-      `SELECT pg_notify('channel_sync', 'requested')`
-    );
-    revalidatePath(REVALIDATE_PATH);
-    return { success: true, data: undefined };
-  } catch {
-    return { success: false, error: "Failed to trigger channel sync" };
-  }
-}
-
 /**
  * Reset all scan progress for a channel so the worker will re-process it
  * from the very beginning on the next ingestion cycle.

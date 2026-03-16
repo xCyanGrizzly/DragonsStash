@@ -1,7 +1,7 @@
 import { config } from "./util/config.js";
 import { logger } from "./util/logger.js";
 import { db, pool } from "./db/client.js";
-import { createBotClient, closeBotClient, onBotUpdate } from "./tdlib/client.js";
+import { createBotClient, closeBotClient, onBotUpdate, getUser } from "./tdlib/client.js";
 import { startSendListener, stopSendListener } from "./send-listener.js";
 import { handleMessage } from "./commands.js";
 import { mkdir } from "fs/promises";
@@ -49,14 +49,27 @@ async function main(): Promise<void> {
         const userId = senderId.user_id as number;
 
         if (text && userId) {
-          // Get user info for display name (async but fire-and-forget for perf)
-          handleMessage({
-            chatId: BigInt(chatId),
-            userId: BigInt(userId),
-            text,
-            firstName: "User", // TDLib provides this via a separate getUser call
-            username: undefined,
-          }).catch((err) => {
+          (async () => {
+            let firstName = "User";
+            let lastName: string | undefined;
+            let username: string | undefined;
+            try {
+              const userInfo = await getUser(userId);
+              firstName = userInfo.firstName;
+              lastName = userInfo.lastName;
+              username = userInfo.username;
+            } catch {
+              // Fall back to defaults if getUser fails
+            }
+            await handleMessage({
+              chatId: BigInt(chatId),
+              userId: BigInt(userId),
+              text,
+              firstName,
+              lastName,
+              username,
+            });
+          })().catch((err) => {
             log.error({ err, chatId, userId }, "Failed to handle message");
           });
         }

@@ -83,7 +83,10 @@
       "Bash(git -C /mnt/c/Users/A00963355/OneDrive - Amaris Zorggroep/Documents/VScodeProjects/DragonsStash log --oneline -10)",
       "Bash(git -C \"C:/Users/A00963355/OneDrive - Amaris Zorggroep/Documents/VScodeProjects/DragonsStash\" status --short)",
       "Bash(timeout:*)",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(wait:*)"
     ]
   }
 }

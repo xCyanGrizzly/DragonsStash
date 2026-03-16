@@ -144,6 +144,28 @@ export async function sendPhotoMessage(
 }
 
 /**
+ * Get basic info about a Telegram user (name, username).
+ */
+export async function getUser(
+  userId: number
+): Promise<{ firstName: string; lastName?: string; username?: string }> {
+  if (!client) throw new Error("Bot client not initialized");
+  const user = (await client.invoke({
+    _: "getUser",
+    user_id: userId,
+  })) as {
+    first_name?: string;
+    last_name?: string;
+    usernames?: { editable_username?: string };
+  };
+  return {
+    firstName: user.first_name ?? "User",
+    lastName: user.last_name || undefined,
+    username: user.usernames?.editable_username || undefined,
+  };
+}
+
+/**
  * Get updates from TDLib. The bot listens for new messages this way.
  */
 export function onBotUpdate(

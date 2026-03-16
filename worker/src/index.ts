@@ -36,11 +36,13 @@ async function main(): Promise<void> {
 // Graceful shutdown
 function shutdown(signal: string): void {
   log.info({ signal }, "Shutdown signal received");
-  stopScheduler();
+
+  // Stop accepting new work
   stopFetchListener();
 
-  // Close DB connections
-  Promise.all([db.$disconnect(), pool.end()])
+  // Wait for any active cycle to finish before closing DB
+  stopScheduler()
+    .then(() => Promise.all([db.$disconnect(), pool.end()]))
     .then(() => {
       log.info("Shutdown complete");
       process.exit(0);

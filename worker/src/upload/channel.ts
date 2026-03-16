@@ -76,6 +76,10 @@ export async function uploadToChannel(
 /**
  * Send a single file message and wait for Telegram to confirm the upload.
  * Returns the final server-assigned message ID.
+ *
+ * IMPORTANT: The update listener is attached BEFORE sending the message to
+ * avoid a race where fast uploads (cached files) complete before the listener
+ * is registered, which would cause the promise to hang forever.
  */
 async function sendAndWaitForUpload(
   client: Client,
@@ -85,41 +89,10 @@ async function sendAndWaitForUpload(
   fileName: string,
   fileSizeMB: number
 ): Promise<bigint> {
-  // Send the message — this returns a temporary message immediately.
-  // Wrapped in withFloodWait to handle Telegram rate limits on upload.
-  const tempMsg = (await withFloodWait(
-    () =>
-      client.invoke({
-        _: "sendMessage",
-        chat_id: Number(chatId),
-        input_message_content: {
-          _: "inputMessageDocument",
-          document: {
-            _: "inputFileLocal",
-            path: filePath,
-          },
-          caption: caption
-            ? {
-                _: "formattedText",
-                text: caption,
-              }
-            : undefined,
-        },
-      }),
-    "sendMessage:upload"
-  )) as { id: number };
-
-  const tempMsgId = tempMsg.id;
-
-  log.debug(
-    { fileName, tempMsgId },
-    "Message queued, waiting for upload confirmation"
-  );
-
-  // Wait for the actual upload to complete
   return new Promise<bigint>((resolve, reject) => {
     let settled = false;
     let lastLoggedPercent = 0;
+    let tempMsgId: number | null = null;
 
     // Timeout: 10 minutes per GB, minimum 10 minutes
     const timeoutMs = Math.max(
@@ -162,7 +135,7 @@ async function sendAndWaitForUpload(
       if (update?._ === "updateMessageSendSucceeded") {
         const msg = update.message;
         const oldMsgId = update.old_message_id;
-        if (oldMsgId === tempMsgId) {
+        if (tempMsgId !== null && oldMsgId === tempMsgId) {
           if (!settled) {
             settled = true;
             cleanup();
@@ -179,7 +152,7 @@ async function sendAndWaitForUpload(
       // Upload failed
       if (update?._ === "updateMessageSendFailed") {
         const oldMsgId = update.old_message_id;
-        if (oldMsgId === tempMsgId) {
+        if (tempMsgId !== null && oldMsgId === tempMsgId) {
           if (!settled) {
             settled = true;
             cleanup();
@@ -195,7 +168,47 @@ async function sendAndWaitForUpload(
       client.off("update", handleUpdate);
     };
 
+    // Attach listener BEFORE sending to avoid missing fast completions
     client.on("update", handleUpdate);
+
+    // Send the message — this returns a temporary message immediately.
+    // Wrapped in withFloodWait to handle Telegram rate limits on upload.
+    withFloodWait(
+      () =>
+        client.invoke({
+          _: "sendMessage",
+          chat_id: Number(chatId),
+          input_message_content: {
+            _: "inputMessageDocument",
+            document: {
+              _: "inputFileLocal",
+              path: filePath,
+            },
+            caption: caption
+              ? {
+                  _: "formattedText",
+                  text: caption,
+                }
+              : undefined,
+          },
+        }),
+      "sendMessage:upload"
+    )
+      .then((result) => {
+        const tempMsg = result as { id: number };
+        tempMsgId = tempMsg.id;
+        log.debug(
+          { fileName, tempMsgId },
+          "Message queued, waiting for upload confirmation"
+        );
+      })
+      .catch((err) => {
+        if (!settled) {
+          settled = true;
+          cleanup();
+          reject(err);
+        }
+      });
   });
 }
 

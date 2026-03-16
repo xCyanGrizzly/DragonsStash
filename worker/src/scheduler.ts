@@ -9,6 +9,7 @@ const log = childLogger("scheduler");
 let running = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let cycleCount = 0;
+let activeCyclePromise: Promise<void> | null = null;
 
 /**
  * Maximum time for a single ingestion cycle (ms).
@@ -107,7 +108,9 @@ function scheduleNext(): void {
   );
 
   timer = setTimeout(async () => {
-    await runCycle();
+    activeCyclePromise = runCycle();
+    await activeCyclePromise;
+    activeCyclePromise = null;
     scheduleNext();
   }, delay);
 }
@@ -125,7 +128,9 @@ export async function startScheduler(): Promise<void> {
   );
 
   // Run immediately on start
-  await runCycle();
+  activeCyclePromise = runCycle();
+  await activeCyclePromise;
+  activeCyclePromise = null;
 
   // Then schedule recurring cycles
   scheduleNext();
@@ -146,11 +151,21 @@ export async function triggerImmediateCycle(): Promise<void> {
 
 /**
  * Stop the scheduler gracefully.
+ * Returns a promise that resolves when any active cycle finishes,
+ * so callers can wait before closing DB connections.
  */
-export function stopScheduler(): void {
+export function stopScheduler(): Promise<void> {
   if (timer) {
     clearTimeout(timer);
     timer = null;
   }
+  if (activeCyclePromise) {
+    log.info("Scheduler stopping — waiting for active cycle to finish");
+    return activeCyclePromise.finally(() => {
+      activeCyclePromise = null;
+      log.info("Scheduler stopped");
+    });
+  }
   log.info("Scheduler stopped");
+  return Promise.resolve();
 }
