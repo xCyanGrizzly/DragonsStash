@@ -2,6 +2,7 @@ import tdl from "tdl";
 import { getTdjson } from "prebuilt-tdlib";
 import { config } from "../util/config.js";
 import { childLogger } from "../util/logger.js";
+import { withFloodWait } from "../util/flood-wait.js";
 
 const log = childLogger("tdlib-bot");
 
@@ -66,14 +67,18 @@ export async function copyMessageToUser(
 ): Promise<void> {
   if (!client) throw new Error("Bot client not initialized");
 
-  await client.invoke({
-    _: "forwardMessages",
-    chat_id: Number(toUserId),
-    from_chat_id: Number(fromChatId),
-    message_ids: [Number(messageId)],
-    send_copy: true,
-    remove_caption: false,
-  });
+  await withFloodWait(
+    () =>
+      client.invoke({
+        _: "forwardMessages",
+        chat_id: Number(toUserId),
+        from_chat_id: Number(fromChatId),
+        message_ids: [Number(messageId)],
+        send_copy: true,
+        remove_caption: false,
+      }),
+    "copyMessageToUser"
+  );
 }
 
 /**
@@ -87,20 +92,28 @@ export async function sendTextMessage(
   if (!client) throw new Error("Bot client not initialized");
 
   // Parse the text first
-  const parsed = await client.invoke({
-    _: "parseTextEntities",
-    text,
-    parse_mode: { _: parseMode, version: parseMode === "textParseModeMarkdown" ? 2 : 0 },
-  });
+  const parsed = await withFloodWait(
+    () =>
+      client.invoke({
+        _: "parseTextEntities",
+        text,
+        parse_mode: { _: parseMode, version: parseMode === "textParseModeMarkdown" ? 2 : 0 },
+      }),
+    "parseTextEntities"
+  );
 
-  await client.invoke({
-    _: "sendMessage",
-    chat_id: Number(chatId),
-    input_message_content: {
-      _: "inputMessageText",
-      text: parsed,
-    },
-  });
+  await withFloodWait(
+    () =>
+      client.invoke({
+        _: "sendMessage",
+        chat_id: Number(chatId),
+        input_message_content: {
+          _: "inputMessageText",
+          text: parsed,
+        },
+      }),
+    "sendTextMessage"
+  );
 }
 
 /**
@@ -121,23 +134,31 @@ export async function sendPhotoMessage(
   try {
     await writeFile(tempPath, photoData);
 
-    const parsedCaption = await client.invoke({
-      _: "parseTextEntities",
-      text: caption,
-      parse_mode: { _: "textParseModeMarkdown", version: 2 },
-    });
+    const parsedCaption = await withFloodWait(
+      () =>
+        client.invoke({
+          _: "parseTextEntities",
+          text: caption,
+          parse_mode: { _: "textParseModeMarkdown", version: 2 },
+        }),
+      "parsePhotoCaption"
+    );
 
-    await client.invoke({
-      _: "sendMessage",
-      chat_id: Number(chatId),
-      input_message_content: {
-        _: "inputMessagePhoto",
-        photo: { _: "inputFileLocal", path: tempPath },
-        caption: parsedCaption,
-        width: 0,
-        height: 0,
-      },
-    });
+    await withFloodWait(
+      () =>
+        client.invoke({
+          _: "sendMessage",
+          chat_id: Number(chatId),
+          input_message_content: {
+            _: "inputMessagePhoto",
+            photo: { _: "inputFileLocal", path: tempPath },
+            caption: parsedCaption,
+            width: 0,
+            height: 0,
+          },
+        }),
+      "sendPhotoMessage"
+    );
   } finally {
     await unlink(tempPath).catch(() => {});
   }
@@ -150,10 +171,14 @@ export async function getUser(
   userId: number
 ): Promise<{ firstName: string; lastName?: string; username?: string }> {
   if (!client) throw new Error("Bot client not initialized");
-  const user = (await client.invoke({
-    _: "getUser",
-    user_id: userId,
-  })) as {
+  const user = (await withFloodWait(
+    () =>
+      client.invoke({
+        _: "getUser",
+        user_id: userId,
+      }),
+    "getUser"
+  )) as {
     first_name?: string;
     last_name?: string;
     usernames?: { editable_username?: string };

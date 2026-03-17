@@ -1,0 +1,9 @@
+{
+  "run_id": "eval-2-without_skill",
+  "expectations": [
+    {"text": "identifies_retry_as_fix", "passed": true, "evidence": "Correctly identifies that invokeWithTimeout already wraps calls in withFloodWait. Adds adaptive backoff at pagination level."},
+    {"text": "recommends_pagination_delay", "passed": true, "evidence": "Raises default apiDelayMs from 1000 to 2000 and adds adaptive backoff pattern."},
+    {"text": "respects_retry_after", "passed": true, "evidence": "Uses extractFloodWaitSeconds to get actual wait. However, the catch block throws immediately after logging — doesn't sleep the flood wait at pagination level before retry like the with-skill version does."},
+    {"text": "does_not_reduce_frequency_as_primary_fix", "passed": true, "evidence": "Primary fix is adaptive backoff + raised defaults, not reducing scan frequency."}
+  ]
+}

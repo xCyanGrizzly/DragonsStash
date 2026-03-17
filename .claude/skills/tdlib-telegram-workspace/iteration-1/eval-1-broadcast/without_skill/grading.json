@@ -1,0 +1,10 @@
+{
+  "run_id": "eval-1-without_skill",
+  "expectations": [
+    {"text": "uses_sequential_queue", "passed": true, "evidence": "Uses for...of loop over links, sends one at a time. No Promise.all."},
+    {"text": "uses_flood_wait_retry", "passed": false, "evidence": "No withFloodWait wrapper. Bare sendTextMessage calls in both send-listener handleBroadcast and commands handleBroadcastCommand. No flood-wait.ts utility created."},
+    {"text": "has_per_message_delay", "passed": false, "evidence": "No sleep/delay between sends in either the send-listener handler or the command handler."},
+    {"text": "handles_per_user_errors", "passed": true, "evidence": "try/catch per user with sent++/failed++ counters, continues to next user."},
+    {"text": "has_api_endpoint", "passed": true, "evidence": "Created src/app/api/telegram/bot/broadcast/route.ts with admin auth, 4096-char limit, pg_notify."}
+  ]
+}

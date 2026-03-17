@@ -1,0 +1,12 @@
+{
+  "eval_id": 1,
+  "eval_name": "broadcast-to-all-users",
+  "prompt": "Add a new bot command /broadcast that sends a text message to ALL users who have a TelegramLink in the database. The admin triggers it from the web app. Add it to the bot's command handler and create an API endpoint that triggers it.",
+  "assertions": [
+    {"text": "uses_sequential_queue: Messages sent one at a time, no Promise.all or concurrent sends", "type": "required"},
+    {"text": "uses_flood_wait_retry: Each send call wrapped in withFloodWait or equivalent FLOOD_WAIT-aware retry", "type": "required"},
+    {"text": "has_per_message_delay: Includes a sleep/delay between individual sends", "type": "recommended"},
+    {"text": "handles_per_user_errors: One failed send does not abort the entire broadcast loop", "type": "required"},
+    {"text": "has_api_endpoint: Creates an API route or server action to trigger the broadcast from the web app", "type": "required"}
+  ]
+}

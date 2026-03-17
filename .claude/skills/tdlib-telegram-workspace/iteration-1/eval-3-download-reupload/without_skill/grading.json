@@ -1,0 +1,10 @@
+{
+  "run_id": "eval-3-without_skill",
+  "expectations": [
+    {"text": "uses_flood_wait_retry", "passed": true, "evidence": "Delegates to existing downloadFile and uploadToChannel which use withFloodWait internally. Notes 'Both are wrapped with withFloodWait internally'."},
+    {"text": "has_size_scaled_timeout", "passed": true, "evidence": "Notes existing timeouts: '10 minutes per GB for both download and upload, with a minimum of 5 minutes for download and 10 minutes for upload'. Inherited from composed functions."},
+    {"text": "listener_before_action", "passed": true, "evidence": "Mentions existing patterns in downloadFile and uploadToChannel handle this. But does NOT explicitly call it out as a critical concern or verify it."},
+    {"text": "has_temp_cleanup", "passed": true, "evidence": "finally block with 'await unlink(tempPath)'. Uses tempSubdir for isolation."},
+    {"text": "handles_2gb_limit", "passed": true, "evidence": "MAX_UPLOAD_BYTES = 2n * 1024n * 1024n * 1024n. Upfront validation with error directing to byteLevelSplit."}
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "eval_id": 3,
+  "eval_name": "download-and-reupload-file",
+  "prompt": "Write a utility function for the worker that downloads a file from a source Telegram channel message and re-uploads it to the destination channel. It needs to handle files up to 2GB and work reliably in Docker.",
+  "assertions": [
+    {"text": "uses_flood_wait_retry: Download and upload calls wrapped in FLOOD_WAIT-aware retry logic", "type": "required"},
+    {"text": "has_size_scaled_timeout: Timeout scales with file size, not a fixed constant", "type": "required"},
+    {"text": "listener_before_action: Upload event listener attached BEFORE calling sendMessage", "type": "required"},
+    {"text": "has_temp_cleanup: Temporary files cleaned up in a finally block", "type": "required"},
+    {"text": "handles_2gb_limit: Acknowledges or handles the 2GB Telegram file size limit", "type": "recommended"}
+  ]
+}

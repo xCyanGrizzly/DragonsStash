@@ -1,0 +1,10 @@
+{
+  "run_id": "eval-3-with_skill",
+  "expectations": [
+    {"text": "uses_flood_wait_retry", "passed": true, "evidence": "Delegates to existing downloadFile and uploadToChannel which internally use withFloodWait. Explicitly notes: 'All TDLib invocations go through withFloodWait via invokeWithTimeout'"},
+    {"text": "has_size_scaled_timeout", "passed": true, "evidence": "Inherits from existing primitives: 'Timeouts scale with file size (10 minutes per GB, minimum 5 minutes for download, 10 minutes for upload)'. Explicitly cited from skill."},
+    {"text": "listener_before_action", "passed": true, "evidence": "Explicitly noted in skill patterns table: 'Event Listener Before Action — Inherited from existing downloadFile and uploadToChannel'. The skill pattern is referenced."},
+    {"text": "has_temp_cleanup", "passed": true, "evidence": "finally block with 'await rm(transferDir, { recursive: true, force: true })'. Uses randomUUID for isolation."},
+    {"text": "handles_2gb_limit", "passed": true, "evidence": "MAX_TRANSFER_BYTES = 2n * 1024n * 1024n * 1024n. Upfront validation with clear error message."}
+  ]
+}

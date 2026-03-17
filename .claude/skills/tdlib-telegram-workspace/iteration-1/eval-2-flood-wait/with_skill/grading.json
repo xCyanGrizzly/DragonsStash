@@ -1,0 +1,9 @@
+{
+  "run_id": "eval-2-with_skill",
+  "expectations": [
+    {"text": "identifies_retry_as_fix", "passed": true, "evidence": "Identifies that withFloodWait already exists but the pagination loop needs its own adaptive backoff layer. Adds extractFloodWaitSeconds at pagination level."},
+    {"text": "recommends_pagination_delay", "passed": true, "evidence": "Keeps existing sleep(config.apiDelayMs) and makes it adaptive: doubles on FLOOD_WAIT, relaxes by 0.8x on success."},
+    {"text": "respects_retry_after", "passed": true, "evidence": "Extracts actual wait duration: 'await sleep(waitSec * 1000 + jitter)' using extractFloodWaitSeconds. Explicitly cites skill rule: 'Always respect the wait duration.'"},
+    {"text": "does_not_reduce_frequency_as_primary_fix", "passed": true, "evidence": "Primary fix is adaptive backoff at pagination level, not reducing scan frequency. Does not suggest lowering WORKER_INTERVAL_MINUTES."}
+  ]
+}

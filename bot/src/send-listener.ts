@@ -8,6 +8,7 @@ import {
   getGlobalDestinationChannel,
 } from "./db/queries.js";
 import { copyMessageToUser, sendTextMessage, sendPhotoMessage } from "./tdlib/client.js";
+import { sleep } from "./util/flood-wait.js";
 
 const log = childLogger("send-listener");
 
@@ -200,6 +201,9 @@ async function handleNewPackage(payload: string): Promise<void> {
           "Failed to notify subscriber"
         );
       });
+
+      // Rate limit delay between notifications (~20 msgs/sec, under 30 msgs/sec bot limit)
+      await sleep(50);
     }
   } catch (err) {
     log.error({ err, payload }, "Failed to process new_package notification");

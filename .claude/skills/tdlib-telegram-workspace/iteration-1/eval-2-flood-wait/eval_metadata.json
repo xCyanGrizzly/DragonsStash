@@ -1,0 +1,11 @@
+{
+  "eval_id": 2,
+  "eval_name": "flood-wait-during-scan",
+  "prompt": "The worker keeps crashing with 'FLOOD_WAIT_35' errors when scanning a source channel that has about 10,000 messages. It happens during the getChannelMessages pagination loop. How do I fix this?",
+  "assertions": [
+    {"text": "identifies_retry_as_fix: Recommends wrapping pagination calls in FLOOD_WAIT-aware retry logic", "type": "required"},
+    {"text": "recommends_pagination_delay: Mentions adding or increasing sleep between pages", "type": "required"},
+    {"text": "respects_retry_after: Fix extracts and uses the actual wait duration from the error, not a hardcoded value", "type": "required"},
+    {"text": "does_not_reduce_frequency_as_primary_fix: Does not suggest scanning less often as the main solution", "type": "required"}
+  ]
+}

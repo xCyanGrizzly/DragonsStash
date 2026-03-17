@@ -1,0 +1,23 @@
+{
+  "skill_name": "tdlib-telegram",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Add a new bot command /broadcast that sends a text message to ALL users who have a TelegramLink in the database. The admin triggers it from the web app. Add it to the bot's command handler and create an API endpoint that triggers it.",
+      "expected_output": "Code that uses a sequential send queue with withFloodWait wrapping each sendTextMessage call, a delay between sends (~50ms), and does NOT use Promise.all or concurrent sends. Should handle errors per-user without stopping the broadcast.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "The worker keeps crashing with 'FLOOD_WAIT_35' errors when scanning a source channel that has about 10,000 messages. It happens during the getChannelMessages pagination loop. How do I fix this?",
+      "expected_output": "Diagnosis that the apiDelayMs between pages may be too low or the retry logic isn't wrapping the pagination calls. Should recommend ensuring all getChatHistory/searchChatMessages calls go through withFloodWait/invokeWithTimeout, and that sleep(config.apiDelayMs) exists between pages. Should NOT suggest reducing scan frequency as the primary fix.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Write a utility function for the worker that downloads a file from a source Telegram channel message and re-uploads it to the destination channel. It needs to handle files up to 2GB and work reliably in Docker.",
+      "expected_output": "Code that: (1) wraps download in withFloodWait with size-scaled timeout, (2) attaches upload event listener BEFORE calling sendMessage, (3) uses temp directory with cleanup in finally block, (4) handles the 2GB Telegram limit correctly, (5) uses try/finally for client cleanup if applicable.",
+      "files": []
+    }
+  ]
+}

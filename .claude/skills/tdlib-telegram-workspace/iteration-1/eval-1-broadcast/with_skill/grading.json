@@ -1,0 +1,10 @@
+{
+  "run_id": "eval-1-with_skill",
+  "expectations": [
+    {"text": "uses_sequential_queue", "passed": true, "evidence": "Uses a for...of loop iterating links one at a time. No Promise.all. Comment: '~20 msgs/sec — well under the 30 msgs/sec global bot limit'"},
+    {"text": "uses_flood_wait_retry", "passed": true, "evidence": "Each send wrapped in withFloodWait(): 'await withFloodWait(() => sendTextMessage(link.telegramUserId, data.message, \"textParseModeHTML\"))'. Created a new bot/src/util/flood-wait.ts with full extractFloodWaitSeconds + retry logic."},
+    {"text": "has_per_message_delay", "passed": true, "evidence": "await sleep(50) after each send — explicitly commented as '~20 msgs/sec'"},
+    {"text": "handles_per_user_errors", "passed": true, "evidence": "try/catch around each send with 'failed++' counter, continues to next user"},
+    {"text": "has_api_endpoint", "passed": true, "evidence": "Created src/app/api/telegram/bot/broadcast/route.ts with admin auth, 4096-char validation, pg_notify('bot_broadcast')"}
+  ]
+}

@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eval Review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --bg: #faf9f5;
+      --surface: #ffffff;
+      --border: #e8e6dc;
+      --text: #141413;
+      --text-muted: #b0aea5;
+      --accent: #d97757;
+      --accent-hover: #c4613f;
+      --green: #788c5d;
+      --green-bg: #eef2e8;
+      --red: #c44;
+      --red-bg: #fceaea;
+      --header-bg: #141413;
+      --header-text: #faf9f5;
+      --radius: 6px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Lora', Georgia, serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ---- Header ---- */
+    .header {
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .header h1 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+    }
+    .header .instructions {
+      font-size: 0.8rem;
+      opacity: 0.7;
+      margin-top: 0.25rem;
+    }
+    .header .progress {
+      font-size: 0.875rem;
+      opacity: 0.8;
+      text-align: right;
+    }
+
+    /* ---- Main content ---- */
+    .main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.5rem 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    /* ---- Sections ---- */
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      flex-shrink: 0;
+    }
+    .section-header {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.75rem 1rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .section-body {
+      padding: 1rem;
+    }
+
+    /* ---- Config badge ---- */
+    .config-badge {
+      display: inline-block;
+      padding: 0.2rem 0.625rem;
+      border-radius: 9999px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-left: 0.75rem;
+      vertical-align: middle;
+    }
+    .config-badge.config-primary {
+      background: rgba(33, 150, 243, 0.12);
+      color: #1976d2;
+    }
+    .config-badge.config-baseline {
+      background: rgba(255, 193, 7, 0.15);
+      color: #f57f17;
+    }
+
+    /* ---- Prompt ---- */
+    .prompt-text {
+      white-space: pre-wrap;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+    }
+
+    /* ---- Outputs ---- */
+    .output-file {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .output-file + .output-file {
+      margin-top: 1rem;
+    }
+    .output-file-header {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .output-file-header .dl-btn {
+      font-size: 0.7rem;
+      color: var(--accent);
+      text-decoration: none;
+      cursor: pointer;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-weight: 500;
+      opacity: 0.8;
+    }
+    .output-file-header .dl-btn:hover {
+      opacity: 1;
+      text-decoration: underline;
+    }
+    .output-file-content {
+      padding: 0.75rem;
+      overflow-x: auto;
+    }
+    .output-file-content pre {
+      font-size: 0.8125rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    }
+    .output-file-content img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 4px;
+    }
+    .output-file-content iframe {
+      width: 100%;
+      height: 600px;
+      border: none;
+    }
+    .output-file-content table {
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+      width: 100%;
+    }
+    .output-file-content table td,
+    .output-file-content table th {
+      border: 1px solid var(--border);
+      padding: 0.375rem 0.5rem;
+      text-align: left;
+    }
+    .output-file-content table th {
+      background: var(--bg);
+      font-weight: 600;
+    }
+    .output-file-content .download-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+    .output-file-content .download-link:hover {
+      background: var(--border);
+    }
+    .empty-state {
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    /* ---- Feedback ---- */
+    .prev-feedback {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.625rem 0.75rem;
+      margin-top: 0.75rem;
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .prev-feedback-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.25rem;
+      color: var(--text-muted);
+    }
+    .feedback-textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 0.9375rem;
+      line-height: 1.5;
+      resize: vertical;
+      color: var(--text);
+    }
+    .feedback-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+    .feedback-status {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.5rem;
+      min-height: 1.1em;
+    }
+
+    /* ---- Grades (collapsible) ---- */
+    .grades-toggle {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+    .grades-toggle:hover {
+      color: var(--accent);
+    }
+    .grades-toggle .arrow {
+      margin-right: 0.5rem;
+      transition: transform 0.15s;
+      font-size: 0.75rem;
+    }
+    .grades-toggle .arrow.open {
+      transform: rotate(90deg);
+    }
+    .grades-content {
+      display: none;
+      margin-top: 0.75rem;
+    }
+    .grades-content.open {
+      display: block;
+    }
+    .grades-summary {
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .grade-badge {
+      display: inline-block;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .grade-pass { background: var(--green-bg); color: var(--green); }
+    .grade-fail { background: var(--red-bg); color: var(--red); }
+    .assertion-list {
+      list-style: none;
+    }
+    .assertion-item {
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8125rem;
+    }
+    .assertion-item:last-child { border-bottom: none; }
+    .assertion-status {
+      font-weight: 600;
+      margin-right: 0.5rem;
+    }
+    .assertion-status.pass { color: var(--green); }
+    .assertion-status.fail { color: var(--red); }
+    .assertion-evidence {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      margin-top: 0.25rem;
+      padding-left: 1.5rem;
+    }
+
+    /* ---- View tabs ---- */
+    .view-tabs {
+      display: flex;
+      gap: 0;
+      padding: 0 2rem;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .view-tab {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.625rem 1.25rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+    .view-tab:hover { color: var(--text); }
+    .view-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .view-panel { display: none; }
+    .view-panel.active { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+    /* ---- Benchmark view ---- */
+    .benchmark-view {
+      padding: 1.5rem 2rem;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .benchmark-table {
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.8125rem;
+      width: 100%;
+      margin-bottom: 1.5rem;
+    }
+    .benchmark-table th, .benchmark-table td {
+      padding: 0.625rem 0.75rem;
+      text-align: left;
+      border: 1px solid var(--border);
+    }
+    .benchmark-table th {
+      font-family: 'Poppins', sans-serif;
+      background: var(--header-bg);
+      color: var(--header-text);
+      font-weight: 500;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .benchmark-table tr:hover { background: var(--bg); }
+    .benchmark-table tr.benchmark-row-with { background: rgba(33, 150, 243, 0.06); }
+    .benchmark-table tr.benchmark-row-without { background: rgba(255, 193, 7, 0.06); }
+    .benchmark-table tr.benchmark-row-with:hover { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-without:hover { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-table tr.benchmark-row-avg { font-weight: 600; border-top: 2px solid var(--border); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-with { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-without { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-delta-positive { color: var(--green); font-weight: 600; }
+    .benchmark-delta-negative { color: var(--red); font-weight: 600; }
+    .benchmark-notes {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+    }
+    .benchmark-notes h3 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+    }
+    .benchmark-notes ul {
+      list-style: disc;
+      padding-left: 1.25rem;
+    }
+    .benchmark-notes li {
+      font-size: 0.8125rem;
+      line-height: 1.6;
+      margin-bottom: 0.375rem;
+    }
+    .benchmark-empty {
+      color: var(--text-muted);
+      font-style: italic;
+      text-align: center;
+      padding: 3rem;
+    }
+
+    /* ---- Navigation ---- */
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 2rem;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .nav-btn {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text);
+      transition: all 0.15s;
+    }
+    .nav-btn:hover:not(:disabled) {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .nav-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .done-btn {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.5rem 1.5rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .done-btn:hover {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .done-btn.ready {
+      border: none;
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+    }
+    .done-btn.ready:hover {
+      background: var(--accent-hover);
+    }
+    /* ---- Done overlay ---- */
+    .done-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+    }
+    .done-overlay.visible {
+      display: flex;
+    }
+    .done-card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 2rem 3rem;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      max-width: 500px;
+    }
+    .done-card h2 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .done-card p {
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+      line-height: 1.5;
+    }
+    .done-card .btn-row {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+    }
+    .done-card button {
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+    .done-card button:hover {
+      background: var(--bg);
+    }
+    /* ---- Toast ---- */
+    .toast {
+      position: fixed;
+      bottom: 5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 0.625rem 1.25rem;
+      border-radius: var(--radius);
+      font-size: 0.875rem;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      z-index: 200;
+    }
+    .toast.visible {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="app" style="height:100vh; display:flex; flex-direction:column;">
+    <div class="header">
+      <div>
+        <h1>Eval Review: <span id="skill-name"></span></h1>
+        <div class="instructions">Review each output and leave feedback below. Navigate with arrow keys or buttons. When done, copy feedback and paste into Claude Code.</div>
+      </div>
+      <div class="progress" id="progress"></div>
+    </div>
+
+    <!-- View tabs (only shown when benchmark data exists) -->
+    <div class="view-tabs" id="view-tabs" style="display:none;">
+      <button class="view-tab active" onclick="switchView('outputs')">Outputs</button>
+      <button class="view-tab" onclick="switchView('benchmark')">Benchmark</button>
+    </div>
+
+    <!-- Outputs panel (qualitative review) -->
+    <div class="view-panel active" id="panel-outputs">
+    <div class="main">
+      <!-- Prompt -->
+      <div class="section">
+        <div class="section-header">Prompt <span class="config-badge" id="config-badge" style="display:none;"></span></div>
+        <div class="section-body">
+          <div class="prompt-text" id="prompt-text"></div>
+        </div>
+      </div>
+
+      <!-- Outputs -->
+      <div class="section">
+        <div class="section-header">Output</div>
+        <div class="section-body" id="outputs-body">
+          <div class="empty-state">No output files found</div>
+        </div>
+      </div>
+
+      <!-- Previous Output (collapsible) -->
+      <div class="section" id="prev-outputs-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="togglePrevOutputs()">
+            <span class="arrow" id="prev-outputs-arrow">&#9654;</span>
+            Previous Output
+          </div>
+        </div>
+        <div class="grades-content" id="prev-outputs-content"></div>
+      </div>
+
+      <!-- Grades (collapsible) -->
+      <div class="section" id="grades-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="toggleGrades()">
+            <span class="arrow" id="grades-arrow">&#9654;</span>
+            Formal Grades
+          </div>
+        </div>
+        <div class="grades-content" id="grades-content"></div>
+      </div>
+
+      <!-- Feedback -->
+      <div class="section">
+        <div class="section-header">Your Feedback</div>
+        <div class="section-body">
+          <textarea
+            class="feedback-textarea"
+            id="feedback"
+            placeholder="What do you think of this output? Any issues, suggestions, or things that look great?"
+          ></textarea>
+          <div class="feedback-status" id="feedback-status"></div>
+          <div class="prev-feedback" id="prev-feedback" style="display:none;">
+            <div class="prev-feedback-label">Previous feedback</div>
+            <div id="prev-feedback-text"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav" id="outputs-nav">
+      <button class="nav-btn" id="prev-btn" onclick="navigate(-1)">&#8592; Previous</button>
+      <button class="done-btn" id="done-btn" onclick="showDoneDialog()">Submit All Reviews</button>
+      <button class="nav-btn" id="next-btn" onclick="navigate(1)">Next &#8594;</button>
+    </div>
+    </div><!-- end panel-outputs -->
+
+    <!-- Benchmark panel (quantitative stats) -->
+    <div class="view-panel" id="panel-benchmark">
+      <div class="benchmark-view" id="benchmark-content">
+        <div class="benchmark-empty">No benchmark data available. Run a benchmark to see quantitative results here.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Done overlay -->
+  <div class="done-overlay" id="done-overlay">
+    <div class="done-card">
+      <h2>Review Complete</h2>
+      <p>Your feedback has been saved. Go back to your Claude Code session and tell Claude you're done reviewing.</p>
+      <div class="btn-row">
+        <button onclick="closeDoneDialog()">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ---- Embedded data (injected by generate_review.py) ----
+    const EMBEDDED_DATA = {"skill_name": "tdlib-telegram", "runs": [{"id": "eval-1-broadcast-with_skill", "prompt": "Add a new bot command /broadcast that sends a text message to ALL users who have a TelegramLink in the database. The admin triggers it from the web app. Add it to the bot's command handler and create an API endpoint that triggers it.", "eval_id": 1, "outputs": [{"name": "response.md", "type": "text", "content": "# /broadcast Implementation Plan\n\n## Approach\n\nThe broadcast feature has two parts:\n\n1. **API endpoint** (`POST /api/telegram/bot/broadcast`) \u00e2\u20ac\u201d called from the web app by an admin. It accepts a `message` string, looks up ALL `TelegramLink` records in the database, and triggers the bot to send the message to each linked user via `pg_notify`.\n2. **Bot-side handler** \u00e2\u20ac\u201d a new `bot_broadcast` pg_notify channel listener in `send-listener.ts` that receives the broadcast payload and sequentially sends the text message to every linked Telegram user.\n\nThe `/broadcast` bot command itself is not a user-facing Telegram command (regular users should not be able to trigger it). It is triggered exclusively through the admin API endpoint.\n\n## Skill Patterns Applied\n\n- **Sequential Send Queue** (from skill): Never fire concurrent sends to multiple users. The broadcast iterates users sequentially with `await sleep(50)` between sends (~20 msgs/sec, well under the 30 msgs/sec global bot limit).\n- **FLOOD_WAIT handling** (from skill): Every `sendTextMessage` call is wrapped with `withFloodWait()` which extracts the wait duration from errors and retries with jitter.\n- **Anti-pattern avoidance**: No `Promise.all(users.map(...))` \u00e2\u20ac\u201d that would instantly hit the 30 msg/sec global limit.\n- **Message text length limit**: The API endpoint validates that the broadcast message does not exceed 4,096 characters (Telegram's limit from the skill).\n\n---\n\n## File 1: `bot/src/util/flood-wait.ts` (NEW)\n\nExtracted from the skill's recommended FLOOD_WAIT pattern so it can be reused by both existing send logic and the new broadcast logic.\n\n```typescript\nimport { childLogger } from \"./logger.js\";\n\nconst log = childLogger(\"flood-wait\");\n\nfunction sleep(ms: number): Promise<void> {\n  return new Promise((resolve) => setTimeout(resolve, ms));\n}\n\n/**\n * Extract the mandatory wait duration (in seconds) from a Telegram\n * FLOOD_WAIT error.  Returns null when the error is not rate-limit related.\n */\nexport function extractFloodWaitSeconds(err: unknown): number | null {\n  const message = err instanceof Error ? err.message : String(err);\n\n  // Pattern 1: FLOOD_WAIT_30\n  const flood = message.match(/FLOOD_WAIT_(\\d+)/i);\n  if (flood) return parseInt(flood[1], 10);\n\n  // Pattern 2: \"retry after 30\"\n  const retry = message.match(/retry after (\\d+)/i);\n  if (retry) return parseInt(retry[1], 10);\n\n  // Pattern 3: HTTP 429 without explicit seconds\n  if (String((err as any)?.code) === \"429\") return 30;\n\n  return null; // Not a rate limit error\n}\n\n/**\n * Wrap any async Telegram operation with automatic FLOOD_WAIT retry.\n * Adds random jitter (1-5 s) to prevent thundering-herd retries.\n */\nexport async function withFloodWait<T>(\n  fn: () => Promise<T>,\n  maxRetries = 5\n): Promise<T> {\n  for (let attempt = 0; attempt <= maxRetries; attempt++) {\n    try {\n      return await fn();\n    } catch (err) {\n      const wait = extractFloodWaitSeconds(err);\n      if (wait === null || attempt >= maxRetries) throw err;\n\n      const jitter = 1000 + Math.random() * 4000;\n      log.warn(\n        { wait, attempt, jitter: Math.round(jitter) },\n        \"FLOOD_WAIT received \u00e2\u20ac\u201d backing off\"\n      );\n      await sleep(wait * 1000 + jitter);\n    }\n  }\n  throw new Error(\"Unreachable\");\n}\n\nexport { sleep };\n```\n\n---\n\n## File 2: `bot/src/db/queries.ts` (MODIFIED \u00e2\u20ac\u201d add one function)\n\nAdd this function at the bottom of the existing file, after the `getGlobalDestinationChannel` function:\n\n```typescript\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac Broadcast \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n\n/**\n * Fetch ALL TelegramLink records (users who linked their Telegram account).\n * Used by the broadcast feature to send a message to every linked user.\n */\nexport async function getAllTelegramLinks() {\n  return db.telegramLink.findMany({\n    select: {\n      telegramUserId: true,\n      telegramName: true,\n    },\n  });\n}\n```\n\n---\n\n## File 3: `bot/src/send-listener.ts` (MODIFIED \u00e2\u20ac\u201d add broadcast channel)\n\nAdd the `bot_broadcast` channel to the existing listener. The changes are:\n\n### 3a. Add import for the new query and flood-wait utility\n\nAt the top of the file, update the imports:\n\n```typescript\nimport {\n  getPendingSendRequest,\n  updateSendRequest,\n  findMatchingSubscriptions,\n  getGlobalDestinationChannel,\n  getAllTelegramLinks,           // \u00e2\u2020\ufffd NEW\n} from \"./db/queries.js\";\nimport { copyMessageToUser, sendTextMessage, sendPhotoMessage } from \"./tdlib/client.js\";\nimport { withFloodWait, sleep } from \"./util/flood-wait.js\"; // \u00e2\u2020\ufffd NEW\n```\n\n### 3b. Subscribe to the new pg_notify channel\n\nInside `connectListener()`, after the existing LISTEN statements, add:\n\n```typescript\nawait pgClient.query(\"LISTEN bot_broadcast\");\n```\n\n### 3c. Add the notification handler\n\nInside the `pgClient.on(\"notification\", ...)` callback, add the new branch:\n\n```typescript\npgClient.on(\"notification\", (msg) => {\n  if (msg.channel === \"bot_send\" && msg.payload) {\n    handleBotSend(msg.payload);\n  } else if (msg.channel === \"new_package\" && msg.payload) {\n    handleNewPackage(msg.payload);\n  } else if (msg.channel === \"bot_broadcast\" && msg.payload) {  // \u00e2\u2020\ufffd NEW\n    handleBroadcast(msg.payload);\n  }\n});\n```\n\nUpdate the log message:\n\n```typescript\nlog.info(\"Send listener started (bot_send, new_package, bot_broadcast)\");\n```\n\n### 3d. Add the broadcast handler function\n\nAdd this at the bottom of the file (before the existing `escapeHtml` helper):\n\n```typescript\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac bot_broadcast handler \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n\n/**\n * Handle a broadcast request.  The payload is a JSON string:\n *   { message: string }\n *\n * Sends the message to every user who has a TelegramLink.\n * Uses a sequential loop with a 50 ms delay between sends (~20 msgs/sec)\n * to stay well under Telegram's 30 msgs/sec global bot limit.\n * Each send is wrapped with withFloodWait to automatically retry on\n * rate-limit errors.\n */\nasync function handleBroadcast(payload: string): Promise<void> {\n  try {\n    const data = JSON.parse(payload) as { message: string };\n    if (!data.message) {\n      log.warn(\"Broadcast payload missing message \u00e2\u20ac\u201d ignoring\");\n      return;\n    }\n\n    const links = await getAllTelegramLinks();\n    if (links.length === 0) {\n      log.info(\"Broadcast requested but no linked users found\");\n      return;\n    }\n\n    log.info(\n      { recipientCount: links.length },\n      \"Starting broadcast to all linked users\"\n    );\n\n    let sent = 0;\n    let failed = 0;\n\n    for (const link of links) {\n      try {\n        await withFloodWait(() =>\n          sendTextMessage(link.telegramUserId, data.message, \"textParseModeHTML\")\n        );\n        sent++;\n      } catch (err) {\n        failed++;\n        log.warn(\n          { err, telegramUserId: link.telegramUserId.toString() },\n          \"Broadcast send failed for user\"\n        );\n      }\n      // ~20 msgs/sec \u00e2\u20ac\u201d well under the 30 msgs/sec global bot limit\n      await sleep(50);\n    }\n\n    log.info({ sent, failed, total: links.length }, \"Broadcast completed\");\n  } catch (err) {\n    log.error({ err, payload }, \"Failed to process broadcast\");\n  }\n}\n```\n\n---\n\n## File 4: `src/app/api/telegram/bot/broadcast/route.ts` (NEW)\n\nThis is the Next.js API endpoint that the admin triggers from the web app.\n\n```typescript\nimport { NextResponse } from \"next/server\";\nimport { auth } from \"@/lib/auth\";\nimport { prisma } from \"@/lib/prisma\";\n\nexport const dynamic = \"force-dynamic\";\n\n/**\n * POST /api/telegram/bot/broadcast\n * Send a text message to ALL users who have a linked Telegram account.\n *\n * Body: { message: string }\n *\n * Admin-only. The actual sending is done by the bot process \u00e2\u20ac\u201d this endpoint\n * simply validates input and fires a pg_notify('bot_broadcast', ...) signal.\n */\nexport async function POST(request: Request) {\n  const session = await auth();\n  if (!session?.user?.id) {\n    return NextResponse.json({ error: \"Unauthorized\" }, { status: 401 });\n  }\n\n  // Only admins can broadcast\n  if (session.user.role !== \"ADMIN\") {\n    return NextResponse.json(\n      { error: \"Only admins can send broadcast messages\" },\n      { status: 403 }\n    );\n  }\n\n  let body: { message?: string };\n  try {\n    body = await request.json();\n  } catch {\n    return NextResponse.json({ error: \"Invalid JSON body\" }, { status: 400 });\n  }\n\n  if (!body.message || typeof body.message !== \"string\") {\n    return NextResponse.json(\n      { error: \"message is required and must be a string\" },\n      { status: 400 }\n    );\n  }\n\n  const trimmed = body.message.trim();\n  if (trimmed.length === 0) {\n    return NextResponse.json(\n      { error: \"message must not be empty\" },\n      { status: 400 }\n    );\n  }\n\n  // Telegram message text limit is 4096 characters\n  if (trimmed.length > 4096) {\n    return NextResponse.json(\n      { error: \"message exceeds Telegram's 4096-character limit\" },\n      { status: 400 }\n    );\n  }\n\n  // Count how many users will receive the broadcast\n  const recipientCount = await prisma.telegramLink.count();\n  if (recipientCount === 0) {\n    return NextResponse.json(\n      { error: \"No users have linked Telegram accounts\" },\n      { status: 400 }\n    );\n  }\n\n  // Notify the bot via pg_notify\n  const payload = JSON.stringify({ message: trimmed });\n  try {\n    await prisma.$queryRawUnsafe(\n      `SELECT pg_notify('bot_broadcast', $1)`,\n      payload\n    );\n  } catch (err) {\n    return NextResponse.json(\n      { error: \"Failed to queue broadcast \u00e2\u20ac\u201d bot notification channel unavailable\" },\n      { status: 500 }\n    );\n  }\n\n  return NextResponse.json({\n    status: \"QUEUED\",\n    recipientCount,\n    message: `Broadcast queued for ${recipientCount} user(s)`,\n  });\n}\n```\n\n---\n\n## Summary of Changes\n\n| File | Action | Description |\n|------|--------|-------------|\n| `bot/src/util/flood-wait.ts` | NEW | Reusable FLOOD_WAIT retry + sleep utilities (from skill) |\n| `bot/src/db/queries.ts` | MODIFIED | Add `getAllTelegramLinks()` query |\n| `bot/src/send-listener.ts` | MODIFIED | Subscribe to `bot_broadcast` channel; add `handleBroadcast()` with sequential send loop |\n| `src/app/api/telegram/bot/broadcast/route.ts` | NEW | Admin-only API endpoint that validates input and fires `pg_notify` |\n\n## Skill Patterns Used\n\n1. **Sequential Send Queue**: The broadcast loop sends messages one at a time with `await sleep(50)` between each, keeping throughput at ~20 msgs/sec \u00e2\u20ac\u201d safely under the 30 msgs/sec bot global limit documented in the skill.\n\n2. **FLOOD_WAIT handling with `withFloodWait()`**: Every `sendTextMessage` call is wrapped so that if Telegram returns a `FLOOD_WAIT_X` error, the bot automatically waits the required duration plus random jitter (1-5s) before retrying. This prevents the entire broadcast from failing due to a temporary rate limit.\n\n3. **Message text length validation**: The API endpoint rejects messages over 4,096 characters, which is the `message_text_length_max` limit documented in the skill.\n\n4. **No concurrent sends (anti-pattern avoidance)**: The skill explicitly warns against `Promise.all(users.map(...))` for bulk sends. The implementation uses a sequential `for...of` loop instead.\n\n5. **pg_notify pattern**: Follows the existing project convention (seen in `bot_send` and `new_package`) where the web app fires a `pg_notify` and the bot's `send-listener.ts` picks it up \u00e2\u20ac\u201d keeping the two processes decoupled.\n"}], "grading": {"run_id": "eval-1-with_skill", "expectations": [{"text": "uses_sequential_queue", "passed": true, "evidence": "Uses a for...of loop iterating links one at a time. No Promise.all. Comment: '~20 msgs/sec \u00e2\u20ac\u201d well under the 30 msgs/sec global bot limit'"}, {"text": "uses_flood_wait_retry", "passed": true, "evidence": "Each send wrapped in withFloodWait(): 'await withFloodWait(() => sendTextMessage(link.telegramUserId, data.message, \"textParseModeHTML\"))'. Created a new bot/src/util/flood-wait.ts with full extractFloodWaitSeconds + retry logic."}, {"text": "has_per_message_delay", "passed": true, "evidence": "await sleep(50) after each send \u00e2\u20ac\u201d explicitly commented as '~20 msgs/sec'"}, {"text": "handles_per_user_errors", "passed": true, "evidence": "try/catch around each send with 'failed++' counter, continues to next user"}, {"text": "has_api_endpoint", "passed": true, "evidence": "Created src/app/api/telegram/bot/broadcast/route.ts with admin auth, 4096-char validation, pg_notify('bot_broadcast')"}]}}, {"id": "eval-1-broadcast-without_skill", "prompt": "Add a new bot command /broadcast that sends a text message to ALL users who have a TelegramLink in the database. The admin triggers it from the web app. Add it to the bot's command handler and create an API endpoint that triggers it.", "eval_id": 1, "outputs": [{"name": "response.md", "type": "text", "content": "# /broadcast Command Implementation\n\n## Approach\n\nThe implementation requires two pieces:\n\n1. **A new Next.js API endpoint** (`POST /api/telegram/bot/broadcast`) -- triggered from the web app by an admin. It fetches all `TelegramLink` records from the database, then uses `pg_notify` to tell the bot to send messages. However, since broadcast is a one-shot text message (not a package forward), we take a simpler approach: the API endpoint directly uses `pg_notify` with a new `bot_broadcast` channel, passing the broadcast message text as the payload.\n\n2. **A bot-side handler** -- the bot's `send-listener.ts` listens for the new `bot_broadcast` pg_notify channel. When it receives a broadcast payload, it queries all `TelegramLink` records and sends the message text to each linked user via `sendTextMessage`.\n\nAdditionally, a `/broadcast` command is added to the bot's command handler so admins who are chatting with the bot directly can trigger it (though the primary trigger path is the API endpoint from the web app).\n\n---\n\n## File 1: New API Endpoint\n\n**Path:** `src/app/api/telegram/bot/broadcast/route.ts`\n\n```typescript\nimport { NextResponse } from \"next/server\";\nimport { auth } from \"@/lib/auth\";\nimport { prisma } from \"@/lib/prisma\";\n\nexport const dynamic = \"force-dynamic\";\n\n/**\n * POST /api/telegram/bot/broadcast\n * Send a text message to ALL users who have a linked Telegram account.\n * Admin-only.\n *\n * Body: { message: string }\n */\nexport async function POST(request: Request) {\n  const session = await auth();\n  if (!session?.user?.id) {\n    return NextResponse.json({ error: \"Unauthorized\" }, { status: 401 });\n  }\n\n  // Only admins can broadcast\n  if (session.user.role !== \"ADMIN\") {\n    return NextResponse.json(\n      { error: \"Only admins can send broadcast messages\" },\n      { status: 403 }\n    );\n  }\n\n  let body: { message?: string };\n  try {\n    body = await request.json();\n  } catch {\n    return NextResponse.json({ error: \"Invalid JSON body\" }, { status: 400 });\n  }\n\n  if (!body.message || body.message.trim().length === 0) {\n    return NextResponse.json(\n      { error: \"message is required and must be non-empty\" },\n      { status: 400 }\n    );\n  }\n\n  const message = body.message.trim();\n\n  if (message.length > 4096) {\n    return NextResponse.json(\n      { error: \"Message is too long (max 4096 characters)\" },\n      { status: 400 }\n    );\n  }\n\n  // Count how many linked users will receive the broadcast\n  const linkCount = await prisma.telegramLink.count();\n\n  if (linkCount === 0) {\n    return NextResponse.json(\n      { error: \"No users have linked Telegram accounts\" },\n      { status: 400 }\n    );\n  }\n\n  // Notify the bot via pg_notify with the broadcast message\n  try {\n    await prisma.$queryRawUnsafe(\n      `SELECT pg_notify('bot_broadcast', $1)`,\n      JSON.stringify({ message, requestedBy: session.user.id })\n    );\n  } catch (err) {\n    return NextResponse.json(\n      { error: \"Failed to queue broadcast\" },\n      { status: 500 }\n    );\n  }\n\n  return NextResponse.json({\n    status: \"QUEUED\",\n    recipientCount: linkCount,\n    message: `Broadcast queued for ${linkCount} linked user(s)`,\n  });\n}\n```\n\n---\n\n## File 2: Updated `bot/src/send-listener.ts`\n\nAdd handling for the `bot_broadcast` pg_notify channel. The changes are additions to the existing file -- shown below are the **new/modified sections only** with context.\n\nIn the `connectListener` function, add a new LISTEN:\n\n```typescript\n// Add after the existing LISTEN lines in connectListener():\nawait pgClient.query(\"LISTEN bot_broadcast\");\n```\n\nIn the notification handler, add the broadcast case:\n\n```typescript\n// Add to the pgClient.on(\"notification\") handler:\n} else if (msg.channel === \"bot_broadcast\" && msg.payload) {\n  handleBroadcast(msg.payload);\n}\n```\n\nUpdate the log line:\n\n```typescript\nlog.info(\"Send listener started (bot_send, new_package, bot_broadcast)\");\n```\n\nAdd the broadcast handler function (new function at the bottom of the file):\n\n```typescript\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac bot_broadcast handler \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n\nasync function handleBroadcast(payload: string): Promise<void> {\n  try {\n    const data = JSON.parse(payload) as {\n      message: string;\n      requestedBy: string;\n    };\n\n    log.info({ requestedBy: data.requestedBy }, \"Processing broadcast request\");\n\n    // Fetch all linked Telegram users\n    const { db } = await import(\"./db/client.js\");\n    const links = await db.telegramLink.findMany({\n      select: { telegramUserId: true, telegramName: true },\n    });\n\n    if (links.length === 0) {\n      log.warn(\"No linked users found for broadcast\");\n      return;\n    }\n\n    log.info({ recipientCount: links.length }, \"Sending broadcast to linked users\");\n\n    let sent = 0;\n    let failed = 0;\n\n    for (const link of links) {\n      try {\n        const broadcastText = [\n          `\u00f0\u0178\u201c\u00a2 <b>Broadcast Message</b>`,\n          ``,\n          data.message,\n        ].join(\"\\n\");\n\n        await sendTextMessage(\n          link.telegramUserId,\n          broadcastText,\n          \"textParseModeHTML\"\n        );\n        sent++;\n      } catch (err) {\n        failed++;\n        log.warn(\n          {\n            err,\n            telegramUserId: link.telegramUserId.toString(),\n            telegramName: link.telegramName,\n          },\n          \"Failed to send broadcast to user\"\n        );\n      }\n    }\n\n    log.info(\n      { sent, failed, total: links.length },\n      \"Broadcast complete\"\n    );\n  } catch (err) {\n    log.error({ err, payload }, \"Failed to process broadcast\");\n  }\n}\n```\n\n### Full updated `bot/src/send-listener.ts`:\n\n```typescript\nimport type pg from \"pg\";\nimport { pool } from \"./db/client.js\";\nimport { childLogger } from \"./util/logger.js\";\nimport {\n  getPendingSendRequest,\n  updateSendRequest,\n  findMatchingSubscriptions,\n  getGlobalDestinationChannel,\n} from \"./db/queries.js\";\nimport { copyMessageToUser, sendTextMessage, sendPhotoMessage } from \"./tdlib/client.js\";\n\nconst log = childLogger(\"send-listener\");\n\nlet pgClient: pg.PoolClient | null = null;\nlet stopped = false;\n\n/** Delay (ms) before attempting to reconnect after a connection loss. */\nconst RECONNECT_DELAY_MS = 5_000;\n\n/**\n * Start listening for pg_notify signals:\n *   - `bot_send` \u00e2\u20ac\u201d payload = requestId \u00e2\u2020\u2019 send a package to a user\n *   - `new_package` \u00e2\u20ac\u201d payload = JSON { packageId, fileName, creator } \u00e2\u2020\u2019 notify subscribers\n *   - `bot_broadcast` \u00e2\u20ac\u201d payload = JSON { message, requestedBy } \u00e2\u2020\u2019 send text to all linked users\n *\n * If the underlying connection is lost, the listener automatically reconnects\n * so that pg_notify signals are never silently dropped.\n */\nexport async function startSendListener(): Promise<void> {\n  stopped = false;\n  await connectListener();\n}\n\nasync function connectListener(): Promise<void> {\n  try {\n    pgClient = await pool.connect();\n    await pgClient.query(\"LISTEN bot_send\");\n    await pgClient.query(\"LISTEN new_package\");\n    await pgClient.query(\"LISTEN bot_broadcast\");\n\n    pgClient.on(\"notification\", (msg) => {\n      if (msg.channel === \"bot_send\" && msg.payload) {\n        handleBotSend(msg.payload);\n      } else if (msg.channel === \"new_package\" && msg.payload) {\n        handleNewPackage(msg.payload);\n      } else if (msg.channel === \"bot_broadcast\" && msg.payload) {\n        handleBroadcast(msg.payload);\n      }\n    });\n\n    // Reconnect automatically when the connection ends unexpectedly\n    pgClient.on(\"end\", () => {\n      if (!stopped) {\n        log.warn(\"Send listener connection lost \u00e2\u20ac\u201d reconnecting\");\n        pgClient = null;\n        scheduleReconnect();\n      }\n    });\n\n    pgClient.on(\"error\", (err) => {\n      log.error({ err }, \"Send listener connection error\");\n      if (!stopped && pgClient) {\n        try {\n          pgClient.release(true);\n        } catch (releaseErr) {\n          log.debug({ err: releaseErr }, \"Failed to release pg client after error\");\n        }\n        pgClient = null;\n        scheduleReconnect();\n      }\n    });\n\n    log.info(\"Send listener started (bot_send, new_package, bot_broadcast)\");\n  } catch (err) {\n    log.error({ err }, \"Failed to start send listener \u00e2\u20ac\u201d retrying\");\n    scheduleReconnect();\n  }\n}\n\nfunction scheduleReconnect(): void {\n  if (stopped) return;\n  setTimeout(() => {\n    if (!stopped) {\n      connectListener();\n    }\n  }, RECONNECT_DELAY_MS);\n}\n\nexport function stopSendListener(): void {\n  stopped = true;\n  if (pgClient) {\n    pgClient.release();\n    pgClient = null;\n  }\n  log.info(\"Send listener stopped\");\n}\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac bot_send handler \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n\nlet sendQueue: Promise<void> = Promise.resolve();\n\nfunction handleBotSend(requestId: string): void {\n  sendQueue = sendQueue.then(() => processSendRequest(requestId)).catch((err) => {\n    log.error({ err, requestId }, \"Send request processing failed\");\n  });\n}\n\nasync function processSendRequest(requestId: string): Promise<void> {\n  const request = await getPendingSendRequest(requestId);\n  if (!request || request.status !== \"PENDING\") {\n    log.warn({ requestId }, \"Send request not found or not pending\");\n    return;\n  }\n\n  log.info(\n    {\n      requestId,\n      packageId: request.packageId,\n      targetTgId: request.telegramLink.telegramUserId.toString(),\n    },\n    \"Processing send request\"\n  );\n\n  await updateSendRequest(requestId, \"SENDING\");\n\n  try {\n    const pkg = request.package;\n    const targetUserId = request.telegramLink.telegramUserId;\n\n    if (!pkg.destChannelId || !pkg.destMessageId) {\n      throw new Error(\"Package has no destination message \u00e2\u20ac\u201d cannot forward\");\n    }\n\n    // Get the destination channel's Telegram ID\n    const destChannel = await getGlobalDestinationChannel();\n    if (!destChannel) {\n      throw new Error(\"No global destination channel configured\");\n    }\n\n    // Send preview if available\n    if (pkg.previewData) {\n      const caption = `\u00f0\u0178\u201c\u00a6 *${pkg.fileName}*\\n\\nSent from Dragon's Stash`;\n      await sendPhotoMessage(targetUserId, Buffer.from(pkg.previewData), caption);\n    }\n\n    // Forward the actual archive file(s) from destination channel\n    await copyMessageToUser(\n      destChannel.telegramId,\n      pkg.destMessageId,\n      targetUserId\n    );\n\n    await updateSendRequest(requestId, \"SENT\");\n    log.info({ requestId }, \"Send request completed successfully\");\n  } catch (err) {\n    const message = err instanceof Error ? err.message : String(err);\n    log.error({ err, requestId }, \"Send request failed\");\n    await updateSendRequest(requestId, \"FAILED\", message);\n  }\n}\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac new_package handler \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n\nasync function handleNewPackage(payload: string): Promise<void> {\n  try {\n    const data = JSON.parse(payload) as {\n      packageId: string;\n      fileName: string;\n      creator: string | null;\n    };\n\n    const subs = await findMatchingSubscriptions(data.fileName, data.creator);\n    if (subs.length === 0) return;\n\n    log.info(\n      { packageId: data.packageId, matchedSubscriptions: subs.length },\n      \"Notifying subscribers of new package\"\n    );\n\n    // Group by user to send one notification per user\n    const userSubs = new Map<string, string[]>();\n    for (const sub of subs) {\n      const key = sub.telegramUserId.toString();\n      const patterns = userSubs.get(key) ?? [];\n      patterns.push(sub.pattern);\n      userSubs.set(key, patterns);\n    }\n\n    const creator = data.creator ? ` by ${escapeHtml(data.creator)}` : \"\";\n    for (const [telegramUserId, patterns] of userSubs) {\n      const msg = [\n        `\u00f0\u0178\u201d\u201d <b>New package matching your subscriptions:</b>`,\n        ``,\n        `\u00f0\u0178\u201c\u00a6 <b>${escapeHtml(data.fileName)}</b>${creator}`,\n        ``,\n        `Matched: ${patterns.map((p) => `\"${escapeHtml(p)}\"`).join(\", \")}`,\n        ``,\n        `Use /package ${data.packageId} for details.`,\n      ].join(\"\\n\");\n\n      await sendTextMessage(BigInt(telegramUserId), msg, \"textParseModeHTML\").catch((err) => {\n        log.warn(\n          { err, telegramUserId, packageId: data.packageId },\n          \"Failed to notify subscriber\"\n        );\n      });\n    }\n  } catch (err) {\n    log.error({ err, payload }, \"Failed to process new_package notification\");\n  }\n}\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac bot_broadcast handler \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n\nasync function handleBroadcast(payload: string): Promise<void> {\n  try {\n    const data = JSON.parse(payload) as {\n      message: string;\n      requestedBy: string;\n    };\n\n    log.info({ requestedBy: data.requestedBy }, \"Processing broadcast request\");\n\n    // Fetch all linked Telegram users\n    const { db } = await import(\"./db/client.js\");\n    const links = await db.telegramLink.findMany({\n      select: { telegramUserId: true, telegramName: true },\n    });\n\n    if (links.length === 0) {\n      log.warn(\"No linked users found for broadcast\");\n      return;\n    }\n\n    log.info({ recipientCount: links.length }, \"Sending broadcast to linked users\");\n\n    let sent = 0;\n    let failed = 0;\n\n    for (const link of links) {\n      try {\n        const broadcastText = [\n          `\u00f0\u0178\u201c\u00a2 <b>Broadcast Message</b>`,\n          ``,\n          data.message,\n        ].join(\"\\n\");\n\n        await sendTextMessage(\n          link.telegramUserId,\n          broadcastText,\n          \"textParseModeHTML\"\n        );\n        sent++;\n      } catch (err) {\n        failed++;\n        log.warn(\n          {\n            err,\n            telegramUserId: link.telegramUserId.toString(),\n            telegramName: link.telegramName,\n          },\n          \"Failed to send broadcast to user\"\n        );\n      }\n    }\n\n    log.info(\n      { sent, failed, total: links.length },\n      \"Broadcast complete\"\n    );\n  } catch (err) {\n    log.error({ err, payload }, \"Failed to process broadcast\");\n  }\n}\n\nfunction escapeHtml(text: string): string {\n  return text.replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\");\n}\n```\n\n---\n\n## File 3: Updated `bot/src/commands.ts`\n\nAdd the `/broadcast` command to the bot's command handler. This allows an admin who is also a linked Telegram user to trigger a broadcast directly from the bot chat. The command queries all `TelegramLink` records and sends the message to each.\n\n### Changes to the switch statement (add new case before `default`):\n\n```typescript\n      case \"/broadcast\":\n        await handleBroadcast(chatId, userId, args);\n        break;\n```\n\n### New handler function:\n\n```typescript\nasync function handleBroadcast(\n  chatId: bigint,\n  userId: bigint,\n  message: string\n): Promise<void> {\n  if (!message) {\n    await sendTextMessage(\n      chatId,\n      \"Usage: /broadcast &lt;message&gt;\\n\\nSends a message to all linked Telegram users.\",\n      \"textParseModeHTML\"\n    );\n    return;\n  }\n\n  // Verify the sender is a linked admin user\n  const link = await findLinkByTelegramUserId(userId);\n  if (!link) {\n    await sendTextMessage(\n      chatId,\n      \"You must link your Telegram account first. Use /link &lt;code&gt;.\",\n      \"textParseModeHTML\"\n    );\n    return;\n  }\n\n  // Check if the linked user is an admin\n  const { db } = await import(\"./db/client.js\");\n  const user = await db.user.findUnique({\n    where: { id: link.userId },\n    select: { role: true },\n  });\n\n  if (!user || user.role !== \"ADMIN\") {\n    await sendTextMessage(\n      chatId,\n      \"Only admins can use the /broadcast command.\",\n      \"textParseModeHTML\"\n    );\n    return;\n  }\n\n  // Fetch all linked users\n  const links = await db.telegramLink.findMany({\n    select: { telegramUserId: true, telegramName: true },\n  });\n\n  if (links.length === 0) {\n    await sendTextMessage(\n      chatId,\n      \"No users have linked Telegram accounts.\",\n      \"textParseModeHTML\"\n    );\n    return;\n  }\n\n  await sendTextMessage(\n    chatId,\n    `\u00f0\u0178\u201c\u00a2 Sending broadcast to ${links.length} user(s)...`,\n    \"textParseModeHTML\"\n  );\n\n  let sent = 0;\n  let failed = 0;\n\n  for (const target of links) {\n    try {\n      const broadcastText = [\n        `\u00f0\u0178\u201c\u00a2 <b>Broadcast Message</b>`,\n        ``,\n        message,\n      ].join(\"\\n\");\n\n      await sendTextMessage(\n        target.telegramUserId,\n        broadcastText,\n        \"textParseModeHTML\"\n      );\n      sent++;\n    } catch {\n      failed++;\n    }\n  }\n\n  await sendTextMessage(\n    chatId,\n    `\u00e2\u0153\u2026 Broadcast complete. Sent: ${sent}, Failed: ${failed}, Total: ${links.length}`,\n    \"textParseModeHTML\"\n  );\n}\n```\n\n### Updated help text in `handleStart` and `handleHelp`:\n\nIn `handleStart`, add to the commands list:\n```typescript\n    `/broadcast &lt;message&gt; \u00e2\u20ac\u201d Send message to all linked users (admin)`,\n```\n\nIn `handleHelp`, add a new section:\n```typescript\n    ``,\n    `\u00f0\u0178\u201c\u00a2 <b>Admin</b>`,\n    `/broadcast &lt;message&gt; \u00e2\u20ac\u201d Send to all linked users`,\n```\n\n### Full updated `bot/src/commands.ts`:\n\n```typescript\nimport { childLogger } from \"./util/logger.js\";\nimport {\n  searchPackages,\n  getLatestPackages,\n  getPackageById,\n  findLinkByTelegramUserId,\n  validateLinkCode,\n  deleteLinkCode,\n  createTelegramLink,\n  getSubscriptions,\n  addSubscription,\n  removeSubscription,\n} from \"./db/queries.js\";\nimport { sendTextMessage, sendPhotoMessage } from \"./tdlib/client.js\";\n\nconst log = childLogger(\"commands\");\n\ninterface IncomingMessage {\n  chatId: bigint;\n  userId: bigint;\n  text: string;\n  firstName: string;\n  lastName?: string;\n  username?: string;\n}\n\nfunction formatSize(bytes: bigint): string {\n  const mb = Number(bytes) / (1024 * 1024);\n  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;\n  return `${mb.toFixed(1)} MB`;\n}\n\nfunction formatDate(date: Date): string {\n  return date.toISOString().slice(0, 10);\n}\n\nexport async function handleMessage(msg: IncomingMessage): Promise<void> {\n  const { chatId, userId, text } = msg;\n\n  // Parse command and args\n  const trimmed = text.trim();\n  const spaceIdx = trimmed.indexOf(\" \");\n  const command = (spaceIdx > 0 ? trimmed.slice(0, spaceIdx) : trimmed).toLowerCase();\n  const args = spaceIdx > 0 ? trimmed.slice(spaceIdx + 1).trim() : \"\";\n\n  try {\n    switch (command) {\n      case \"/start\":\n        await handleStart(chatId, userId, args, msg);\n        break;\n      case \"/help\":\n        await handleHelp(chatId);\n        break;\n      case \"/search\":\n        await handleSearch(chatId, args);\n        break;\n      case \"/latest\":\n        await handleLatest(chatId, args);\n        break;\n      case \"/package\":\n        await handlePackage(chatId, args);\n        break;\n      case \"/link\":\n        await handleLink(chatId, userId, args, msg);\n        break;\n      case \"/unlink\":\n        await handleUnlink(chatId, userId);\n        break;\n      case \"/subscribe\":\n        await handleSubscribe(chatId, userId, args);\n        break;\n      case \"/unsubscribe\":\n        await handleUnsubscribe(chatId, userId, args);\n        break;\n      case \"/subscriptions\":\n        await handleListSubscriptions(chatId, userId);\n        break;\n      case \"/status\":\n        await handleStatus(chatId, userId);\n        break;\n      case \"/broadcast\":\n        await handleBroadcastCommand(chatId, userId, args);\n        break;\n      default:\n        await sendTextMessage(\n          chatId,\n          \"Unknown command. Use /help to see available commands.\",\n          \"textParseModeHTML\"\n        );\n    }\n  } catch (err) {\n    log.error({ err, command, userId: userId.toString() }, \"Command handler error\");\n    await sendTextMessage(\n      chatId,\n      \"An error occurred processing your command. Please try again.\",\n      \"textParseModeHTML\"\n    ).catch(() => {});\n  }\n}\n\nasync function handleStart(\n  chatId: bigint,\n  userId: bigint,\n  args: string,\n  msg: IncomingMessage\n): Promise<void> {\n  // Deep link: /start link_<code>\n  if (args.startsWith(\"link_\")) {\n    const code = args.slice(5);\n    await handleLink(chatId, userId, code, msg);\n    return;\n  }\n\n  const welcome = [\n    `\u00f0\u0178\ufffd\u2030 <b>Dragon's Stash Bot</b>`,\n    ``,\n    `I can help you search and receive indexed archive packages.`,\n    ``,\n    `<b>Commands:</b>`,\n    `/search &lt;query&gt; \u00e2\u20ac\u201d Search packages`,\n    `/latest [n] \u00e2\u20ac\u201d Show latest packages`,\n    `/package &lt;id&gt; \u00e2\u20ac\u201d Package details`,\n    `/link &lt;code&gt; \u00e2\u20ac\u201d Link your Telegram to your web account`,\n    `/subscribe &lt;keyword&gt; \u00e2\u20ac\u201d Get notified for new packages`,\n    `/subscriptions \u00e2\u20ac\u201d View your subscriptions`,\n    `/unsubscribe &lt;keyword&gt; \u00e2\u20ac\u201d Remove a subscription`,\n    `/status \u00e2\u20ac\u201d Check your link status`,\n    `/broadcast &lt;message&gt; \u00e2\u20ac\u201d Send to all linked users (admin)`,\n    `/help \u00e2\u20ac\u201d Show this help message`,\n  ].join(\"\\n\");\n\n  await sendTextMessage(chatId, welcome, \"textParseModeHTML\");\n}\n\nasync function handleHelp(chatId: bigint): Promise<void> {\n  const help = [\n    `<b>Available Commands:</b>`,\n    ``,\n    `\u00f0\u0178\u201d\ufffd <b>Search &amp; Browse</b>`,\n    `/search &lt;query&gt; \u00e2\u20ac\u201d Search by filename or creator`,\n    `/latest [n] \u00e2\u20ac\u201d Show n most recent packages (default: 5)`,\n    `/package &lt;id&gt; \u00e2\u20ac\u201d View package details and file list`,\n    ``,\n    `\u00f0\u0178\u201d\u2014 <b>Account Linking</b>`,\n    `/link &lt;code&gt; \u00e2\u20ac\u201d Link Telegram to your web account`,\n    `/unlink \u00e2\u20ac\u201d Unlink your Telegram account`,\n    `/status \u00e2\u20ac\u201d Check link status`,\n    ``,\n    `\u00f0\u0178\u201d\u201d <b>Notifications</b>`,\n    `/subscribe &lt;keyword&gt; \u00e2\u20ac\u201d Get alerts for matching packages`,\n    `/unsubscribe &lt;keyword&gt; \u00e2\u20ac\u201d Remove a subscription`,\n    `/subscriptions \u00e2\u20ac\u201d List your subscriptions`,\n    ``,\n    `\u00f0\u0178\u201c\u00a2 <b>Admin</b>`,\n    `/broadcast &lt;message&gt; \u00e2\u20ac\u201d Send message to all linked users`,\n  ].join(\"\\n\");\n\n  await sendTextMessage(chatId, help, \"textParseModeHTML\");\n}\n\nasync function handleSearch(chatId: bigint, query: string): Promise<void> {\n  if (!query) {\n    await sendTextMessage(chatId, \"Usage: /search &lt;query&gt;\", \"textParseModeHTML\");\n    return;\n  }\n\n  const results = await searchPackages(query, 10);\n\n  if (results.length === 0) {\n    await sendTextMessage(\n      chatId,\n      `No packages found for \"<b>${escapeHtml(query)}</b>\".`,\n      \"textParseModeHTML\"\n    );\n    return;\n  }\n\n  const lines = results.map((pkg, i) => {\n    const creator = pkg.creator ? ` by ${pkg.creator}` : \"\";\n    return `${i + 1}. <b>${escapeHtml(pkg.fileName)}</b>${creator}\\n   \u00f0\u0178\u201c\u00a6 ${pkg.fileCount} files \u00c2\u00b7 ${formatSize(pkg.fileSize)} \u00c2\u00b7 ${formatDate(pkg.indexedAt)}\\n   ID: <code>${pkg.id}</code>`;\n  });\n\n  const response = [\n    `\u00f0\u0178\u201d\ufffd <b>Search results for \"${escapeHtml(query)}\":</b>`,\n    ``,\n    ...lines,\n    ``,\n    `Use /package &lt;id&gt; for details.`,\n  ].join(\"\\n\");\n\n  await sendTextMessage(chatId, response, \"textParseModeHTML\");\n}\n\nasync function handleLatest(chatId: bigint, args: string): Promise<void> {\n  const limit = Math.min(Math.max(parseInt(args) || 5, 1), 20);\n  const results = await getLatestPackages(limit);\n\n  if (results.length === 0) {\n    await sendTextMessage(chatId, \"No packages indexed yet.\", \"textParseModeHTML\");\n    return;\n  }\n\n  const lines = results.map((pkg, i) => {\n    const creator = pkg.creator ? ` by ${pkg.creator}` : \"\";\n    return `${i + 1}. <b>${escapeHtml(pkg.fileName)}</b>${creator}\\n   \u00f0\u0178\u201c\u00a6 ${pkg.fileCount} files \u00c2\u00b7 ${formatSize(pkg.fileSize)} \u00c2\u00b7 ${formatDate(pkg.indexedAt)}\\n   ID: <code>${pkg.id}</code>`;\n  });\n\n  const response = [\n    `\u00f0\u0178\u201c\u2039 <b>Latest ${results.length} packages:</b>`,\n    ``,\n    ...lines,\n    ``,\n    `Use /package &lt;id&gt; for details.`,\n  ].join(\"\\n\");\n\n  await sendTextMessage(chatId, response, \"textParseModeHTML\");\n}\n\nasync function handlePackage(chatId: bigint, id: string): Promise<void> {\n  if (!id) {\n    await sendTextMessage(chatId, \"Usage: /package &lt;id&gt;\", \"textParseModeHTML\");\n    return;\n  }\n\n  const pkg = await getPackageById(id.trim());\n  if (!pkg) {\n    await sendTextMessage(chatId, \"Package not found.\", \"textParseModeHTML\");\n    return;\n  }\n\n  const fileList = pkg.files\n    .slice(0, 15)\n    .map((f) => `  ${escapeHtml(f.path)}`)\n    .join(\"\\n\");\n  const moreFiles = pkg.files.length > 15 ? `\\n  ... and ${pkg.fileCount - 15} more` : \"\";\n\n  const details = [\n    `\u00f0\u0178\u201c\u00a6 <b>${escapeHtml(pkg.fileName)}</b>`,\n    ``,\n    `Type: ${pkg.archiveType}`,\n    `Size: ${formatSize(pkg.fileSize)}`,\n    `Files: ${pkg.fileCount}`,\n    pkg.creator ? `Creator: ${escapeHtml(pkg.creator)}` : null,\n    `Source: ${escapeHtml(pkg.sourceChannel.title)}`,\n    `Indexed: ${formatDate(pkg.indexedAt)}`,\n    pkg.isMultipart ? `Parts: ${pkg.partCount}` : null,\n    ``,\n    `<b>File listing:</b>`,\n    `<code>${fileList}${moreFiles}</code>`,\n  ]\n    .filter(Boolean)\n    .join(\"\\n\");\n\n  // Send preview if available\n  if (pkg.previewData) {\n    await sendPhotoMessage(\n      chatId,\n      Buffer.from(pkg.previewData),\n      details\n    );\n  } else {\n    await sendTextMessage(chatId, details, \"textParseModeHTML\");\n  }\n}\n\nasync function handleLink(\n  chatId: bigint,\n  userId: bigint,\n  code: string,\n  msg: IncomingMessage\n): Promise<void> {\n  if (!code) {\n    await sendTextMessage(\n      chatId,\n      \"Usage: /link &lt;code&gt;\\n\\nGet your link code from Settings \u00e2\u2020\u2019 Telegram in the web app.\",\n      \"textParseModeHTML\"\n    );\n    return;\n  }\n\n  // Check if already linked\n  const existing = await findLinkByTelegramUserId(userId);\n  if (existing) {\n    await sendTextMessage(\n      chatId,\n      \"Your Telegram account is already linked to a web account. Use /unlink first if you want to re-link.\",\n      \"textParseModeHTML\"\n    );\n    return;\n  }\n\n  // Validate the code\n  const webUserId = await validateLinkCode(code.trim());\n  if (!webUserId) {\n    await sendTextMessage(\n      chatId,\n      \"Invalid or expired link code. Please generate a new one from Settings \u00e2\u2020\u2019 Telegram.\",\n      \"textParseModeHTML\"\n    );\n    return;\n  }\n\n  // Create the link\n  const displayName = [msg.firstName, msg.lastName].filter(Boolean).join(\" \");\n  await createTelegramLink(webUserId, userId, displayName || msg.username || null);\n  await deleteLinkCode(code.trim());\n\n  await sendTextMessage(\n    chatId,\n    `\u00e2\u0153\u2026 <b>Account linked successfully!</b>\\n\\nYou can now receive packages sent from the web app. Use /status to verify.`,\n    \"textParseModeHTML\"\n  );\n\n  log.info({ userId: userId.toString(), webUserId }, \"Telegram account linked\");\n}\n\nasync function handleUnlink(chatId: bigint, userId: bigint): Promise<void> {\n  const existing = await findLinkByTelegramUserId(userId);\n  if (!existing) {\n    await sendTextMessage(\n      chatId,\n      \"Your Telegram account is not linked to any web account.\",\n      \"textParseModeHTML\"\n    );\n    return;\n  }\n\n  const { db } = await import(\"./db/client.js\");\n  await db.telegramLink.delete({ where: { telegramUserId: userId } });\n\n  await sendTextMessage(\n    chatId,\n    \"\u00f0\u0178\u201d\u201c Account unlinked. You will no longer receive packages from the web app.\",\n    \"textParseModeHTML\"\n  );\n\n  log.info({ userId: userId.toString() }, \"Telegram account unlinked\");\n}\n\nasync function handleSubscribe(\n  chatId: bigint,\n  userId: bigint,\n  pattern: string\n): Promise<void> {\n  if (!pattern) {\n    await sendTextMessage(\n      chatId,\n      \"Usage: /subscribe &lt;keyword&gt;\\n\\nYou'll be notified when new packages matching this keyword are indexed.\",\n      \"textParseModeHTML\"\n    );\n    return;\n  }\n\n  await addSubscription(userId, pattern.toLowerCase().trim());\n\n  await sendTextMessage(\n    chatId,\n    `\u00f0\u0178\u201d\u201d Subscribed to \"<b>${escapeHtml(pattern.trim())}</b>\".\\n\\nYou'll be notified when matching packages are indexed.`,\n    \"textParseModeHTML\"\n  );\n}\n\nasync function handleUnsubscribe(\n  chatId: bigint,\n  userId: bigint,\n  pattern: string\n): Promise<void> {\n  if (!pattern) {\n    await sendTextMessage(\n      chatId,\n      \"Usage: /unsubscribe &lt;keyword&gt;\",\n      \"textParseModeHTML\"\n    );\n    return;\n  }\n\n  const result = await removeSubscription(userId, pattern.toLowerCase().trim());\n\n  if (result.count === 0) {\n    await sendTextMessage(\n      chatId,\n      `No subscription found for \"<b>${escapeHtml(pattern.trim())}</b>\".`,\n      \"textParseModeHTML\"\n    );\n  } else {\n    await sendTextMessage(\n      chatId,\n      `\u00f0\u0178\u201d\u2022 Unsubscribed from \"<b>${escapeHtml(pattern.trim())}</b>\".`,\n      \"textParseModeHTML\"\n    );\n  }\n}\n\nasync function handleListSubscriptions(\n  chatId: bigint,\n  userId: bigint\n): Promise<void> {\n  const subs = await getSubscriptions(userId);\n\n  if (subs.length === 0) {\n    await sendTextMessage(\n      chatId,\n      \"You have no active subscriptions. Use /subscribe &lt;keyword&gt; to add one.\",\n      \"textParseModeHTML\"\n    );\n    return;\n  }\n\n  const lines = subs.map(\n    (s, i) => `${i + 1}. <b>${escapeHtml(s.pattern)}</b> (since ${formatDate(s.createdAt)})`\n  );\n\n  const response = [\n    `\u00f0\u0178\u201d\u201d <b>Your subscriptions:</b>`,\n    ``,\n    ...lines,\n    ``,\n    `Use /unsubscribe &lt;keyword&gt; to remove one.`,\n  ].join(\"\\n\");\n\n  await sendTextMessage(chatId, response, \"textParseModeHTML\");\n}\n\nasync function handleStatus(chatId: bigint, userId: bigint): Promise<void> {\n  const link = await findLinkByTelegramUserId(userId);\n\n  if (link) {\n    await sendTextMessage(\n      chatId,\n      `\u00e2\u0153\u2026 <b>Linked</b>\\n\\nYour Telegram account is linked to a web account.\\nLinked since: ${formatDate(link.createdAt)}`,\n      \"textParseModeHTML\"\n    );\n  } else {\n    await sendTextMessage(\n      chatId,\n      `\u00e2\ufffd\u0152 <b>Not linked</b>\\n\\nUse /link &lt;code&gt; to connect your web account.`,\n      \"textParseModeHTML\"\n    );\n  }\n}\n\nasync function handleBroadcastCommand(\n  chatId: bigint,\n  userId: bigint,\n  message: string\n): Promise<void> {\n  if (!message) {\n    await sendTextMessage(\n      chatId,\n      \"Usage: /broadcast &lt;message&gt;\\n\\nSends a message to all linked Telegram users.\",\n      \"textParseModeHTML\"\n    );\n    return;\n  }\n\n  // Verify the sender is a linked admin user\n  const link = await findLinkByTelegramUserId(userId);\n  if (!link) {\n    await sendTextMessage(\n      chatId,\n      \"You must link your Telegram account first. Use /link &lt;code&gt;.\",\n      \"textParseModeHTML\"\n    );\n    return;\n  }\n\n  // Check if the linked user is an admin\n  const { db } = await import(\"./db/client.js\");\n  const user = await db.user.findUnique({\n    where: { id: link.userId },\n    select: { role: true },\n  });\n\n  if (!user || user.role !== \"ADMIN\") {\n    await sendTextMessage(\n      chatId,\n      \"Only admins can use the /broadcast command.\",\n      \"textParseModeHTML\"\n    );\n    return;\n  }\n\n  // Fetch all linked users\n  const links = await db.telegramLink.findMany({\n    select: { telegramUserId: true, telegramName: true },\n  });\n\n  if (links.length === 0) {\n    await sendTextMessage(\n      chatId,\n      \"No users have linked Telegram accounts.\",\n      \"textParseModeHTML\"\n    );\n    return;\n  }\n\n  await sendTextMessage(\n    chatId,\n    `\u00f0\u0178\u201c\u00a2 Sending broadcast to ${links.length} user(s)...`,\n    \"textParseModeHTML\"\n  );\n\n  let sent = 0;\n  let failed = 0;\n\n  for (const target of links) {\n    try {\n      const broadcastText = [\n        `\u00f0\u0178\u201c\u00a2 <b>Broadcast Message</b>`,\n        ``,\n        message,\n      ].join(\"\\n\");\n\n      await sendTextMessage(\n        target.telegramUserId,\n        broadcastText,\n        \"textParseModeHTML\"\n      );\n      sent++;\n    } catch {\n      failed++;\n    }\n  }\n\n  await sendTextMessage(\n    chatId,\n    `\u00e2\u0153\u2026 Broadcast complete. Sent: ${sent}, Failed: ${failed}, Total: ${links.length}`,\n    \"textParseModeHTML\"\n  );\n\n  log.info(\n    { userId: userId.toString(), sent, failed, total: links.length },\n    \"Broadcast sent via /broadcast command\"\n  );\n}\n\nfunction escapeHtml(text: string): string {\n  return text\n    .replace(/&/g, \"&amp;\")\n    .replace(/</g, \"&lt;\")\n    .replace(/>/g, \"&gt;\");\n}\n```\n\n---\n\n## Summary of Changes\n\n### New file: `src/app/api/telegram/bot/broadcast/route.ts`\n- `POST /api/telegram/bot/broadcast` -- admin-only API endpoint\n- Accepts `{ message: string }` in the request body\n- Validates the user is authenticated and has ADMIN role\n- Validates message is non-empty and under 4096 chars\n- Sends a `bot_broadcast` pg_notify signal with the message payload\n- Returns the count of recipients that will receive the broadcast\n\n### Modified file: `bot/src/send-listener.ts`\n- Added `LISTEN bot_broadcast` to the PostgreSQL notification listener\n- Added `handleBroadcast()` function that:\n  - Parses the broadcast payload (message text + requester ID)\n  - Queries all `TelegramLink` records from the database\n  - Iterates over each linked user and sends the message via `sendTextMessage`\n  - Logs success/failure counts\n  - Handles individual send failures gracefully (continues to next user)\n\n### Modified file: `bot/src/commands.ts`\n- Added `/broadcast <message>` command case to the switch statement\n- Added `handleBroadcastCommand()` function that:\n  - Verifies the sender has a linked account via `findLinkByTelegramUserId`\n  - Checks the linked web user has ADMIN role\n  - Fetches all `TelegramLink` records and sends the message to each\n  - Reports back with sent/failed counts\n- Updated `/start` and `/help` text to include the new command\n\n### Architecture decisions:\n- **Two trigger paths**: The web app triggers via the API endpoint (which uses `pg_notify`), while the bot command triggers directly. This matches the existing pattern where `bot_send` uses `pg_notify` from the web app.\n- **No schema changes needed**: The broadcast uses existing `TelegramLink` records -- no new database tables or migrations required.\n- **Graceful failure handling**: If sending to one user fails, the broadcast continues to the remaining users. Failures are logged but don't abort the whole broadcast.\n- **Admin-only**: Both the API endpoint and the bot command verify admin privileges before allowing a broadcast.\n"}], "grading": {"run_id": "eval-1-without_skill", "expectations": [{"text": "uses_sequential_queue", "passed": true, "evidence": "Uses for...of loop over links, sends one at a time. No Promise.all."}, {"text": "uses_flood_wait_retry", "passed": false, "evidence": "No withFloodWait wrapper. Bare sendTextMessage calls in both send-listener handleBroadcast and commands handleBroadcastCommand. No flood-wait.ts utility created."}, {"text": "has_per_message_delay", "passed": false, "evidence": "No sleep/delay between sends in either the send-listener handler or the command handler."}, {"text": "handles_per_user_errors", "passed": true, "evidence": "try/catch per user with sent++/failed++ counters, continues to next user."}, {"text": "has_api_endpoint", "passed": true, "evidence": "Created src/app/api/telegram/bot/broadcast/route.ts with admin auth, 4096-char limit, pg_notify."}]}}, {"id": "eval-2-flood-wait-with_skill", "prompt": "The worker keeps crashing with 'FLOOD_WAIT_35' errors when scanning a source channel that has about 10,000 messages. It happens during the getChannelMessages pagination loop. How do I fix this?", "eval_id": 2, "outputs": [{"name": "response.md", "type": "text", "content": "# Diagnosis: FLOOD_WAIT_35 During Channel Scanning\n\n## Root Cause\n\nThe `getChannelMessages` function in `worker/src/tdlib/download.ts` (line 146) paginates through channel history using `getChatHistory` with a fixed 1-second delay between pages (`config.apiDelayMs = 1000`). While each individual `getChatHistory` call is wrapped in `invokeWithTimeout` which delegates to `withFloodWait` for retry logic, the pagination loop itself has a fundamental problem for large channels:\n\n**A 10,000-message channel at 100 messages/page = 100 consecutive API calls.** With only a 1-second delay between pages, this sustained burst of ~1 req/sec for 100+ seconds eventually triggers Telegram's dynamic rate limiter. Once `FLOOD_WAIT_35` fires, `withFloodWait` does correctly sleep for 35+ seconds and retry that single call -- but the loop immediately resumes its 1-second cadence, triggering another FLOOD_WAIT shortly after. After 5 retries (`config.maxRetries = 5`), the function throws and the worker crashes.\n\nThe same issue exists in `getTopicMessages` in `worker/src/tdlib/topics.ts` (line 170), which uses identical pagination logic.\n\n## Why the Current Code Is Almost Right But Not Quite\n\nThe codebase already has the right building blocks:\n\n1. `withFloodWait` in `worker/src/util/retry.ts` correctly extracts wait durations and adds jitter -- this matches the skill's recommended FLOOD_WAIT handler pattern exactly.\n2. `invokeWithTimeout` in `worker/src/tdlib/download.ts` wraps every TDLib call through `withFloodWait`.\n3. There is a 1-second inter-page delay (`config.apiDelayMs`).\n\n**The gap:** After a FLOOD_WAIT recovery, the pagination loop does not back off its inter-page delay. It goes right back to 1-second spacing, which is what triggers repeated FLOOD_WAITs until max retries is exhausted.\n\n## The Fix\n\nApply **adaptive backoff** to the pagination delay: when a FLOOD_WAIT is encountered during scanning, increase the inter-page delay for subsequent pages. This prevents the \"recover then immediately re-trigger\" cycle.\n\n### Fix 1: Add adaptive delay to `getChannelMessages` (`worker/src/tdlib/download.ts`)\n\nReplace lines 146-250 with:\n\n```typescript\n/**\n * Fetch messages from a channel, stopping once we've scanned past the\n * last-processed boundary (with one page of lookback for multipart safety).\n * Collects both archive attachments AND photo messages (for preview matching).\n * Returns messages in chronological order (oldest first).\n *\n * When `lastProcessedMessageId` is null (first run), scans everything.\n * The worker applies a post-grouping filter to skip fully-processed sets,\n * and keeps `packageExistsBySourceMessage` as a safety net.\n *\n * Safety features:\n *  - Max page limit to prevent infinite loops\n *  - Stuck detection: breaks if from_message_id stops advancing\n *  - Timeout on each TDLib API call\n *  - Adaptive delay: backs off when FLOOD_WAIT is encountered\n */\nexport async function getChannelMessages(\n  client: Client,\n  chatId: bigint,\n  lastProcessedMessageId?: bigint | null,\n  limit = 100,\n  onProgress?: ScanProgressCallback\n): Promise<ChannelScanResult> {\n  const archives: TelegramMessage[] = [];\n  const photos: TelegramPhoto[] = [];\n  const boundary = lastProcessedMessageId ? Number(lastProcessedMessageId) : null;\n\n  let currentFromId = 0;\n  let totalScanned = 0;\n  let pageCount = 0;\n  let currentDelay = config.apiDelayMs; // starts at 1000ms, adapts on FLOOD_WAIT\n\n  // eslint-disable-next-line no-constant-condition\n  while (true) {\n    if (pageCount >= MAX_SCAN_PAGES) {\n      log.warn(\n        { chatId: chatId.toString(), pageCount, totalScanned },\n        \"Hit max page limit for channel scan, stopping\"\n      );\n      break;\n    }\n    pageCount++;\n\n    const previousFromId = currentFromId;\n\n    let result: { messages: TdMessage[] };\n    try {\n      result = await invokeWithTimeout<{ messages: TdMessage[] }>(client, {\n        _: \"getChatHistory\",\n        chat_id: Number(chatId),\n        from_message_id: currentFromId,\n        offset: 0,\n        limit: Math.min(limit, 100),\n        only_local: false,\n      });\n    } catch (err) {\n      // If invokeWithTimeout exhausted its retries on FLOOD_WAIT, check if\n      // we can recover at the pagination level by increasing the delay further.\n      const waitSec = extractFloodWaitSeconds(err);\n      if (waitSec !== null) {\n        // The retry wrapper already slept; bump the inter-page delay to\n        // prevent the next page from immediately re-triggering.\n        currentDelay = Math.min(currentDelay * 2, 30_000);\n        log.warn(\n          { chatId: chatId.toString(), newDelay: currentDelay, totalScanned },\n          \"FLOOD_WAIT persisted after retries \u00e2\u20ac\u201d increasing inter-page delay and retrying\"\n        );\n        // Sleep the full flood wait duration + jitter before continuing\n        const jitter = 1000 + Math.random() * 4000;\n        await sleep(waitSec * 1000 + jitter);\n        continue; // retry this page with the new delay\n      }\n      throw err; // non-rate-limit error \u00e2\u20ac\u201d propagate\n    }\n\n    // Successful call \u00e2\u20ac\u201d gradually relax the delay back toward baseline\n    if (currentDelay > config.apiDelayMs) {\n      currentDelay = Math.max(config.apiDelayMs, Math.floor(currentDelay * 0.8));\n    }\n\n    if (!result.messages || result.messages.length === 0) break;\n\n    totalScanned += result.messages.length;\n\n    for (const msg of result.messages) {\n      // Check for archive documents\n      const doc = msg.content?.document;\n      if (doc?.file_name && doc.document && isArchiveAttachment(doc.file_name)) {\n        archives.push({\n          id: BigInt(msg.id),\n          fileName: doc.file_name,\n          fileId: String(doc.document.id),\n          fileSize: BigInt(doc.document.size),\n          date: new Date(msg.date * 1000),\n        });\n        continue;\n      }\n\n      // Check for photo messages (potential previews)\n      const photo = msg.content?.photo;\n      const caption = msg.content?.caption?.text ?? \"\";\n      if (photo?.sizes && photo.sizes.length > 0) {\n        const smallest = photo.sizes[0];\n        photos.push({\n          id: BigInt(msg.id),\n          date: new Date(msg.date * 1000),\n          caption,\n          fileId: String(smallest.photo.id),\n          fileSize: smallest.photo.size || smallest.photo.expected_size,\n        });\n      }\n    }\n\n    // Report scanning progress after each page\n    onProgress?.(totalScanned);\n\n    currentFromId = result.messages[result.messages.length - 1].id;\n\n    // Stuck detection: if from_message_id didn't advance, break to prevent infinite loop\n    if (currentFromId === previousFromId) {\n      log.warn(\n        { chatId: chatId.toString(), currentFromId, totalScanned },\n        \"Pagination stuck (from_message_id not advancing), breaking\"\n      );\n      break;\n    }\n\n    // Stop scanning once we've gone past the boundary (this page is the lookback)\n    if (boundary && currentFromId < boundary) break;\n\n    if (result.messages.length < Math.min(limit, 100)) break;\n\n    // Rate limit delay \u00e2\u20ac\u201d adaptive based on FLOOD_WAIT history\n    await sleep(currentDelay);\n  }\n\n  log.info(\n    { chatId: chatId.toString(), archives: archives.length, photos: photos.length, totalScanned, pages: pageCount },\n    \"Channel scan complete\"\n  );\n\n  // Reverse to chronological order (oldest first) so worker processes old\u00e2\u2020\u2019new\n  return {\n    archives: archives.reverse(),\n    photos: photos.reverse(),\n    totalScanned,\n  };\n}\n```\n\nYou will also need to add the import for `extractFloodWaitSeconds` at the top of `download.ts`:\n\n```typescript\nimport { withFloodWait, extractFloodWaitSeconds } from \"../util/retry.js\";\n```\n\n### Fix 2: Apply the same pattern to `getTopicMessages` (`worker/src/tdlib/topics.ts`)\n\nThe same adaptive delay logic should be applied to the `getTopicMessages` function. Add the import:\n\n```typescript\nimport { extractFloodWaitSeconds } from \"../util/retry.js\";\n```\n\nThen apply the same changes to the pagination loop (the structure is identical):\n\n```typescript\nexport async function getTopicMessages(\n  client: Client,\n  chatId: bigint,\n  topicId: bigint,\n  lastProcessedMessageId?: bigint | null,\n  limit = 100,\n  onProgress?: ScanProgressCallback\n): Promise<ChannelScanResult> {\n  const archives: TelegramMessage[] = [];\n  const photos: TelegramPhoto[] = [];\n  const boundary = lastProcessedMessageId ? Number(lastProcessedMessageId) : null;\n\n  let currentFromId = 0;\n  let totalScanned = 0;\n  let pageCount = 0;\n  let currentDelay = config.apiDelayMs;\n\n  // eslint-disable-next-line no-constant-condition\n  while (true) {\n    if (pageCount >= MAX_SCAN_PAGES) {\n      log.warn(\n        { chatId: chatId.toString(), topicId: topicId.toString(), pageCount, totalScanned },\n        \"Hit max page limit for topic scan, stopping\"\n      );\n      break;\n    }\n    pageCount++;\n\n    const previousFromId = currentFromId;\n\n    let result: {\n      messages?: {\n        id: number;\n        date: number;\n        content: {\n          _: string;\n          document?: {\n            file_name?: string;\n            document?: {\n              id: number;\n              size: number;\n            };\n          };\n          photo?: {\n            sizes?: {\n              type: string;\n              photo: { id: number; size: number; expected_size: number };\n              width: number;\n              height: number;\n            }[];\n          };\n          caption?: { text?: string };\n        };\n      }[];\n    };\n\n    try {\n      result = await invokeWithTimeout(client, {\n        _: \"searchChatMessages\",\n        chat_id: Number(chatId),\n        query: \"\",\n        message_thread_id: Number(topicId),\n        from_message_id: currentFromId,\n        offset: 0,\n        limit: Math.min(limit, 100),\n        filter: null,\n        sender_id: null,\n        saved_messages_topic_id: 0,\n      });\n    } catch (err) {\n      const waitSec = extractFloodWaitSeconds(err);\n      if (waitSec !== null) {\n        currentDelay = Math.min(currentDelay * 2, 30_000);\n        log.warn(\n          { chatId: chatId.toString(), topicId: topicId.toString(), newDelay: currentDelay, totalScanned },\n          \"FLOOD_WAIT persisted after retries \u00e2\u20ac\u201d increasing inter-page delay and retrying\"\n        );\n        const jitter = 1000 + Math.random() * 4000;\n        await sleep(waitSec * 1000 + jitter);\n        continue;\n      }\n      throw err;\n    }\n\n    // Successful call \u00e2\u20ac\u201d gradually relax the delay back toward baseline\n    if (currentDelay > config.apiDelayMs) {\n      currentDelay = Math.max(config.apiDelayMs, Math.floor(currentDelay * 0.8));\n    }\n\n    if (!result.messages || result.messages.length === 0) break;\n\n    totalScanned += result.messages.length;\n\n    for (const msg of result.messages) {\n      const doc = msg.content?.document;\n      if (doc?.file_name && doc.document && isArchiveAttachment(doc.file_name)) {\n        archives.push({\n          id: BigInt(msg.id),\n          fileName: doc.file_name,\n          fileId: String(doc.document.id),\n          fileSize: BigInt(doc.document.size),\n          date: new Date(msg.date * 1000),\n        });\n        continue;\n      }\n\n      const photo = msg.content?.photo;\n      const caption = msg.content?.caption?.text ?? \"\";\n      if (photo?.sizes && photo.sizes.length > 0) {\n        const smallest = photo.sizes[0];\n        photos.push({\n          id: BigInt(msg.id),\n          date: new Date(msg.date * 1000),\n          caption,\n          fileId: String(smallest.photo.id),\n          fileSize: smallest.photo.size || smallest.photo.expected_size,\n        });\n      }\n    }\n\n    onProgress?.(totalScanned);\n\n    currentFromId = result.messages[result.messages.length - 1].id;\n\n    if (currentFromId === previousFromId) {\n      log.warn(\n        { chatId: chatId.toString(), topicId: topicId.toString(), currentFromId, totalScanned },\n        \"Topic pagination stuck (from_message_id not advancing), breaking\"\n      );\n      break;\n    }\n\n    if (boundary && currentFromId < boundary) break;\n\n    if (result.messages.length < Math.min(limit, 100)) break;\n\n    await sleep(currentDelay);\n  }\n\n  log.info(\n    { chatId: chatId.toString(), topicId: topicId.toString(), archives: archives.length, photos: photos.length, totalScanned, pages: pageCount },\n    \"Topic scan complete\"\n  );\n\n  return {\n    archives: archives.reverse(),\n    photos: photos.reverse(),\n    totalScanned,\n  };\n}\n```\n\n## Skill Patterns Applied\n\n### 1. FLOOD_WAIT Handling (Skill: \"The Right Way to Handle It\")\n\nThe existing `withFloodWait` and `extractFloodWaitSeconds` in `worker/src/util/retry.ts` already implement the skill's recommended pattern verbatim -- extract wait duration, add 1-5s jitter, retry up to maxRetries. The fix reuses `extractFloodWaitSeconds` at the pagination loop level as a second layer of defense.\n\n### 2. Paginated Scanning with Delay (Skill: \"Pattern: Paginated Scanning with Delay\")\n\nThe skill states: *\"When reading channel history or enumerating topics, always add a delay between pages\"* and shows a 1-second delay example. The existing code has this (`config.apiDelayMs = 1000`). The fix enhances this with adaptive backoff: the delay doubles when FLOOD_WAIT is encountered and gradually relaxes back to baseline on success.\n\n### 3. Non-rate-limit Errors Should Fail Fast (Skill: \"Key Rules\")\n\nThe skill states: *\"Non-rate-limit errors should fail fast. Only retry on FLOOD_WAIT, not on other errors.\"* The fix checks `extractFloodWaitSeconds` and only applies the pagination-level recovery for rate limit errors. All other errors propagate immediately via `throw err`.\n\n### 4. Always Respect the Wait Duration (Skill: \"Key Rules\")\n\nThe skill states: *\"Always respect the wait duration. Never retry before retry_after expires.\"* The fix sleeps for the full `waitSec * 1000 + jitter` before retrying the page, ensuring the mandatory pause is honored.\n\n### 5. Add Jitter (Skill: \"Key Rules\")\n\nThe skill states: *\"Add jitter. Without it, multiple clients retry simultaneously and trigger another FLOOD_WAIT.\"* Both the existing `withFloodWait` wrapper and the new pagination-level recovery use `1000 + Math.random() * 4000` jitter, consistent with the skill's recommendation.\n\n## Files Affected\n\n- `worker/src/tdlib/download.ts` -- `getChannelMessages` function (adaptive delay + pagination-level FLOOD_WAIT recovery)\n- `worker/src/tdlib/topics.ts` -- `getTopicMessages` function (same fix)\n\n## Summary\n\nThe crash happens because the pagination loop fires 100+ consecutive `getChatHistory` calls at 1-second intervals. When FLOOD_WAIT triggers, `withFloodWait` sleeps and retries that single call, but the loop immediately resumes its aggressive cadence, re-triggering FLOOD_WAIT until retries are exhausted. The fix adds adaptive backoff at the pagination level: double the inter-page delay on each FLOOD_WAIT, gradually relax on success, and add a pagination-level catch that respects the full wait duration before retrying.\n"}], "grading": {"run_id": "eval-2-with_skill", "expectations": [{"text": "identifies_retry_as_fix", "passed": true, "evidence": "Identifies that withFloodWait already exists but the pagination loop needs its own adaptive backoff layer. Adds extractFloodWaitSeconds at pagination level."}, {"text": "recommends_pagination_delay", "passed": true, "evidence": "Keeps existing sleep(config.apiDelayMs) and makes it adaptive: doubles on FLOOD_WAIT, relaxes by 0.8x on success."}, {"text": "respects_retry_after", "passed": true, "evidence": "Extracts actual wait duration: 'await sleep(waitSec * 1000 + jitter)' using extractFloodWaitSeconds. Explicitly cites skill rule: 'Always respect the wait duration.'"}, {"text": "does_not_reduce_frequency_as_primary_fix", "passed": true, "evidence": "Primary fix is adaptive backoff at pagination level, not reducing scan frequency. Does not suggest lowering WORKER_INTERVAL_MINUTES."}]}}, {"id": "eval-2-flood-wait-without_skill", "prompt": "The worker keeps crashing with 'FLOOD_WAIT_35' errors when scanning a source channel that has about 10,000 messages. It happens during the getChannelMessages pagination loop. How do I fix this?", "eval_id": 2, "outputs": [{"name": "response.md", "type": "text", "content": "# Diagnosis: FLOOD_WAIT_35 Crashes During Channel Message Pagination\n\n## Root Cause\n\nThe `getChannelMessages` function in `worker/src/tdlib/download.ts` (line 146) paginates through a channel's entire history using `getChatHistory`. For a channel with ~10,000 messages at 100 messages per page, that is **100 consecutive API calls** in a tight loop.\n\nThe current rate-limit mitigation has two problems:\n\n1. **The inter-page delay is too low.** `config.apiDelayMs` is hardcoded to **1000ms** (1 second) in `worker/src/util/config.ts:15`. Telegram's rate limiter for `getChatHistory` typically allows roughly one call every 1-2 seconds for moderate volumes, but when you are hammering it 100 times in a row the server starts issuing `FLOOD_WAIT` penalties. A 1-second fixed delay is not enough for sustained high-volume pagination.\n\n2. **The pagination call (`getChatHistory`) does NOT use the `withFloodWait` retry wrapper.** Look at `download.ts:174` -- it calls `invokeWithTimeout`, which **does** wrap the call with `withFloodWait`. So the retry logic IS present. However, the retry wrapper in `worker/src/util/retry.ts` has `maxRetries` set to **5** (from config). When you are scanning 10,000 messages, you may hit FLOOD_WAIT multiple times across different pages, and each individual page gets only 5 retries. If Telegram escalates the wait time (e.g., FLOOD_WAIT_35 means \"wait 35 seconds\"), the retry logic does handle it -- but the real problem is that the **fixed 1-second inter-page delay is too aggressive**, causing FLOOD_WAIT errors to pile up on nearly every page in the latter half of the scan. Eventually one page exhausts its 5 retries and the entire scan crashes.\n\n3. **No adaptive/exponential backoff between pages.** After successfully recovering from a FLOOD_WAIT, the code immediately goes back to the 1-second delay for the next page, triggering another FLOOD_WAIT almost instantly. There is no mechanism to slow down after being rate-limited.\n\n## The Fix\n\nThe fix has three parts:\n\n### Part 1: Make `apiDelayMs` configurable and increase the default\n\n**File: `worker/src/util/config.ts`**\n\n```typescript\nexport const config = {\n  databaseUrl: process.env.DATABASE_URL ?? \"\",\n  workerIntervalMinutes: parseInt(process.env.WORKER_INTERVAL_MINUTES ?? \"60\", 10),\n  tempDir: process.env.WORKER_TEMP_DIR ?? \"/tmp/zips\",\n  tdlibStateDir: process.env.TDLIB_STATE_DIR ?? \"/data/tdlib\",\n  maxZipSizeMB: parseInt(process.env.WORKER_MAX_ZIP_SIZE_MB ?? \"4096\", 10),\n  logLevel: (process.env.LOG_LEVEL ?? \"info\") as \"debug\" | \"info\" | \"warn\" | \"error\",\n  telegramApiId: parseInt(process.env.TELEGRAM_API_ID ?? \"0\", 10),\n  telegramApiHash: process.env.TELEGRAM_API_HASH ?? \"\",\n  /** Maximum jitter added to scheduler interval (in minutes) */\n  jitterMinutes: 5,\n  /** Maximum time span for multipart archive parts (in hours). 0 = no limit. */\n  multipartTimeoutHours: parseInt(process.env.MULTIPART_TIMEOUT_HOURS ?? \"0\", 10),\n  /** Delay between Telegram API calls (in ms) to avoid rate limits */\n  apiDelayMs: parseInt(process.env.WORKER_API_DELAY_MS ?? \"2000\", 10),\n  /** Max retries for rate-limited requests */\n  maxRetries: parseInt(process.env.WORKER_MAX_RETRIES ?? \"10\", 10),\n} as const;\n```\n\nChanges: default `apiDelayMs` raised from 1000 to **2000**, `maxRetries` raised from 5 to **10**, both now configurable via environment variables.\n\n### Part 2: Add adaptive backoff to the pagination loops\n\nWhen a FLOOD_WAIT is encountered and recovered from inside `invokeWithTimeout`/`withFloodWait`, the pagination loop should temporarily increase its inter-page delay to prevent immediately triggering another FLOOD_WAIT.\n\n**File: `worker/src/tdlib/download.ts`** -- replace the `getChannelMessages` function:\n\n```typescript\n/**\n * Fetch messages from a channel, stopping once we've scanned past the\n * last-processed boundary (with one page of lookback for multipart safety).\n * Collects both archive attachments AND photo messages (for preview matching).\n * Returns messages in chronological order (oldest first).\n *\n * When `lastProcessedMessageId` is null (first run), scans everything.\n * The worker applies a post-grouping filter to skip fully-processed sets,\n * and keeps `packageExistsBySourceMessage` as a safety net.\n *\n * Safety features:\n *  - Max page limit to prevent infinite loops\n *  - Stuck detection: breaks if from_message_id stops advancing\n *  - Timeout on each TDLib API call\n *  - Adaptive backoff: increases delay after FLOOD_WAIT recovery\n */\nexport async function getChannelMessages(\n  client: Client,\n  chatId: bigint,\n  lastProcessedMessageId?: bigint | null,\n  limit = 100,\n  onProgress?: ScanProgressCallback\n): Promise<ChannelScanResult> {\n  const archives: TelegramMessage[] = [];\n  const photos: TelegramPhoto[] = [];\n  const boundary = lastProcessedMessageId ? Number(lastProcessedMessageId) : null;\n\n  let currentFromId = 0;\n  let totalScanned = 0;\n  let pageCount = 0;\n\n  // Adaptive delay: starts at config value, increases after FLOOD_WAIT recovery\n  let currentDelayMs = config.apiDelayMs;\n  const MAX_DELAY_MS = 30_000; // Cap at 30 seconds between pages\n\n  // eslint-disable-next-line no-constant-condition\n  while (true) {\n    if (pageCount >= MAX_SCAN_PAGES) {\n      log.warn(\n        { chatId: chatId.toString(), pageCount, totalScanned },\n        \"Hit max page limit for channel scan, stopping\"\n      );\n      break;\n    }\n    pageCount++;\n\n    const previousFromId = currentFromId;\n\n    let result: { messages: TdMessage[] };\n    try {\n      result = await invokeWithTimeout<{ messages: TdMessage[] }>(client, {\n        _: \"getChatHistory\",\n        chat_id: Number(chatId),\n        from_message_id: currentFromId,\n        offset: 0,\n        limit: Math.min(limit, 100),\n        only_local: false,\n      });\n\n      // Successful call without rate limiting \u00e2\u20ac\u201d gradually reduce delay back\n      // toward the base value (but never below it)\n      if (currentDelayMs > config.apiDelayMs) {\n        currentDelayMs = Math.max(\n          config.apiDelayMs,\n          Math.floor(currentDelayMs * 0.8)\n        );\n      }\n    } catch (err) {\n      // If withFloodWait inside invokeWithTimeout exhausted retries on a\n      // FLOOD_WAIT error, increase the inter-page delay significantly\n      // before re-throwing so the caller (or a future retry of the whole\n      // scan) starts slower.\n      const floodSeconds = extractFloodWaitSeconds(err);\n      if (floodSeconds !== null) {\n        // The retry wrapper already waited, but we still got rate-limited\n        // after max retries. Double the inter-page delay for next time.\n        currentDelayMs = Math.min(MAX_DELAY_MS, currentDelayMs * 2);\n        log.warn(\n          {\n            chatId: chatId.toString(),\n            pageCount,\n            totalScanned,\n            newDelayMs: currentDelayMs,\n          },\n          \"FLOOD_WAIT exhausted retries \u00e2\u20ac\u201d increased inter-page delay\"\n        );\n      }\n      throw err;\n    }\n\n    if (!result.messages || result.messages.length === 0) break;\n\n    totalScanned += result.messages.length;\n\n    for (const msg of result.messages) {\n      // Check for archive documents\n      const doc = msg.content?.document;\n      if (doc?.file_name && doc.document && isArchiveAttachment(doc.file_name)) {\n        archives.push({\n          id: BigInt(msg.id),\n          fileName: doc.file_name,\n          fileId: String(doc.document.id),\n          fileSize: BigInt(doc.document.size),\n          date: new Date(msg.date * 1000),\n        });\n        continue;\n      }\n\n      // Check for photo messages (potential previews)\n      const photo = msg.content?.photo;\n      const caption = msg.content?.caption?.text ?? \"\";\n      if (photo?.sizes && photo.sizes.length > 0) {\n        const smallest = photo.sizes[0];\n        photos.push({\n          id: BigInt(msg.id),\n          date: new Date(msg.date * 1000),\n          caption,\n          fileId: String(smallest.photo.id),\n          fileSize: smallest.photo.size || smallest.photo.expected_size,\n        });\n      }\n    }\n\n    // Report scanning progress after each page\n    onProgress?.(totalScanned);\n\n    currentFromId = result.messages[result.messages.length - 1].id;\n\n    // Stuck detection: if from_message_id didn't advance, break to prevent infinite loop\n    if (currentFromId === previousFromId) {\n      log.warn(\n        { chatId: chatId.toString(), currentFromId, totalScanned },\n        \"Pagination stuck (from_message_id not advancing), breaking\"\n      );\n      break;\n    }\n\n    // Stop scanning once we've gone past the boundary (this page is the lookback)\n    if (boundary && currentFromId < boundary) break;\n\n    if (result.messages.length < Math.min(limit, 100)) break;\n\n    // Rate limit delay (adaptive)\n    await sleep(currentDelayMs);\n  }\n\n  log.info(\n    { chatId: chatId.toString(), archives: archives.length, photos: photos.length, totalScanned, pages: pageCount },\n    \"Channel scan complete\"\n  );\n\n  // Reverse to chronological order (oldest first) so worker processes old\u00e2\u2020\u2019new\n  return {\n    archives: archives.reverse(),\n    photos: photos.reverse(),\n    totalScanned,\n  };\n}\n```\n\nYou also need to add the import for `extractFloodWaitSeconds` at the top of `download.ts`:\n\n```typescript\nimport { withFloodWait, extractFloodWaitSeconds } from \"../util/retry.js\";\n```\n\n### Part 3: Apply the same adaptive backoff to `getTopicMessages` in `topics.ts`\n\nThe same pattern should be applied to `worker/src/tdlib/topics.ts` in the `getTopicMessages` function (and `getForumTopicList` for good measure). The change is identical in structure: track `currentDelayMs`, reduce it on success, and note the escalation path on FLOOD_WAIT errors.\n\n**File: `worker/src/tdlib/topics.ts`** -- add the import and apply to both pagination loops. Here is the updated `getTopicMessages`:\n\n```typescript\nimport { extractFloodWaitSeconds } from \"../util/retry.js\";\n\n// ... (existing code) ...\n\nexport async function getTopicMessages(\n  client: Client,\n  chatId: bigint,\n  topicId: bigint,\n  lastProcessedMessageId?: bigint | null,\n  limit = 100,\n  onProgress?: ScanProgressCallback\n): Promise<ChannelScanResult> {\n  const archives: TelegramMessage[] = [];\n  const photos: TelegramPhoto[] = [];\n  const boundary = lastProcessedMessageId ? Number(lastProcessedMessageId) : null;\n\n  let currentFromId = 0;\n  let totalScanned = 0;\n  let pageCount = 0;\n\n  // Adaptive delay\n  let currentDelayMs = config.apiDelayMs;\n  const MAX_DELAY_MS = 30_000;\n\n  // eslint-disable-next-line no-constant-condition\n  while (true) {\n    if (pageCount >= MAX_SCAN_PAGES) {\n      log.warn(\n        { chatId: chatId.toString(), topicId: topicId.toString(), pageCount, totalScanned },\n        \"Hit max page limit for topic scan, stopping\"\n      );\n      break;\n    }\n    pageCount++;\n\n    const previousFromId = currentFromId;\n\n    let result: {\n      messages?: {\n        id: number;\n        date: number;\n        content: {\n          _: string;\n          document?: {\n            file_name?: string;\n            document?: { id: number; size: number };\n          };\n          photo?: {\n            sizes?: {\n              type: string;\n              photo: { id: number; size: number; expected_size: number };\n              width: number;\n              height: number;\n            }[];\n          };\n          caption?: { text?: string };\n        };\n      }[];\n    };\n\n    try {\n      result = await invokeWithTimeout(client, {\n        _: \"searchChatMessages\",\n        chat_id: Number(chatId),\n        query: \"\",\n        message_thread_id: Number(topicId),\n        from_message_id: currentFromId,\n        offset: 0,\n        limit: Math.min(limit, 100),\n        filter: null,\n        sender_id: null,\n        saved_messages_topic_id: 0,\n      });\n\n      // Gradually reduce delay back toward base after success\n      if (currentDelayMs > config.apiDelayMs) {\n        currentDelayMs = Math.max(\n          config.apiDelayMs,\n          Math.floor(currentDelayMs * 0.8)\n        );\n      }\n    } catch (err) {\n      const floodSeconds = extractFloodWaitSeconds(err);\n      if (floodSeconds !== null) {\n        currentDelayMs = Math.min(MAX_DELAY_MS, currentDelayMs * 2);\n        log.warn(\n          {\n            chatId: chatId.toString(),\n            topicId: topicId.toString(),\n            pageCount,\n            totalScanned,\n            newDelayMs: currentDelayMs,\n          },\n          \"FLOOD_WAIT exhausted retries \u00e2\u20ac\u201d increased inter-page delay\"\n        );\n      }\n      throw err;\n    }\n\n    if (!result.messages || result.messages.length === 0) break;\n\n    totalScanned += result.messages.length;\n\n    for (const msg of result.messages) {\n      const doc = msg.content?.document;\n      if (doc?.file_name && doc.document && isArchiveAttachment(doc.file_name)) {\n        archives.push({\n          id: BigInt(msg.id),\n          fileName: doc.file_name,\n          fileId: String(doc.document.id),\n          fileSize: BigInt(doc.document.size),\n          date: new Date(msg.date * 1000),\n        });\n        continue;\n      }\n\n      const photo = msg.content?.photo;\n      const caption = msg.content?.caption?.text ?? \"\";\n      if (photo?.sizes && photo.sizes.length > 0) {\n        const smallest = photo.sizes[0];\n        photos.push({\n          id: BigInt(msg.id),\n          date: new Date(msg.date * 1000),\n          caption,\n          fileId: String(smallest.photo.id),\n          fileSize: smallest.photo.size || smallest.photo.expected_size,\n        });\n      }\n    }\n\n    onProgress?.(totalScanned);\n\n    currentFromId = result.messages[result.messages.length - 1].id;\n\n    if (currentFromId === previousFromId) {\n      log.warn(\n        { chatId: chatId.toString(), topicId: topicId.toString(), currentFromId, totalScanned },\n        \"Topic pagination stuck (from_message_id not advancing), breaking\"\n      );\n      break;\n    }\n\n    if (boundary && currentFromId < boundary) break;\n\n    if (result.messages.length < Math.min(limit, 100)) break;\n\n    // Adaptive rate limit delay\n    await sleep(currentDelayMs);\n  }\n\n  log.info(\n    { chatId: chatId.toString(), topicId: topicId.toString(), archives: archives.length, photos: photos.length, totalScanned, pages: pageCount },\n    \"Topic scan complete\"\n  );\n\n  return {\n    archives: archives.reverse(),\n    photos: photos.reverse(),\n    totalScanned,\n  };\n}\n```\n\n## Summary of Changes\n\n| File | Change | Why |\n|---|---|---|\n| `worker/src/util/config.ts` | Raise `apiDelayMs` default to 2000, `maxRetries` to 10; make both env-configurable | 1s delay is too aggressive for 100-page scans; 5 retries is too few for sustained scanning |\n| `worker/src/tdlib/download.ts` | Add adaptive backoff to `getChannelMessages` loop; import `extractFloodWaitSeconds` | After FLOOD_WAIT recovery, the next page should wait longer, not immediately go back to the base delay |\n| `worker/src/tdlib/topics.ts` | Same adaptive backoff in `getTopicMessages` and `getForumTopicList` | Same vulnerability exists in topic scanning |\n\n## Approach Explanation\n\nThe core insight is that `FLOOD_WAIT_35` is Telegram telling the client \"you are calling me too fast, wait 35 seconds.\" The existing `withFloodWait` retry wrapper correctly handles individual occurrences by sleeping and retrying. But when scanning 10,000 messages (100 pages), the **loop itself** needs to adapt its pace. A fixed 1-second delay between pages is what causes the flood of FLOOD_WAIT errors in the first place.\n\nThe adaptive backoff strategy:\n- **On success:** gradually decrease the delay back toward the base value (multiply by 0.8), so scanning speeds back up once the rate limit pressure eases.\n- **On FLOOD_WAIT recovery (inside withFloodWait):** the retry wrapper handles it transparently -- the loop just sees a slower successful call and reduces delay.\n- **On FLOOD_WAIT exhausting retries:** double the inter-page delay (capped at 30s) before re-throwing, so if the scan is retried it starts slower.\n- **Higher base delay (2s):** prevents most FLOOD_WAIT errors from occurring in the first place for typical channel sizes.\n- **More retries (10):** gives the retry wrapper enough headroom to survive occasional rate limits during long scans without crashing.\n"}], "grading": {"run_id": "eval-2-without_skill", "expectations": [{"text": "identifies_retry_as_fix", "passed": true, "evidence": "Correctly identifies that invokeWithTimeout already wraps calls in withFloodWait. Adds adaptive backoff at pagination level."}, {"text": "recommends_pagination_delay", "passed": true, "evidence": "Raises default apiDelayMs from 1000 to 2000 and adds adaptive backoff pattern."}, {"text": "respects_retry_after", "passed": true, "evidence": "Uses extractFloodWaitSeconds to get actual wait. However, the catch block throws immediately after logging \u00e2\u20ac\u201d doesn't sleep the flood wait at pagination level before retry like the with-skill version does."}, {"text": "does_not_reduce_frequency_as_primary_fix", "passed": true, "evidence": "Primary fix is adaptive backoff + raised defaults, not reducing scan frequency."}]}}, {"id": "eval-3-download-reupload-with_skill", "prompt": "Write a utility function for the worker that downloads a file from a source Telegram channel message and re-uploads it to the destination channel. It needs to handle files up to 2GB and work reliably in Docker.", "eval_id": 3, "outputs": [{"name": "response.md", "type": "text", "content": "# Download & Re-upload Utility for the Worker\n\n## Approach\n\nThis utility function downloads a file from a source Telegram channel message and re-uploads it to a destination channel, returning the server-assigned message ID of the uploaded file. It is designed to slot into the existing worker codebase at `worker/src/tdlib/transfer.ts`.\n\nThe function composes the existing `downloadFile` (from `tdlib/download.ts`) and `uploadToChannel` (from `upload/channel.ts`) primitives, adding:\n\n1. **Temporary file management** with guaranteed cleanup in a `finally` block\n2. **Size-scaled timeouts** for files up to 2 GB (the TDLib user account limit)\n3. **Cross-filesystem safety** via the existing `verifyAndMove` pattern (rename with EXDEV fallback)\n4. **FLOOD_WAIT-aware retries** by delegating to the existing `withFloodWait` wrapper on every TDLib invoke\n5. **Docker reliability**: uses `/tmp/zips` (the volume from the Dockerfile) for temp storage, ensures cleanup even on crash, and avoids holding large buffers in memory\n\n## Skill Patterns Applied\n\n| Skill Pattern | Where Applied |\n|---|---|\n| **FLOOD_WAIT handling** (`withFloodWait` + `extractFloodWaitSeconds`) | All TDLib invocations go through `withFloodWait` via `invokeWithTimeout` (download) and the upload internals |\n| **Download/Upload Timeouts** (scale with file size: 10 min/GB, min 5-10 min) | Inherited from existing `downloadFile` and `sendAndWaitForUpload` |\n| **Event Listener Before Action** | Inherited from existing `downloadFile` (subscribes to `updateFile` before calling `downloadFile` invoke) and `uploadToChannel` (subscribes before `sendMessage`) |\n| **TDLib Client Lifecycle** (`finally` block for cleanup) | The caller is expected to manage the client; this utility manages temp files in its own `finally` |\n| **File Size Limits** (User account TDLib: 2 GB upload/download) | Explicit 2 GB guard with clear error message |\n| **Sequential Send Queue** / no concurrent sends | Single sequential download-then-upload, rate limit delay between steps |\n| **BigInt Chat IDs** | Passes `Number(chatId)` to TDLib invoke calls (inherited from existing code) |\n| **Docker Considerations** | Uses the mounted `/tmp/zips` volume, per-operation subdirectory, guaranteed cleanup |\n| **Never bare `client.invoke()`** | All invocations go through `withFloodWait` wrappers |\n\n## Full Implementation\n\nFile: `worker/src/tdlib/transfer.ts`\n\n```typescript\nimport path from \"path\";\nimport { mkdir, rm, stat } from \"fs/promises\";\nimport { randomUUID } from \"crypto\";\nimport type { Client } from \"tdl\";\nimport { config } from \"../util/config.js\";\nimport { childLogger } from \"../util/logger.js\";\nimport { downloadFile } from \"./download.js\";\nimport type { DownloadProgress } from \"./download.js\";\nimport { uploadToChannel } from \"../upload/channel.js\";\n\nconst log = childLogger(\"transfer\");\n\n/** Maximum file size TDLib user accounts can handle (2 GB). */\nconst MAX_TRANSFER_BYTES = 2n * 1024n * 1024n * 1024n;\n\nexport interface TransferOptions {\n  /** TDLib file ID (numeric string) of the file to download. */\n  fileId: string;\n  /** Original file name from the source message. */\n  fileName: string;\n  /** Expected file size in bytes. */\n  fileSize: bigint;\n  /** Telegram chat ID of the source channel (used only for logging context). */\n  sourceChatId: bigint;\n  /** Telegram chat ID of the destination channel. */\n  destChatId: bigint;\n  /** Optional caption to attach to the uploaded message. */\n  caption?: string;\n  /** Optional callback for download progress updates. */\n  onDownloadProgress?: (progress: DownloadProgress) => void;\n}\n\nexport interface TransferResult {\n  /** Server-assigned message ID of the uploaded file in the destination channel. */\n  destMessageId: bigint;\n  /** Size of the transferred file in bytes (verified on disk after download). */\n  transferredBytes: number;\n}\n\n/**\n * Download a file from a source Telegram channel message and re-upload it\n * to a destination channel.\n *\n * This function:\n *  1. Validates the file size is within TDLib's 2 GB limit\n *  2. Downloads the file to a temporary directory (with progress tracking)\n *  3. Verifies the downloaded file's size matches the expected size\n *  4. Uploads the file to the destination channel\n *  5. Waits for Telegram's server-side upload confirmation\n *  6. Cleans up the temporary file (even on failure)\n *\n * All TDLib calls are wrapped with FLOOD_WAIT-aware retry logic.\n * Timeouts scale with file size (10 minutes per GB, minimum 5 minutes for\n * download, 10 minutes for upload).\n *\n * Designed for Docker: uses the configured temp directory (mounted volume at\n * /tmp/zips) and creates a unique subdirectory per transfer to avoid collisions\n * between concurrent operations.\n *\n * @throws Error if file exceeds 2 GB\n * @throws Error if download fails, times out, or size verification fails\n * @throws Error if upload fails or times out\n */\nexport async function downloadAndReupload(\n  client: Client,\n  options: TransferOptions\n): Promise<TransferResult> {\n  const {\n    fileId,\n    fileName,\n    fileSize,\n    sourceChatId,\n    destChatId,\n    caption,\n    onDownloadProgress,\n  } = options;\n\n  // \u00e2\u201d\u20ac\u00e2\u201d\u20ac Validate file size \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n  if (fileSize > MAX_TRANSFER_BYTES) {\n    throw new Error(\n      `File \"${fileName}\" is ${Number(fileSize / (1024n * 1024n))}MB, ` +\n        `which exceeds the TDLib user account limit of 2 GB`\n    );\n  }\n\n  // \u00e2\u201d\u20ac\u00e2\u201d\u20ac Create isolated temp directory for this transfer \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n  const transferId = randomUUID();\n  const transferDir = path.join(config.tempDir, `transfer_${transferId}`);\n  await mkdir(transferDir, { recursive: true });\n\n  const tempFilePath = path.join(transferDir, fileName);\n\n  log.info(\n    {\n      fileId,\n      fileName,\n      fileSize: Number(fileSize),\n      sourceChatId: Number(sourceChatId),\n      destChatId: Number(destChatId),\n      transferDir,\n    },\n    \"Starting download-and-reupload transfer\"\n  );\n\n  try {\n    // \u00e2\u201d\u20ac\u00e2\u201d\u20ac Step 1: Download from source \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n    log.info({ fileId, fileName }, \"Downloading file from source channel\");\n\n    await downloadFile(\n      client,\n      fileId,\n      tempFilePath,\n      fileSize,\n      fileName,\n      onDownloadProgress\n    );\n\n    // \u00e2\u201d\u20ac\u00e2\u201d\u20ac Step 2: Verify downloaded file \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n    const fileStats = await stat(tempFilePath);\n    const actualBytes = fileStats.size;\n\n    if (Number(fileSize) > 0 && actualBytes !== Number(fileSize)) {\n      throw new Error(\n        `Downloaded file size mismatch for \"${fileName}\": ` +\n          `expected ${Number(fileSize)} bytes, got ${actualBytes} bytes`\n      );\n    }\n\n    log.info(\n      { fileName, bytes: actualBytes },\n      \"Download complete, starting upload to destination\"\n    );\n\n    // \u00e2\u201d\u20ac\u00e2\u201d\u20ac Step 3: Upload to destination \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n    const uploadResult = await uploadToChannel(\n      client,\n      destChatId,\n      [tempFilePath],\n      caption\n    );\n\n    log.info(\n      {\n        fileName,\n        destMessageId: Number(uploadResult.messageId),\n        destChatId: Number(destChatId),\n        bytes: actualBytes,\n      },\n      \"Transfer complete: file uploaded to destination channel\"\n    );\n\n    return {\n      destMessageId: uploadResult.messageId,\n      transferredBytes: actualBytes,\n    };\n  } catch (err) {\n    log.error(\n      {\n        err,\n        fileId,\n        fileName,\n        sourceChatId: Number(sourceChatId),\n        destChatId: Number(destChatId),\n      },\n      \"Transfer failed\"\n    );\n    throw err;\n  } finally {\n    // \u00e2\u201d\u20ac\u00e2\u201d\u20ac Always clean up temp files \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n    await rm(transferDir, { recursive: true, force: true }).catch((cleanupErr) => {\n      log.warn(\n        { err: cleanupErr, transferDir },\n        \"Failed to clean up transfer temp directory\"\n      );\n    });\n  }\n}\n\n/**\n * Convenience wrapper that extracts the file info from a TDLib message object\n * and calls downloadAndReupload.\n *\n * Accepts the raw TDLib message shape (as returned by getChatHistory) so callers\n * don't need to manually extract document fields.\n *\n * @throws Error if the message does not contain a document attachment\n */\nexport async function transferMessageFile(\n  client: Client,\n  // eslint-disable-next-line @typescript-eslint/no-explicit-any\n  message: any,\n  sourceChatId: bigint,\n  destChatId: bigint,\n  caption?: string,\n  onDownloadProgress?: (progress: DownloadProgress) => void\n): Promise<TransferResult> {\n  const doc = message?.content?.document;\n  if (!doc?.document) {\n    throw new Error(\n      `Message ${message?.id} does not contain a document attachment`\n    );\n  }\n\n  return downloadAndReupload(client, {\n    fileId: String(doc.document.id),\n    fileName: doc.file_name ?? `file_${message.id}`,\n    fileSize: BigInt(doc.document.size),\n    sourceChatId,\n    destChatId,\n    caption,\n    onDownloadProgress,\n  });\n}\n```\n\n## Usage Example\n\nWithin the worker pipeline (e.g., in `worker.ts` or a new route handler):\n\n```typescript\nimport { createTdlibClient, closeTdlibClient } from \"./tdlib/client.js\";\nimport { downloadAndReupload } from \"./tdlib/transfer.js\";\n\nconst client = await createTdlibClient({ id: account.id, phone: account.phone });\ntry {\n  const result = await downloadAndReupload(client, {\n    fileId: \"12345\",\n    fileName: \"model_pack_v2.zip\",\n    fileSize: 1_500_000_000n, // ~1.4 GB\n    sourceChatId: -1001234567890n,\n    destChatId: -1009876543210n,\n    caption: \"Re-uploaded from source channel\",\n    onDownloadProgress: (progress) => {\n      console.log(`Download: ${progress.percent}%`);\n    },\n  });\n\n  console.log(`Uploaded as message ${result.destMessageId}`);\n} finally {\n  await closeTdlibClient(client);\n}\n```\n\n## Key Design Decisions\n\n1. **Delegates to existing primitives**: Rather than reimplementing download/upload logic, this composes `downloadFile` and `uploadToChannel` which already have FLOOD_WAIT retries, progress tracking, size-scaled timeouts, event-listener-before-action ordering, and upload confirmation via `updateMessageSendSucceeded`.\n\n2. **Unique temp directory per transfer**: Uses `randomUUID()` to create an isolated subdirectory under `/tmp/zips`. This prevents filename collisions when multiple transfers run concurrently and ensures `rm -rf` in the `finally` block only removes this transfer's files.\n\n3. **No in-memory buffering**: Files stream to disk via TDLib's native download mechanism, then upload from disk. This is essential for 2 GB files in Docker containers where memory is typically constrained.\n\n4. **Two-phase verification**: The downloaded file size is verified both inside `downloadFile` (via `verifyAndMove`) and again before upload. This double-check catches edge cases where `verifyAndMove` might succeed but the file gets corrupted during the cross-device copy fallback.\n\n5. **`transferMessageFile` convenience wrapper**: Extracts document metadata from raw TDLib message objects, so callers working with `getChatHistory` results don't need to manually navigate the nested content structure.\n"}], "grading": {"run_id": "eval-3-with_skill", "expectations": [{"text": "uses_flood_wait_retry", "passed": true, "evidence": "Delegates to existing downloadFile and uploadToChannel which internally use withFloodWait. Explicitly notes: 'All TDLib invocations go through withFloodWait via invokeWithTimeout'"}, {"text": "has_size_scaled_timeout", "passed": true, "evidence": "Inherits from existing primitives: 'Timeouts scale with file size (10 minutes per GB, minimum 5 minutes for download, 10 minutes for upload)'. Explicitly cited from skill."}, {"text": "listener_before_action", "passed": true, "evidence": "Explicitly noted in skill patterns table: 'Event Listener Before Action \u00e2\u20ac\u201d Inherited from existing downloadFile and uploadToChannel'. The skill pattern is referenced."}, {"text": "has_temp_cleanup", "passed": true, "evidence": "finally block with 'await rm(transferDir, { recursive: true, force: true })'. Uses randomUUID for isolation."}, {"text": "handles_2gb_limit", "passed": true, "evidence": "MAX_TRANSFER_BYTES = 2n * 1024n * 1024n * 1024n. Upfront validation with clear error message."}]}}, {"id": "eval-3-download-reupload-without_skill", "prompt": "Write a utility function for the worker that downloads a file from a source Telegram channel message and re-uploads it to the destination channel. It needs to handle files up to 2GB and work reliably in Docker.", "eval_id": 3, "outputs": [{"name": "response.md", "type": "text", "content": "# Download and Re-upload Utility for the DragonsStash Worker\n\n## Approach\n\nThe utility function `downloadAndReupload` bridges a source Telegram channel message to a destination channel by:\n\n1. **Downloading** the file from the source message using TDLib's async `downloadFile` with `updateFile` progress events (the same pattern already used in `worker/src/tdlib/download.ts`).\n2. **Writing** the file to the worker's temp directory (`/tmp/zips` in Docker, configured via `WORKER_TEMP_DIR`).\n3. **Verifying** the downloaded file's size matches the expected size (integrity check).\n4. **Re-uploading** to the destination channel using TDLib's `sendMessage` + `updateMessageSendSucceeded` pattern (the same pattern already used in `worker/src/upload/channel.ts`).\n5. **Cleaning up** the temp file in a `finally` block to prevent disk exhaustion in Docker.\n\n### Docker Considerations\n\n- Uses the existing `/tmp/zips` volume mount (declared in the worker Dockerfile) so large files don't fill the container's overlay filesystem.\n- Handles cross-device rename (`EXDEV`) when moving files between TDLib's cache directory (`/data/tdlib`) and the temp directory, since these may be on different Docker volumes.\n- Timeouts scale with file size (10 minutes per GB for both download and upload), with a minimum of 5 minutes for download and 10 minutes for upload -- matching the existing patterns in the codebase.\n- All temp files are cleaned up in `finally` blocks even if the operation fails partway through.\n\n### 2GB File Support\n\n- TDLib's `downloadFile` with `synchronous: false` handles files up to 2GB natively. The existing codebase already has this pattern working.\n- Telegram's upload limit is 2GB per message. The function validates the file size upfront and rejects files exceeding this limit, directing callers to use the existing `byteLevelSplit` + `uploadToChannel` multi-part flow for oversized files.\n- Uses `bigint` for file sizes throughout (matching the codebase convention) to avoid JavaScript number precision issues near the 2GB boundary.\n\n## File Location\n\nThis utility would be placed at `worker/src/tdlib/reupload.ts`, alongside the existing `download.ts` module.\n\n## Full Code\n\n```typescript\n// worker/src/tdlib/reupload.ts\n\nimport path from \"path\";\nimport { mkdir, unlink, stat } from \"fs/promises\";\nimport type { Client } from \"tdl\";\nimport { config } from \"../util/config.js\";\nimport { childLogger } from \"../util/logger.js\";\nimport { downloadFile } from \"./download.ts\";\nimport type { DownloadProgress } from \"./download.ts\";\nimport { uploadToChannel } from \"../upload/channel.js\";\nimport type { UploadResult } from \"../upload/channel.js\";\n\nconst log = childLogger(\"reupload\");\n\n/** Maximum file size Telegram allows for a single upload (2 GB). */\nconst MAX_UPLOAD_BYTES = 2n * 1024n * 1024n * 1024n;\n\nexport interface ReuploadOptions {\n  /** TDLib client instance (must be authenticated). */\n  client: Client;\n  /** Telegram file ID (numeric string) from the source message. */\n  fileId: string;\n  /** Original file name. */\n  fileName: string;\n  /** Expected file size in bytes. */\n  fileSize: bigint;\n  /** Telegram chat ID of the destination channel. */\n  destChatId: bigint;\n  /** Optional caption for the re-uploaded message. */\n  caption?: string;\n  /** Optional callback for download progress. */\n  onDownloadProgress?: (progress: DownloadProgress) => void;\n  /** Optional subdirectory name inside tempDir (to isolate concurrent operations). */\n  tempSubdir?: string;\n}\n\nexport interface ReuploadResult {\n  /** Server-assigned message ID in the destination channel. */\n  destMessageId: bigint;\n  /** Actual file size on disk after download (for verification logging). */\n  actualBytes: number;\n}\n\n/**\n * Download a file from a source Telegram channel message and re-upload it\n * to a destination channel.\n *\n * Flow:\n *  1. Validates file size is within Telegram's 2GB upload limit\n *  2. Downloads via TDLib async download with progress tracking\n *  3. Verifies file integrity (size match)\n *  4. Uploads to destination channel, waiting for server confirmation\n *  5. Cleans up the temp file\n *\n * For files larger than 2GB, callers should use the split + multi-part\n * upload flow in worker.ts instead.\n *\n * Docker notes:\n *  - Uses WORKER_TEMP_DIR (/tmp/zips) which is a Docker volume, so large\n *    files don't fill the overlay filesystem.\n *  - Handles cross-device moves between TDLib's file cache (/data/tdlib)\n *    and the temp directory.\n *  - Temp files are always cleaned up, even on failure.\n *\n * @throws Error if fileSize exceeds 2GB (callers should split first)\n * @throws Error if download fails, times out, or produces a size mismatch\n * @throws Error if upload fails or times out\n */\nexport async function downloadAndReupload(\n  opts: ReuploadOptions\n): Promise<ReuploadResult> {\n  const {\n    client,\n    fileId,\n    fileName,\n    fileSize,\n    destChatId,\n    caption,\n    onDownloadProgress,\n    tempSubdir,\n  } = opts;\n\n  // \u00e2\u201d\u20ac\u00e2\u201d\u20ac Validate: reject files that exceed Telegram's upload limit \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n  if (fileSize > MAX_UPLOAD_BYTES) {\n    throw new Error(\n      `File \"${fileName}\" is ${Number(fileSize / (1024n * 1024n))}MB, ` +\n        `which exceeds Telegram's 2GB upload limit. ` +\n        `Use byteLevelSplit + uploadToChannel for oversized files.`\n    );\n  }\n\n  // \u00e2\u201d\u20ac\u00e2\u201d\u20ac Prepare temp directory \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n  const workDir = tempSubdir\n    ? path.join(config.tempDir, tempSubdir)\n    : config.tempDir;\n  await mkdir(workDir, { recursive: true });\n\n  const tempPath = path.join(workDir, fileName);\n\n  log.info(\n    {\n      fileId,\n      fileName,\n      fileSize: Number(fileSize),\n      destChatId: Number(destChatId),\n      tempPath,\n    },\n    \"Starting download-and-reupload\"\n  );\n\n  try {\n    // \u00e2\u201d\u20ac\u00e2\u201d\u20ac Step 1: Download from source \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n    //\n    // Uses the existing downloadFile which:\n    //  - Starts an async TDLib download (priority 32)\n    //  - Listens for updateFile events with progress tracking\n    //  - Verifies file size after completion\n    //  - Moves from TDLib cache to destPath (handles EXDEV cross-device)\n    //  - Times out at max(5min, 10min/GB)\n    log.info({ fileId, fileName }, \"Downloading from source channel\");\n\n    await downloadFile(\n      client,\n      fileId,\n      tempPath,\n      fileSize,\n      fileName,\n      onDownloadProgress\n    );\n\n    // Extra safety: verify file exists and has the right size\n    const fileStats = await stat(tempPath);\n    const actualBytes = fileStats.size;\n    const expectedBytes = Number(fileSize);\n\n    if (expectedBytes > 0 && actualBytes !== expectedBytes) {\n      throw new Error(\n        `Downloaded file size mismatch for \"${fileName}\": ` +\n          `expected ${expectedBytes} bytes, got ${actualBytes} bytes`\n      );\n    }\n\n    log.info(\n      { fileId, fileName, actualBytes },\n      \"Download complete, starting upload to destination\"\n    );\n\n    // \u00e2\u201d\u20ac\u00e2\u201d\u20ac Step 2: Upload to destination channel \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n    //\n    // Uses the existing uploadToChannel which:\n    //  - Sends via sendMessage with inputFileLocal\n    //  - Listens for updateMessageSendSucceeded for the real server message ID\n    //  - Handles FLOOD_WAIT rate limits automatically\n    //  - Times out at max(10min, 10min/GB)\n    const uploadResult: UploadResult = await uploadToChannel(\n      client,\n      destChatId,\n      [tempPath],\n      caption\n    );\n\n    log.info(\n      {\n        fileId,\n        fileName,\n        destChatId: Number(destChatId),\n        destMessageId: Number(uploadResult.messageId),\n        actualBytes,\n      },\n      \"Download-and-reupload completed successfully\"\n    );\n\n    return {\n      destMessageId: uploadResult.messageId,\n      actualBytes,\n    };\n  } finally {\n    // \u00e2\u201d\u20ac\u00e2\u201d\u20ac Always clean up temp file \u00e2\u201d\u20ac\u00e2\u201d\u20ac\n    // Critical in Docker to prevent /tmp/zips volume from filling up,\n    // especially when processing many large files in sequence.\n    try {\n      await unlink(tempPath);\n      log.debug({ tempPath }, \"Cleaned up temp file\");\n    } catch {\n      // File may not exist if download failed before writing\n    }\n  }\n}\n\n/**\n * Convenience wrapper that downloads and re-uploads multiple files\n * (e.g., multipart archive parts) from a source channel to a destination.\n *\n * Each file is downloaded and uploaded sequentially with a rate-limit\n * delay between operations. Returns the message ID of the first upload\n * (matching the convention in uploadToChannel).\n *\n * For multipart sets where individual parts exceed 2GB, the caller\n * should use the full repack pipeline in worker.ts (concatenate +\n * byteLevelSplit) instead of this function.\n */\nexport async function downloadAndReuploadMultiple(\n  client: Client,\n  files: Array<{\n    fileId: string;\n    fileName: string;\n    fileSize: bigint;\n  }>,\n  destChatId: bigint,\n  caption?: string,\n  onDownloadProgress?: (fileIndex: number, progress: DownloadProgress) => void,\n  tempSubdir?: string\n): Promise<ReuploadResult> {\n  if (files.length === 0) {\n    throw new Error(\"No files provided for download-and-reupload\");\n  }\n\n  let firstResult: ReuploadResult | null = null;\n\n  for (let i = 0; i < files.length; i++) {\n    const file = files[i];\n\n    // Only set caption on the first file (matching uploadToChannel convention)\n    const fileCaption = i === 0 ? caption : undefined;\n\n    const result = await downloadAndReupload({\n      client,\n      fileId: file.fileId,\n      fileName: file.fileName,\n      fileSize: file.fileSize,\n      destChatId,\n      caption: fileCaption,\n      onDownloadProgress: onDownloadProgress\n        ? (progress) => onDownloadProgress(i, progress)\n        : undefined,\n      tempSubdir,\n    });\n\n    if (i === 0) {\n      firstResult = result;\n    }\n\n    // Rate limit delay between operations\n    if (i < files.length - 1) {\n      await new Promise((resolve) =>\n        setTimeout(resolve, config.apiDelayMs)\n      );\n    }\n  }\n\n  return firstResult!;\n}\n```\n\n## How It Fits Into the Existing Codebase\n\nThe function composes the two existing building blocks:\n\n- **`downloadFile`** from `worker/src/tdlib/download.ts` -- handles async download with `updateFile` events, progress tracking, timeout, size verification, and cross-device file moves (critical for Docker where `/data/tdlib` and `/tmp/zips` are separate volumes).\n- **`uploadToChannel`** from `worker/src/upload/channel.ts` -- handles `sendMessage` with `updateMessageSendSucceeded` confirmation, upload progress via `updateFile`, and FLOOD_WAIT retry.\n\nBoth are wrapped with `withFloodWait` internally, so the utility automatically handles Telegram rate limiting.\n\nThe `downloadAndReupload` function is a focused utility that can be called from the worker pipeline or any other part of the system that needs to transfer a file between channels. The existing `processOneArchiveSet` in `worker.ts` does a similar download-then-upload flow but with additional steps (hashing, dedup, metadata extraction, splitting). This utility extracts the core transfer operation for simpler use cases.\n\n## Usage Example\n\n```typescript\nimport { downloadAndReupload } from \"./tdlib/reupload.js\";\n\n// Transfer a single file from source to destination\nconst result = await downloadAndReupload({\n  client,\n  fileId: \"12345\",\n  fileName: \"archive.zip\",\n  fileSize: 1_500_000_000n, // ~1.5 GB\n  destChatId: -1001234567890n,\n  caption: \"Re-uploaded archive\",\n  onDownloadProgress: (progress) => {\n    console.log(`Download: ${progress.percent}%`);\n  },\n  tempSubdir: `reupload_${Date.now()}`,\n});\n\nconsole.log(`Uploaded as message ${result.destMessageId}`);\n```\n"}], "grading": {"run_id": "eval-3-without_skill", "expectations": [{"text": "uses_flood_wait_retry", "passed": true, "evidence": "Delegates to existing downloadFile and uploadToChannel which use withFloodWait internally. Notes 'Both are wrapped with withFloodWait internally'."}, {"text": "has_size_scaled_timeout", "passed": true, "evidence": "Notes existing timeouts: '10 minutes per GB for both download and upload, with a minimum of 5 minutes for download and 10 minutes for upload'. Inherited from composed functions."}, {"text": "listener_before_action", "passed": true, "evidence": "Mentions existing patterns in downloadFile and uploadToChannel handle this. But does NOT explicitly call it out as a critical concern or verify it."}, {"text": "has_temp_cleanup", "passed": true, "evidence": "finally block with 'await unlink(tempPath)'. Uses tempSubdir for isolation."}, {"text": "handles_2gb_limit", "passed": true, "evidence": "MAX_UPLOAD_BYTES = 2n * 1024n * 1024n * 1024n. Upfront validation with error directing to byteLevelSplit."}]}}], "previous_feedback": {}, "previous_outputs": {}, "benchmark": {"skill_name": "tdlib-telegram", "iteration": 1, "configs": [{"name": "with_skill", "pass_rate": {"mean": 1.0, "stddev": 0.0}, "tokens": {"mean": 53200, "stddev": 14800}, "time_seconds": {"mean": 123.5, "stddev": 16.7}}, {"name": "without_skill", "pass_rate": {"mean": 0.857, "stddev": 0.134}, "tokens": {"mean": 56467, "stddev": 12100}, "time_seconds": {"mean": 156.4, "stddev": 39.7}}], "delta": {"pass_rate": "+14.3%", "tokens": "-5.8%", "time": "-21.0%"}, "evals": [{"name": "broadcast-to-all-users", "with_skill": {"pass_rate": 1.0, "passed": 5, "total": 5, "tokens": 35365, "time_seconds": 107.6}, "without_skill": {"pass_rate": 0.6, "passed": 3, "total": 5, "tokens": 69214, "time_seconds": 200.2}}, {"name": "flood-wait-during-scan", "with_skill": {"pass_rate": 1.0, "passed": 4, "total": 4, "tokens": 63079, "time_seconds": 140.9}, "without_skill": {"pass_rate": 1.0, "passed": 4, "total": 4, "tokens": 45601, "time_seconds": 122.3}}, {"name": "download-and-reupload-file", "with_skill": {"pass_rate": 1.0, "passed": 5, "total": 5, "tokens": 61157, "time_seconds": 122.1}, "without_skill": {"pass_rate": 1.0, "passed": 5, "total": 5, "tokens": 54587, "time_seconds": 146.7}}], "analyst_notes": ["The skill's biggest impact was on Eval 1 (broadcast): the baseline MISSED both withFloodWait retry wrapping and inter-message delay \u00e2\u20ac\u201d the two most critical patterns for avoiding rate limits during bulk sends. This is exactly the kind of bug the skill is designed to prevent.", "Eval 2 (FLOOD_WAIT debugging) was a near-tie. Both versions correctly diagnosed the problem and proposed adaptive backoff. The skill version was slightly more thorough: it added pagination-level retry with sleep(waitSec) instead of just re-throwing, meaning it can survive even after withFloodWait's retries are exhausted.", "Eval 3 (download/reupload) was also close. Both correctly composed existing primitives. The skill version was more explicit about WHY certain patterns matter (referencing the skill's documentation), which helps future maintainers understand the code.", "The skill version was faster on average (-21% time) and used fewer tokens (-5.8%), likely because the skill front-loaded the knowledge instead of requiring the agent to discover it by reading source files."]}};
+
+    // ---- State ----
+    let feedbackMap = {};  // run_id -> feedback text
+    let currentIndex = 0;
+    let visitedRuns = new Set();
+
+    // ---- Init ----
+    async function init() {
+      // Load saved feedback from server — but only if this isn't a fresh
+      // iteration (indicated by previous_feedback being present). When
+      // previous feedback exists, the feedback.json on disk is stale from
+      // the prior iteration and should not pre-fill the textareas.
+      const hasPrevious = Object.keys(EMBEDDED_DATA.previous_feedback || {}).length > 0
+        || Object.keys(EMBEDDED_DATA.previous_outputs || {}).length > 0;
+      if (!hasPrevious) {
+        try {
+          const resp = await fetch("/api/feedback");
+          const data = await resp.json();
+          if (data.reviews) {
+            for (const r of data.reviews) feedbackMap[r.run_id] = r.feedback;
+          }
+        } catch { /* first run, no feedback yet */ }
+      }
+
+      document.getElementById("skill-name").textContent = EMBEDDED_DATA.skill_name;
+      showRun(0);
+
+      // Wire up feedback auto-save
+      const textarea = document.getElementById("feedback");
+      let saveTimeout = null;
+      textarea.addEventListener("input", () => {
+        clearTimeout(saveTimeout);
+        document.getElementById("feedback-status").textContent = "";
+        saveTimeout = setTimeout(() => saveCurrentFeedback(), 800);
+      });
+    }
+
+    // ---- Navigation ----
+    function navigate(delta) {
+      const newIndex = currentIndex + delta;
+      if (newIndex >= 0 && newIndex < EMBEDDED_DATA.runs.length) {
+        saveCurrentFeedback();
+        showRun(newIndex);
+      }
+    }
+
+    function updateNavButtons() {
+      document.getElementById("prev-btn").disabled = currentIndex === 0;
+      document.getElementById("next-btn").disabled =
+        currentIndex === EMBEDDED_DATA.runs.length - 1;
+    }
+
+    // ---- Show a run ----
+    function showRun(index) {
+      currentIndex = index;
+      const run = EMBEDDED_DATA.runs[index];
+
+      // Progress
+      document.getElementById("progress").textContent =
+        `${index + 1} of ${EMBEDDED_DATA.runs.length}`;
+
+      // Prompt
+      document.getElementById("prompt-text").textContent = run.prompt;
+
+      // Config badge
+      const badge = document.getElementById("config-badge");
+      const configMatch = run.id.match(/(with_skill|without_skill|new_skill|old_skill)/);
+      if (configMatch) {
+        const config = configMatch[1];
+        const isBaseline = config === "without_skill" || config === "old_skill";
+        badge.textContent = config.replace(/_/g, " ");
+        badge.className = "config-badge " + (isBaseline ? "config-baseline" : "config-primary");
+        badge.style.display = "inline-block";
+      } else {
+        badge.style.display = "none";
+      }
+
+      // Outputs
+      renderOutputs(run);
+
+      // Previous outputs
+      renderPrevOutputs(run);
+
+      // Grades
+      renderGrades(run);
+
+      // Previous feedback
+      const prevFb = (EMBEDDED_DATA.previous_feedback || {})[run.id];
+      const prevEl = document.getElementById("prev-feedback");
+      if (prevFb) {
+        document.getElementById("prev-feedback-text").textContent = prevFb;
+        prevEl.style.display = "block";
+      } else {
+        prevEl.style.display = "none";
+      }
+
+      // Feedback
+      document.getElementById("feedback").value = feedbackMap[run.id] || "";
+      document.getElementById("feedback-status").textContent = "";
+
+      updateNavButtons();
+
+      // Track visited runs and promote done button when all visited
+      visitedRuns.add(index);
+      const doneBtn = document.getElementById("done-btn");
+      if (visitedRuns.size >= EMBEDDED_DATA.runs.length) {
+        doneBtn.classList.add("ready");
+      }
+
+      // Scroll main content to top
+      document.querySelector(".main").scrollTop = 0;
+    }
+
+    // ---- Render outputs ----
+    function renderOutputs(run) {
+      const container = document.getElementById("outputs-body");
+      container.innerHTML = "";
+
+      const outputs = run.outputs || [];
+      if (outputs.length === 0) {
+        container.innerHTML = '<div class="empty-state">No output files</div>';
+        return;
+      }
+
+      for (const file of outputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        // Always show file header with download link
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const content = document.createElement("div");
+        content.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          content.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          content.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          content.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(content, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          content.appendChild(a);
+        } else if (file.type === "error") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          pre.style.color = "var(--red)";
+          content.appendChild(pre);
+        }
+
+        fileDiv.appendChild(content);
+        container.appendChild(fileDiv);
+      }
+    }
+
+    // ---- XLSX rendering via SheetJS ----
+    function renderXlsx(container, b64Data) {
+      try {
+        const raw = Uint8Array.from(atob(b64Data), c => c.charCodeAt(0));
+        const wb = XLSX.read(raw, { type: "array" });
+
+        for (let i = 0; i < wb.SheetNames.length; i++) {
+          const sheetName = wb.SheetNames[i];
+          const ws = wb.Sheets[sheetName];
+
+          if (wb.SheetNames.length > 1) {
+            const sheetLabel = document.createElement("div");
+            sheetLabel.style.cssText =
+              "font-weight:600; font-size:0.8rem; color:#b0aea5; margin-top:0.5rem; margin-bottom:0.25rem;";
+            sheetLabel.textContent = "Sheet: " + sheetName;
+            container.appendChild(sheetLabel);
+          }
+
+          const htmlStr = XLSX.utils.sheet_to_html(ws, { editable: false });
+          const wrapper = document.createElement("div");
+          wrapper.innerHTML = htmlStr;
+          container.appendChild(wrapper);
+        }
+      } catch (err) {
+        container.textContent = "Error rendering spreadsheet: " + err.message;
+      }
+    }
+
+    // ---- Grades ----
+    function renderGrades(run) {
+      const section = document.getElementById("grades-section");
+      const content = document.getElementById("grades-content");
+
+      if (!run.grading) {
+        section.style.display = "none";
+        return;
+      }
+
+      const grading = run.grading;
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("grades-arrow").classList.remove("open");
+
+      const summary = grading.summary || {};
+      const expectations = grading.expectations || [];
+
+      let html = '<div style="padding: 1rem;">';
+
+      // Summary line
+      const passRate = summary.pass_rate != null
+        ? Math.round(summary.pass_rate * 100) + "%"
+        : "?";
+      const badgeClass = summary.pass_rate >= 0.8 ? "grade-pass" : summary.pass_rate >= 0.5 ? "" : "grade-fail";
+      html += '<div class="grades-summary">';
+      html += '<span class="grade-badge ' + badgeClass + '">' + passRate + '</span>';
+      html += '<span>' + (summary.passed || 0) + ' passed, ' + (summary.failed || 0) + ' failed of ' + (summary.total || 0) + '</span>';
+      html += '</div>';
+
+      // Assertions list
+      html += '<ul class="assertion-list">';
+      for (const exp of expectations) {
+        const statusClass = exp.passed ? "pass" : "fail";
+        const statusIcon = exp.passed ? "\u2713" : "\u2717";
+        html += '<li class="assertion-item">';
+        html += '<span class="assertion-status ' + statusClass + '">' + statusIcon + '</span>';
+        html += '<span>' + escapeHtml(exp.text) + '</span>';
+        if (exp.evidence) {
+          html += '<div class="assertion-evidence">' + escapeHtml(exp.evidence) + '</div>';
+        }
+        html += '</li>';
+      }
+      html += '</ul>';
+
+      html += '</div>';
+      content.innerHTML = html;
+    }
+
+    function toggleGrades() {
+      const content = document.getElementById("grades-content");
+      const arrow = document.getElementById("grades-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Previous outputs (collapsible) ----
+    function renderPrevOutputs(run) {
+      const section = document.getElementById("prev-outputs-section");
+      const content = document.getElementById("prev-outputs-content");
+      const prevOutputs = (EMBEDDED_DATA.previous_outputs || {})[run.id];
+
+      if (!prevOutputs || prevOutputs.length === 0) {
+        section.style.display = "none";
+        return;
+      }
+
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("prev-outputs-arrow").classList.remove("open");
+
+      // Render the files into the content area
+      content.innerHTML = "";
+      const wrapper = document.createElement("div");
+      wrapper.style.padding = "1rem";
+
+      for (const file of prevOutputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const fc = document.createElement("div");
+        fc.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          fc.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          fc.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          fc.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(fc, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          fc.appendChild(a);
+        }
+
+        fileDiv.appendChild(fc);
+        wrapper.appendChild(fileDiv);
+      }
+
+      content.appendChild(wrapper);
+    }
+
+    function togglePrevOutputs() {
+      const content = document.getElementById("prev-outputs-content");
+      const arrow = document.getElementById("prev-outputs-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Feedback (saved to server -> feedback.json) ----
+    function saveCurrentFeedback() {
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // Build reviews array from map
+      const reviews = [];
+      for (const [run_id, feedback] of Object.entries(feedbackMap)) {
+        if (feedback.trim()) {
+          reviews.push({ run_id, feedback, timestamp: new Date().toISOString() });
+        }
+      }
+
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviews, status: "in_progress" }),
+      }).then(() => {
+        document.getElementById("feedback-status").textContent = "Saved";
+      }).catch(() => {
+        // Static mode or server unavailable — no-op on auto-save,
+        // feedback will be downloaded on final submit
+        document.getElementById("feedback-status").textContent = "Will download on submit";
+      });
+    }
+
+    // ---- Done ----
+    function showDoneDialog() {
+      // Save current textarea to feedbackMap (but don't POST yet)
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // POST once with status: complete — include ALL runs so the model
+      // can distinguish "no feedback" (looks good) from "not reviewed"
+      const reviews = [];
+      const ts = new Date().toISOString();
+      for (const r of EMBEDDED_DATA.runs) {
+        reviews.push({ run_id: r.id, feedback: feedbackMap[r.id] || "", timestamp: ts });
+      }
+      const payload = JSON.stringify({ reviews, status: "complete" }, null, 2);
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      }).then(() => {
+        document.getElementById("done-overlay").classList.add("visible");
+      }).catch(() => {
+        // Server not available (static mode) — download as file
+        const blob = new Blob([payload], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "feedback.json";
+        a.click();
+        URL.revokeObjectURL(url);
+        document.getElementById("done-overlay").classList.add("visible");
+      });
+    }
+
+    function closeDoneDialog() {
+      // Reset status back to in_progress
+      saveCurrentFeedback();
+      document.getElementById("done-overlay").classList.remove("visible");
+    }
+
+    // ---- Toast ----
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("visible");
+      setTimeout(() => toast.classList.remove("visible"), 2000);
+    }
+
+    // ---- Keyboard nav ----
+    document.addEventListener("keydown", (e) => {
+      // Don't capture when typing in textarea
+      if (e.target.tagName === "TEXTAREA") return;
+
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        navigate(-1);
+      } else if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        navigate(1);
+      }
+    });
+
+    // ---- Util ----
+    function getDownloadUri(file) {
+      if (file.data_uri) return file.data_uri;
+      if (file.data_b64) return "data:application/octet-stream;base64," + file.data_b64;
+      if (file.type === "text") return "data:text/plain;charset=utf-8," + encodeURIComponent(file.content);
+      return "#";
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // ---- View switching ----
+    function switchView(view) {
+      document.querySelectorAll(".view-tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".view-panel").forEach(p => p.classList.remove("active"));
+      document.querySelector(`[onclick="switchView('${view}')"]`).classList.add("active");
+      document.getElementById("panel-" + view).classList.add("active");
+    }
+
+    // ---- Benchmark rendering ----
+    function renderBenchmark() {
+      const data = EMBEDDED_DATA.benchmark;
+      if (!data) return;
+
+      // Show the tabs
+      document.getElementById("view-tabs").style.display = "flex";
+
+      const container = document.getElementById("benchmark-content");
+      const summary = data.run_summary || {};
+      const metadata = data.metadata || {};
+      const notes = data.notes || [];
+
+      let html = "";
+
+      // Header
+      html += "<h2 style='font-family: Poppins, sans-serif; margin-bottom: 0.5rem;'>Benchmark Results</h2>";
+      html += "<p style='color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.25rem;'>";
+      if (metadata.skill_name) html += "<strong>" + escapeHtml(metadata.skill_name) + "</strong> &mdash; ";
+      if (metadata.timestamp) html += metadata.timestamp + " &mdash; ";
+      if (metadata.evals_run) html += "Evals: " + metadata.evals_run.join(", ") + " &mdash; ";
+      html += (metadata.runs_per_configuration || "?") + " runs per configuration";
+      html += "</p>";
+
+      // Summary table
+      html += '<table class="benchmark-table">';
+
+      function fmtStat(stat, pct) {
+        if (!stat) return "—";
+        const suffix = pct ? "%" : "";
+        const m = pct ? (stat.mean * 100).toFixed(0) : stat.mean.toFixed(1);
+        const s = pct ? (stat.stddev * 100).toFixed(0) : stat.stddev.toFixed(1);
+        return m + suffix + " ± " + s + suffix;
+      }
+
+      function deltaClass(val) {
+        if (!val) return "";
+        const n = parseFloat(val);
+        if (n > 0) return "benchmark-delta-positive";
+        if (n < 0) return "benchmark-delta-negative";
+        return "";
+      }
+
+      // Discover config names dynamically (everything except "delta")
+      const configs = Object.keys(summary).filter(k => k !== "delta");
+      const configA = configs[0] || "config_a";
+      const configB = configs[1] || "config_b";
+      const labelA = configA.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const labelB = configB.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const a = summary[configA] || {};
+      const b = summary[configB] || {};
+      const delta = summary.delta || {};
+
+      html += "<thead><tr><th>Metric</th><th>" + escapeHtml(labelA) + "</th><th>" + escapeHtml(labelB) + "</th><th>Delta</th></tr></thead>";
+      html += "<tbody>";
+
+      html += "<tr><td><strong>Pass Rate</strong></td>";
+      html += "<td>" + fmtStat(a.pass_rate, true) + "</td>";
+      html += "<td>" + fmtStat(b.pass_rate, true) + "</td>";
+      html += '<td class="' + deltaClass(delta.pass_rate) + '">' + (delta.pass_rate || "—") + "</td></tr>";
+
+      // Time (only show row if data exists)
+      if (a.time_seconds || b.time_seconds) {
+        html += "<tr><td><strong>Time (s)</strong></td>";
+        html += "<td>" + fmtStat(a.time_seconds, false) + "</td>";
+        html += "<td>" + fmtStat(b.time_seconds, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.time_seconds) + '">' + (delta.time_seconds ? delta.time_seconds + "s" : "—") + "</td></tr>";
+      }
+
+      // Tokens (only show row if data exists)
+      if (a.tokens || b.tokens) {
+        html += "<tr><td><strong>Tokens</strong></td>";
+        html += "<td>" + fmtStat(a.tokens, false) + "</td>";
+        html += "<td>" + fmtStat(b.tokens, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.tokens) + '">' + (delta.tokens || "—") + "</td></tr>";
+      }
+
+      html += "</tbody></table>";
+
+      // Per-eval breakdown (if runs data available)
+      const runs = data.runs || [];
+      if (runs.length > 0) {
+        const evalIds = [...new Set(runs.map(r => r.eval_id))].sort((a, b) => a - b);
+
+        html += "<h3 style='font-family: Poppins, sans-serif; margin-bottom: 0.75rem;'>Per-Eval Breakdown</h3>";
+
+        const hasTime = runs.some(r => r.result && r.result.time_seconds != null);
+        const hasErrors = runs.some(r => r.result && r.result.errors > 0);
+
+        for (const evalId of evalIds) {
+          const evalRuns = runs.filter(r => r.eval_id === evalId);
+          const evalName = evalRuns[0] && evalRuns[0].eval_name ? evalRuns[0].eval_name : "Eval " + evalId;
+
+          html += "<h4 style='font-family: Poppins, sans-serif; margin: 1rem 0 0.5rem; color: var(--text);'>" + escapeHtml(evalName) + "</h4>";
+          html += '<table class="benchmark-table">';
+          html += "<thead><tr><th>Config</th><th>Run</th><th>Pass Rate</th>";
+          if (hasTime) html += "<th>Time (s)</th>";
+          if (hasErrors) html += "<th>Crashes During Execution</th>";
+          html += "</tr></thead>";
+          html += "<tbody>";
+
+          // Group by config and render with average rows
+          const configGroups = [...new Set(evalRuns.map(r => r.configuration))];
+          for (let ci = 0; ci < configGroups.length; ci++) {
+            const config = configGroups[ci];
+            const configRuns = evalRuns.filter(r => r.configuration === config);
+            if (configRuns.length === 0) continue;
+
+            const rowClass = ci === 0 ? "benchmark-row-with" : "benchmark-row-without";
+            const configLabel = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+            for (const run of configRuns) {
+              const r = run.result || {};
+              const prClass = r.pass_rate >= 0.8 ? "benchmark-delta-positive" : r.pass_rate < 0.5 ? "benchmark-delta-negative" : "";
+              html += '<tr class="' + rowClass + '">';
+              html += "<td>" + configLabel + "</td>";
+              html += "<td>" + run.run_number + "</td>";
+              html += '<td class="' + prClass + '">' + ((r.pass_rate || 0) * 100).toFixed(0) + "% (" + (r.passed || 0) + "/" + (r.total || 0) + ")</td>";
+              if (hasTime) html += "<td>" + (r.time_seconds != null ? r.time_seconds.toFixed(1) : "—") + "</td>";
+              if (hasErrors) html += "<td>" + (r.errors || 0) + "</td>";
+              html += "</tr>";
+            }
+
+            // Average row
+            const rates = configRuns.map(r => (r.result || {}).pass_rate || 0);
+            const avgRate = rates.reduce((a, b) => a + b, 0) / rates.length;
+            const avgPrClass = avgRate >= 0.8 ? "benchmark-delta-positive" : avgRate < 0.5 ? "benchmark-delta-negative" : "";
+            html += '<tr class="benchmark-row-avg ' + rowClass + '">';
+            html += "<td>" + configLabel + "</td>";
+            html += "<td>Avg</td>";
+            html += '<td class="' + avgPrClass + '">' + (avgRate * 100).toFixed(0) + "%</td>";
+            if (hasTime) {
+              const times = configRuns.map(r => (r.result || {}).time_seconds).filter(t => t != null);
+              html += "<td>" + (times.length ? (times.reduce((a, b) => a + b, 0) / times.length).toFixed(1) : "—") + "</td>";
+            }
+            if (hasErrors) html += "<td></td>";
+            html += "</tr>";
+          }
+          html += "</tbody></table>";
+
+          // Per-assertion detail for this eval
+          const runsWithExpectations = {};
+          for (const config of configGroups) {
+            runsWithExpectations[config] = evalRuns.filter(r => r.configuration === config && r.expectations && r.expectations.length > 0);
+          }
+          const hasAnyExpectations = Object.values(runsWithExpectations).some(runs => runs.length > 0);
+          if (hasAnyExpectations) {
+            // Collect all unique assertion texts across all configs
+            const allAssertions = [];
+            const seen = new Set();
+            for (const config of configGroups) {
+              for (const run of runsWithExpectations[config]) {
+                for (const exp of (run.expectations || [])) {
+                  if (!seen.has(exp.text)) {
+                    seen.add(exp.text);
+                    allAssertions.push(exp.text);
+                  }
+                }
+              }
+            }
+
+            html += '<table class="benchmark-table" style="margin-top: 0.5rem;">';
+            html += "<thead><tr><th>Assertion</th>";
+            for (const config of configGroups) {
+              const label = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+              html += "<th>" + escapeHtml(label) + "</th>";
+            }
+            html += "</tr></thead><tbody>";
+
+            for (const assertionText of allAssertions) {
+              html += "<tr><td>" + escapeHtml(assertionText) + "</td>";
+
+              for (const config of configGroups) {
+                html += "<td>";
+                for (const run of runsWithExpectations[config]) {
+                  const exp = (run.expectations || []).find(e => e.text === assertionText);
+                  if (exp) {
+                    const cls = exp.passed ? "benchmark-delta-positive" : "benchmark-delta-negative";
+                    const icon = exp.passed ? "\u2713" : "\u2717";
+                    html += '<span class="' + cls + '" title="Run ' + run.run_number + ': ' + escapeHtml(exp.evidence || "") + '">' + icon + "</span> ";
+                  } else {
+                    html += "— ";
+                  }
+                }
+                html += "</td>";
+              }
+              html += "</tr>";
+            }
+            html += "</tbody></table>";
+          }
+        }
+      }
+
+      // Notes
+      if (notes.length > 0) {
+        html += '<div class="benchmark-notes">';
+        html += "<h3>Analysis Notes</h3>";
+        html += "<ul>";
+        for (const note of notes) {
+          html += "<li>" + escapeHtml(note) + "</li>";
+        }
+        html += "</ul></div>";
+      }
+
+      container.innerHTML = html;
+    }
+
+    // ---- Start ----
+    init();
+    renderBenchmark();
+  </script>
+</body>
+</html>
