@@ -12,7 +12,7 @@ steps:
   - name: build
     image: plugins/docker
     settings:
-      repo: git.samagsteribbe.nl/admin/DragonsStash
+      repo: git.samagsteribbe.nl/admin/dragonsstash
       registry: git.samagsteribbe.nl
       tags:
         - latest
