@@ -40,6 +40,7 @@ import { extractCreatorFromFileName, extractCreatorFromChannelTitle } from "./ar
 import { hashParts } from "./archive/hash.js";
 import { readZipCentralDirectory } from "./archive/zip-reader.js";
 import { readRarContents } from "./archive/rar-reader.js";
+import { read7zContents } from "./archive/sevenz-reader.js";
 import { byteLevelSplit, concatenateFiles } from "./archive/split.js";
 import { uploadToChannel } from "./upload/channel.js";
 import type { TelegramAccount, TelegramChannel } from "@prisma/client";
@@ -875,9 +876,11 @@ async function processOneArchiveSet(
         entries = await readZipCentralDirectory(tempPaths);
       } else if (archiveSet.type === "RAR") {
         entries = await readRarContents(tempPaths[0]);
-      } else if (archiveSet.type === "DOCUMENT" || archiveSet.type === "7Z") {
-        // Standalone documents (PDF, STL, etc.) and 7z files — no extraction needed,
-        // just record the file itself as the single entry
+      } else if (archiveSet.type === "7Z") {
+        entries = await read7zContents(tempPaths[0]);
+      } else if (archiveSet.type === "DOCUMENT") {
+        // Standalone documents (PDF, STL, etc.) — no extraction,
+        // record the file itself as the single entry
         const part = archiveSet.parts[0];
         const ext = part.fileName.match(/\.([^.]+)$/)?.[1] ?? null;
         entries = [{
