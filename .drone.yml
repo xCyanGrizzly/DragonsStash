@@ -1,38 +1,35 @@
----                                                                           
+ ---
   kind: pipeline                                                                
-  type: docker                                                                  
-  name: build-and-deploy                                    
-                                                                                
-  trigger:                                                  
-    branch: [main]                                                              
+  type: docker                                              
+  name: build-and-deploy
+
+  trigger:
+    branch: [main]
     event: [push]                                                               
-                                                                                
+   
   steps:                                                                        
-    - name: build                                                               
-      image: plugins/docker                                 
+    - name: build                                           
+      image: plugins/docker
       settings:
-        repo: git.samagsteribbe.nl/admin/dragonsstash
+        repo: git.samagsteribbe.nl/admin/dragonsstash                           
         registry: git.samagsteribbe.nl                                          
         tags:                                                                   
           - latest                                                              
-          - "${DRONE_COMMIT_SHA:0:8}"                                           
-        username:                                                               
+          - "${DRONE_COMMIT_SHA:0:8}"                       
+        username:
           from_secret: gitea_username
         password:                                                               
-          from_secret: gitea_password                       
+          from_secret: gitea_password
                                                                                 
-    - name: deploy
+    - name: deploy                                          
       image: alpine                                                             
-      environment:                                                              
+      environment:                                          
         SSH_KEY:
-          from_secret: ssh_key                                                  
-      commands:                                             
+          from_secret: ssh_key
+      commands:
         - apk add --no-cache openssh-client
         - mkdir -p ~/.ssh                                                       
-        - echo "$SSH_KEY" > ~/.ssh/id_ed25519
+        - printf "%s" "$SSH_KEY" > ~/.ssh/id_ed25519                            
         - chmod 600 ~/.ssh/id_ed25519                                           
-        - echo "192.168.68.68 ssh-ed25519                   
-  AAAAC3NzaC1lZDI1NTE5AAAAIJNvfHUtTav4mCeCe2fE7uTIYstQ+pz7tvNASKZ4N0kW" >       
-  ~/.ssh/known_hosts
-        - ssh sam@192.168.68.68 "cd /opt/stacks/DragonsStash && docker compose  
-  pull && docker compose up -d" 
+        - ssh-keyscan -t ed25519 192.168.68.68 > ~/.ssh/known_hosts 2>/dev/null 
+        - ssh sam@192.168.68.68 "cd /opt/stacks/DragonsStash && docker compose pull && docker compose up -d"
