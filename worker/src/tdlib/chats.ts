@@ -176,6 +176,63 @@ export async function joinChatByInviteLink(
   log.info({ inviteLink }, "Joined chat by invite link");
 }
 
+/**
+ * Search for a public chat by username.
+ * Returns the chat info if found, or null if not found.
+ */
+export async function searchPublicChat(
+  client: Client,
+  username: string
+): Promise<TelegramChatInfo | null> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const chat = (await withFloodWait(
+      () => client.invoke({
+        _: "searchPublicChat",
+        username,
+      }),
+      "searchPublicChat"
+    )) as any;
+
+    const chatType = chat.type?._;
+    let type: TelegramChatInfo["type"] = "other";
+    let isForum = false;
+
+    if (chatType === "chatTypeSupergroup") {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sg = (await withFloodWait(
+          () => client.invoke({
+            _: "getSupergroup",
+            supergroup_id: chat.type.supergroup_id,
+          }),
+          "getSupergroup"
+        )) as any;
+
+        type = sg.is_channel ? "channel" : "supergroup";
+        isForum = sg.is_forum ?? false;
+      } catch {
+        type = "supergroup";
+      }
+    } else if (chatType === "chatTypeBasicGroup") {
+      type = "group";
+    } else if (chatType === "chatTypePrivate" || chatType === "chatTypeSecret") {
+      type = "private";
+    }
+
+    log.info({ username, chatId: chat.id, type }, "Found public chat");
+    return {
+      chatId: BigInt(chat.id),
+      title: chat.title ?? username,
+      type,
+      isForum,
+    };
+  } catch (err) {
+    log.warn({ username, err }, "Public chat not found");
+    return null;
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

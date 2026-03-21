@@ -17,15 +17,15 @@ export async function registerUser(input: unknown): Promise<ActionResult<{ id: s
   });
 
   if (!invite) {
-    return { success: false, error: "Invalid invite code" };
+    return { success: false, error: "Invalid invite code. Please check the code and try again." };
   }
 
   if (invite.uses >= invite.maxUses) {
-    return { success: false, error: "This invite code has already been used" };
+    return { success: false, error: "This invite code has reached its maximum number of uses" };
   }
 
   if (invite.expiresAt && invite.expiresAt < new Date()) {
-    return { success: false, error: "This invite code has expired" };
+    return { success: false, error: "This invite code has expired. Please request a new one." };
   }
 
   const existing = await prisma.user.findUnique({
@@ -46,6 +46,7 @@ export async function registerUser(input: unknown): Promise<ActionResult<{ id: s
         email: parsed.data.email,
         hashedPassword,
         role: "USER",
+        usedInviteId: invite.id,
         settings: {
           create: {
             lowStockThreshold: 10,

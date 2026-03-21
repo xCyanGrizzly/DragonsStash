@@ -34,6 +34,7 @@ import { getChannelMessages, downloadFile, downloadPhotoThumbnail } from "./tdli
 import type { DownloadProgress, ChannelScanResult } from "./tdlib/download.js";
 import { isChatForum, getForumTopicList, getTopicMessages } from "./tdlib/topics.js";
 import { matchPreviewToArchive } from "./preview/match.js";
+import { pickPreviewFile, extractPreviewImage } from "./preview/extract.js";
 import { groupArchiveSets } from "./archive/multipart.js";
 import type { ArchiveSet } from "./archive/multipart.js";
 import { extractCreatorFromFileName, extractCreatorFromChannelTitle } from "./archive/creator.js";
@@ -969,6 +970,23 @@ async function processOneArchiveSet(
       });
       previewData = await downloadPhotoThumbnail(client, matchedPhoto.fileId);
       previewMsgId = matchedPhoto.id;
+    }
+
+    // ── Fallback: extract preview image from inside the archive ──
+    if (!previewData && entries.length > 0 && archiveSet.type !== "DOCUMENT") {
+      const previewEntry = pickPreviewFile(entries);
+      if (previewEntry) {
+        accountLog.debug(
+          { fileName: archiveName, previewFile: previewEntry.path },
+          "Attempting to extract preview image from archive"
+        );
+        const archiveTypeForExtract = archiveSet.type === "7Z" ? "SEVEN_Z" as const : archiveSet.type as "ZIP" | "RAR";
+        previewData = await extractPreviewImage(
+          tempPaths[0],
+          archiveTypeForExtract,
+          previewEntry.path
+        );
+      }
     }
 
     // ── Resolve creator: topic name > filename extraction > channel title > null ──

@@ -3,6 +3,7 @@ import { config } from "./util/config.js";
 import { logger } from "./util/logger.js";
 import { markStaleRunsAsFailed } from "./db/queries.js";
 import { cleanupTempDir } from "./worker.js";
+import { recoverIncompleteUploads } from "./recovery.js";
 import { startScheduler, stopScheduler } from "./scheduler.js";
 import { startFetchListener, stopFetchListener } from "./fetch-listener.js";
 import { db, pool } from "./db/client.js";
@@ -25,6 +26,10 @@ async function main(): Promise<void> {
   // Clean up stale state
   await cleanupTempDir();
   await markStaleRunsAsFailed();
+
+  // Verify destination messages exist for all "uploaded" packages.
+  // Resets any packages whose dest message is missing so they get re-processed.
+  await recoverIncompleteUploads();
 
   // Start the fetch listener (pg_notify for on-demand channel fetching)
   await startFetchListener();

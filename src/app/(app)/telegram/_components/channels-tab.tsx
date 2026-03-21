@@ -2,10 +2,11 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Download } from "lucide-react";
+import { Download, Plus } from "lucide-react";
 import { getChannelColumns } from "./channel-columns";
 import { DestinationCard } from "./destination-card";
 import { ChannelPickerDialog } from "./channel-picker-dialog";
+import { JoinChannelDialog } from "./join-channel-dialog";
 import {
   deleteChannel,
   toggleChannelActive,
@@ -30,6 +31,7 @@ export function ChannelsTab({ channels, globalDestination, accounts }: ChannelsT
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [rescanId, setRescanId] = useState<string | null>(null);
   const [fetchChannelsAccountId, setFetchChannelsAccountId] = useState<string | null>(null);
+  const [joinDialogOpen, setJoinDialogOpen] = useState(false);
 
   // Find the first authenticated account for "Fetch Channels"
   const authenticatedAccounts = accounts.filter((a) => a.authState === "AUTHENTICATED" && a.isActive);
@@ -113,6 +115,14 @@ export function ChannelsTab({ channels, globalDestination, accounts }: ChannelsT
           <Download className="mr-2 h-4 w-4" />
           Fetch Channels
         </Button>
+        <Button
+          variant="outline"
+          onClick={() => setJoinDialogOpen(true)}
+          disabled={authenticatedAccounts.length === 0}
+        >
+          <Plus className="mr-2 h-4 w-4" />
+          Add Channel
+        </Button>
       </div>
 
       {channels.length > 0 && (
@@ -151,6 +161,11 @@ export function ChannelsTab({ channels, globalDestination, accounts }: ChannelsT
         onOpenChange={(open) => {
           if (!open) setFetchChannelsAccountId(null);
         }}
+      />
+
+      <JoinChannelDialog
+        open={joinDialogOpen}
+        onOpenChange={setJoinDialogOpen}
       />
     </div>
   );

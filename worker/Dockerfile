@@ -3,7 +3,7 @@ FROM node:20-bookworm-slim AS deps
 
 RUN sed -i 's/^Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources && \
     apt-get update && apt-get install -y \
-    libssl-dev zlib1g-dev unrar p7zip-full \
+    libssl-dev zlib1g-dev unzip unrar p7zip-full \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -26,7 +26,7 @@ FROM node:20-bookworm-slim AS runner
 
 RUN sed -i 's/^Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources && \
     apt-get update && apt-get install -y \
-    libssl3 zlib1g unrar p7zip-full \
+    libssl3 zlib1g unzip unrar p7zip-full \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

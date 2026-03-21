@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { toast } from "sonner";
 import {
   FileText,
   Folder,
@@ -9,6 +10,9 @@ import {
   Search,
   ChevronDown,
   ChevronRight,
+  Upload,
+  ImagePlus,
+  Images,
 } from "lucide-react";
 import {
   Dialog,
@@ -24,6 +28,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { PackageRow } from "./package-columns";
 import { SendToTelegramButton } from "./send-to-telegram-button";
+import { uploadPackagePreview } from "../actions";
+import { ArchivePreviewPicker } from "./archive-preview-picker";
 
 interface FileItem {
   id: string;
@@ -224,6 +230,46 @@ export function PackageFilesDrawer({ pkg, open, onOpenChange }: PackageFilesDraw
   const [loadingMore, setLoadingMore] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [uploading, setUploading] = useState(false);
+  const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
+  const [showPreviewPicker, setShowPreviewPicker] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePreviewUpload = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file || !pkg) return;
+
+      // Reset file input so the same file can be re-selected
+      e.target.value = "";
+
+      setUploading(true);
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const result = await uploadPackagePreview(pkg.id, formData);
+        if (result.success) {
+          toast.success("Preview image uploaded");
+          // Show uploaded image immediately via local object URL
+          setLocalPreviewUrl(URL.createObjectURL(file));
+        } else {
+          toast.error(result.error);
+        }
+      } catch {
+        toast.error("Failed to upload preview image");
+      } finally {
+        setUploading(false);
+      }
+    },
+    [pkg]
+  );
+
+  // Clean up local preview URL when drawer closes or package changes
+  useEffect(() => {
+    return () => {
+      if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
+    };
+  }, [localPreviewUrl]);
 
   const fetchFiles = useCallback(
     async (pageNum: number, append: boolean) => {
@@ -258,6 +304,7 @@ export function PackageFilesDrawer({ pkg, open, onOpenChange }: PackageFilesDraw
       setTotal(0);
       setSearch("");
       setPage(1);
+      setLocalPreviewUrl(null);
       fetchFiles(1, false);
     }
   }, [open, pkg, fetchFiles]);
@@ -293,12 +340,49 @@ export function PackageFilesDrawer({ pkg, open, onOpenChange }: PackageFilesDraw
         <DialogHeader className="px-6 pt-6 pb-4 border-b border-border space-y-3">
           {/* Preview image + title row */}
           <div className="flex gap-4">
-            {pkg?.hasPreview && (
-              <img
-                src={`/api/zips/${pkg.id}/preview`}
-                alt=""
-                className="h-20 w-20 rounded-lg object-cover bg-muted shrink-0"
-              />
+            {/* Preview image area with upload capability */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={handlePreviewUpload}
+            />
+            {(pkg?.hasPreview || localPreviewUrl) ? (
+              <button
+                type="button"
+                className="relative group h-20 w-20 shrink-0 rounded-lg overflow-hidden bg-muted"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                title="Click to replace preview image"
+              >
+                <img
+                  src={localPreviewUrl ?? `/api/zips/${pkg!.id}/preview`}
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  {uploading ? (
+                    <Loader2 className="h-5 w-5 text-white animate-spin" />
+                  ) : (
+                    <Upload className="h-5 w-5 text-white" />
+                  )}
+                </div>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/50 hover:bg-muted hover:border-muted-foreground/50 transition-colors cursor-pointer"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                title="Upload preview image"
+              >
+                {uploading ? (
+                  <Loader2 className="h-5 w-5 text-muted-foreground animate-spin" />
+                ) : (
+                  <ImagePlus className="h-5 w-5 text-muted-foreground" />
+                )}
+              </button>
             )}
             <div className="min-w-0 flex-1">
               <DialogTitle className="truncate pr-8">
@@ -308,11 +392,22 @@ export function PackageFilesDrawer({ pkg, open, onOpenChange }: PackageFilesDraw
                 {total.toLocaleString()} file{total !== 1 ? "s" : ""} in archive
               </DialogDescription>
               {pkg && (
-                <div className="mt-2">
+                <div className="mt-2 flex items-center gap-2">
                   <SendToTelegramButton
                     packageId={pkg.id}
                     packageName={pkg.fileName}
                   />
+                  {pkg.archiveType !== "DOCUMENT" && !pkg.isMultipart && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-1.5 text-xs"
+                      onClick={() => setShowPreviewPicker(true)}
+                    >
+                      <Images className="h-3.5 w-3.5" />
+                      Pick Preview
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
@@ -416,6 +511,20 @@ export function PackageFilesDrawer({ pkg, open, onOpenChange }: PackageFilesDraw
           </div>
         </ScrollArea>
       </DialogContent>
+
+      {/* Archive preview picker modal */}
+      {pkg && pkg.archiveType !== "DOCUMENT" && !pkg.isMultipart && (
+        <ArchivePreviewPicker
+          packageId={pkg.id}
+          packageName={pkg.fileName}
+          open={showPreviewPicker}
+          onOpenChange={setShowPreviewPicker}
+          onPreviewSet={() => {
+            // Refresh the preview by setting a cache-busting URL
+            setLocalPreviewUrl(`/api/zips/${pkg.id}/preview?t=${Date.now()}`);
+          }}
+        />
+      )}
     </Dialog>
   );
 }

@@ -38,7 +38,9 @@ model User {
   tags         Tag[]
   settings     UserSettings?
   telegramLink TelegramLink?
-  inviteCodes  InviteCode[]
+  inviteCodes  InviteCode[]   @relation("InviteCreator")
+  usedInvite   InviteCode?    @relation("InviteUser", fields: [usedInviteId], references: [id], onDelete: SetNull)
+  usedInviteId String?
 }
 
 model Account {
@@ -471,11 +473,12 @@ model Package {
   indexedAt        DateTime   @default(now())
   createdAt       DateTime    @default(now())
 
-  sourceChannel  TelegramChannel @relation(fields: [sourceChannelId], references: [id])
-  files          PackageFile[]
-  ingestionRun   IngestionRun?   @relation(fields: [ingestionRunId], references: [id])
-  ingestionRunId String?
-  sendRequests   BotSendRequest[]
+  sourceChannel   TelegramChannel      @relation(fields: [sourceChannelId], references: [id])
+  files           PackageFile[]
+  ingestionRun    IngestionRun?        @relation(fields: [ingestionRunId], references: [id])
+  ingestionRunId  String?
+  sendRequests    BotSendRequest[]
+  extractRequests ArchiveExtractRequest[]
 
   @@index([sourceChannelId])
   @@index([destChannelId])
@@ -568,7 +571,8 @@ model InviteCode {
   createdBy String
   createdAt DateTime  @default(now())
 
-  creator User @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+  creator  User   @relation("InviteCreator", fields: [createdBy], references: [id], onDelete: Cascade)
+  usedBy   User[] @relation("InviteUser")
 
   @@index([code])
   @@map("invite_codes")
@@ -645,4 +649,36 @@ model BotSubscription {
   @@unique([telegramUserId, pattern])
   @@index([telegramUserId])
   @@map("bot_subscriptions")
+}
+
+// ───────────────────────────────────────
+// Archive image extraction (worker-mediated)
+// ───────────────────────────────────────
+
+enum ExtractStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+/// A request for the worker to extract an image from an archive.
+/// The web app creates this, sends a pg_notify, and the worker
+/// downloads the archive, extracts the file, and writes the result.
+model ArchiveExtractRequest {
+  id          String        @id @default(cuid())
+  packageId   String
+  filePath    String        @db.VarChar(1024)  // path within archive to extract
+  status      ExtractStatus @default(PENDING)
+  imageData   Bytes?        // extracted image bytes (JPEG/PNG/WebP)
+  contentType String?       @db.VarChar(64)    // MIME type of extracted image
+  error       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  package Package @relation(fields: [packageId], references: [id], onDelete: Cascade)
+
+  @@index([packageId, filePath])
+  @@index([status])
+  @@map("archive_extract_requests")
 }

@@ -1,9 +1,21 @@
 "use client";
 
 import { useState, useEffect, useTransition } from "react";
-import { Database, AlertTriangle, Link2, Plus, Loader2, ArrowRight } from "lucide-react";
+import {
+  Database,
+  AlertTriangle,
+  Link2,
+  Plus,
+  Loader2,
+  ArrowRight,
+  RefreshCw,
+} from "lucide-react";
 import { toast } from "sonner";
-import { createDestinationViaWorker, setGlobalDestination } from "../actions";
+import {
+  createDestinationViaWorker,
+  setGlobalDestination,
+  rebuildPackageDatabase,
+} from "../actions";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,12 +50,29 @@ type CreateState =
   | { phase: "done"; title: string; telegramId: string }
   | { phase: "error"; message: string };
 
+type RebuildState =
+  | { phase: "idle" }
+  | { phase: "running"; requestId: string }
+  | { phase: "done"; created: number; skipped: number; scanned: number }
+  | { phase: "error"; message: string };
+
+interface RebuildProgress {
+  status: string;
+  messagesScanned: number;
+  documentsFound: number;
+  packagesCreated: number;
+  packagesSkipped: number;
+  error?: string;
+}
+
 export function DestinationCard({ destination, channels = [] }: DestinationCardProps) {
   const [isPending, startTransition] = useTransition();
   const [createOpen, setCreateOpen] = useState(false);
   const [title, setTitle] = useState("dragonsstash db");
   const [createState, setCreateState] = useState<CreateState>({ phase: "idle" });
   const [selectedChannelId, setSelectedChannelId] = useState<string>("");
+  const [rebuildState, setRebuildState] = useState<RebuildState>({ phase: "idle" });
+  const [rebuildProgress, setRebuildProgress] = useState<RebuildProgress | null>(null);
 
   // Channels that can be assigned as destination (SOURCE channels only, exclude current destination)
   const assignableChannels = channels.filter(
@@ -104,6 +133,86 @@ export function DestinationCard({ destination, channels = [] }: DestinationCardP
     poll();
     return () => { mounted = false; };
   }, [createState]);
+
+  // Poll for rebuild progress
+  useEffect(() => {
+    if (rebuildState.phase !== "running") return;
+
+    let mounted = true;
+    const requestId = rebuildState.requestId;
+
+    const poll = async () => {
+      for (let i = 0; i < 300; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        if (!mounted) return;
+
+        try {
+          const res = await fetch(
+            `/api/telegram/worker-request?requestId=${requestId}`
+          );
+          if (!res.ok) continue;
+
+          const data = await res.json();
+
+          // Update live progress from resultJson
+          if (data.result && typeof data.result === "object") {
+            if (mounted) setRebuildProgress(data.result as RebuildProgress);
+          }
+
+          if (data.status === "COMPLETED" && data.result) {
+            const result = data.result as RebuildProgress;
+            if (mounted) {
+              setRebuildState({
+                phase: "done",
+                created: result.packagesCreated,
+                skipped: result.packagesSkipped,
+                scanned: result.messagesScanned,
+              });
+              setRebuildProgress(null);
+              toast.success(
+                `Rebuild complete: ${result.packagesCreated} packages restored, ${result.packagesSkipped} skipped`
+              );
+            }
+            return;
+          } else if (data.status === "FAILED") {
+            if (mounted) {
+              setRebuildState({
+                phase: "error",
+                message: data.error || "Rebuild failed",
+              });
+              setRebuildProgress(null);
+            }
+            return;
+          }
+        } catch {
+          // Network blip — keep polling
+        }
+      }
+
+      if (mounted) {
+        setRebuildState({ phase: "error", message: "Timed out waiting for rebuild" });
+        setRebuildProgress(null);
+      }
+    };
+
+    poll();
+    return () => {
+      mounted = false;
+    };
+  }, [rebuildState]);
+
+  const handleRebuild = () => {
+    startTransition(async () => {
+      const result = await rebuildPackageDatabase();
+      if (result.success) {
+        setRebuildState({ phase: "running", requestId: result.data.requestId });
+        setRebuildProgress(null);
+        toast.info("Rebuild started — scanning destination channel...");
+      } else {
+        toast.error(result.error ?? "Failed to start rebuild");
+      }
+    });
+  };
 
   const handleCreate = () => {
     if (!title.trim()) return;
@@ -188,37 +297,115 @@ export function DestinationCard({ destination, channels = [] }: DestinationCardP
   return (
     <>
       <Card>
-        <CardContent className="flex items-center justify-between gap-4 py-4">
-          <div className="flex items-center gap-3">
-            <Database className="h-5 w-5 text-purple-500 shrink-0" />
-            <div>
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-medium">{destination.title}</p>
-                <Badge
-                  variant="outline"
-                  className="bg-purple-500/10 text-purple-600 border-purple-500/20 text-[10px]"
-                >
-                  DESTINATION
-                </Badge>
-              </div>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                <span>ID: {destination.telegramId}</span>
-                {destination.inviteLink && (
-                  <span className="flex items-center gap-1">
-                    <Link2 className="h-3 w-3" />
-                    Invite link active
-                  </span>
-                )}
+        <CardContent className="py-4 space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <Database className="h-5 w-5 text-purple-500 shrink-0" />
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium">{destination.title}</p>
+                  <Badge
+                    variant="outline"
+                    className="bg-purple-500/10 text-purple-600 border-purple-500/20 text-[10px]"
+                  >
+                    DESTINATION
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <span>ID: {destination.telegramId}</span>
+                  {destination.inviteLink && (
+                    <span className="flex items-center gap-1">
+                      <Link2 className="h-3 w-3" />
+                      Invite link active
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRebuild}
+                disabled={isPending || rebuildState.phase === "running"}
+                title="Scan destination channel and rebuild the package database"
+              >
+                {rebuildState.phase === "running" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                Rebuild DB
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCreateOpen(true)}
+              >
+                Change
+              </Button>
+            </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCreateOpen(true)}
-          >
-            Change
-          </Button>
+
+          {/* Rebuild progress */}
+          {rebuildState.phase === "running" && rebuildProgress && (
+            <div className="border-t pt-3">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+                <span className="text-xs text-muted-foreground">
+                  Rebuilding package database...
+                </span>
+              </div>
+              <div className="flex items-center gap-4 pl-6 mt-1 text-xs text-muted-foreground">
+                <span>
+                  <span className="text-foreground tabular-nums">
+                    {rebuildProgress.messagesScanned}
+                  </span>{" "}
+                  messages scanned
+                </span>
+                <span>
+                  <span className="text-foreground tabular-nums">
+                    {rebuildProgress.documentsFound}
+                  </span>{" "}
+                  archives found
+                </span>
+                <span>
+                  <span className="text-foreground tabular-nums">
+                    {rebuildProgress.packagesCreated}
+                  </span>{" "}
+                  restored
+                </span>
+                <span>
+                  <span className="text-foreground tabular-nums">
+                    {rebuildProgress.packagesSkipped}
+                  </span>{" "}
+                  skipped
+                </span>
+              </div>
+            </div>
+          )}
+
+          {rebuildState.phase === "done" && (
+            <div className="border-t pt-3">
+              <div className="flex items-center gap-2 text-xs text-emerald-500">
+                <Database className="h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Rebuild complete: {rebuildState.created} packages restored,{" "}
+                  {rebuildState.skipped} skipped ({rebuildState.scanned} messages
+                  scanned)
+                </span>
+              </div>
+            </div>
+          )}
+
+          {rebuildState.phase === "error" && (
+            <div className="border-t pt-3">
+              <div className="flex items-center gap-2 text-xs text-red-500">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span>Rebuild failed: {rebuildState.message}</span>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

@@ -501,6 +501,56 @@ export async function saveChannelSelections(
   }
 }
 
+// ── Join channel by link/username ──
+
+/**
+ * Request the worker to join a channel by t.me link, invite link, or @username.
+ * Uses ChannelFetchRequest as a generic DB-mediated request with pg_notify.
+ * Returns the requestId so the UI can poll for completion.
+ */
+export async function joinChannelByLink(
+  input: string
+): Promise<ActionResult<{ requestId: string }>> {
+  const admin = await requireAdmin();
+  if (!admin.success) return admin;
+
+  const trimmed = input.trim();
+  if (!trimmed) return { success: false, error: "Input is required" };
+
+  try {
+    // Need at least one authenticated account for TDLib
+    const account = await prisma.telegramAccount.findFirst({
+      where: { isActive: true, authState: "AUTHENTICATED" },
+      select: { id: true },
+    });
+    if (!account) {
+      return { success: false, error: "At least one authenticated account is needed" };
+    }
+
+    // Create a fetch request to track progress
+    const fetchRequest = await prisma.channelFetchRequest.create({
+      data: {
+        accountId: account.id,
+        status: "PENDING",
+      },
+    });
+
+    // Signal worker via pg_notify
+    await prisma.$queryRawUnsafe(
+      `SELECT pg_notify('join_channel', $1)`,
+      JSON.stringify({
+        requestId: fetchRequest.id,
+        input: trimmed,
+        accountId: account.id,
+      })
+    );
+
+    return { success: true, data: { requestId: fetchRequest.id } };
+  } catch {
+    return { success: false, error: "Failed to request channel join" };
+  }
+}
+
 // ── Global destination channel ──
 
 export async function setGlobalDestination(
@@ -628,6 +678,63 @@ export async function createDestinationChannel(
       return { success: false, error: "A channel with this Telegram ID already exists" };
     }
     return { success: false, error: "Failed to create destination channel" };
+  }
+}
+
+/**
+ * Request the worker to rebuild the package database by scanning the
+ * destination channel for uploaded archives and recreating Package records.
+ * Uses ChannelFetchRequest as a generic DB-mediated request with pg_notify.
+ * Returns the requestId so the UI can poll for progress.
+ */
+export async function rebuildPackageDatabase(): Promise<
+  ActionResult<{ requestId: string }>
+> {
+  const admin = await requireAdmin();
+  if (!admin.success) return admin;
+
+  try {
+    // Need at least one authenticated account for TDLib
+    const hasAccount = await prisma.telegramAccount.findFirst({
+      where: { isActive: true, authState: "AUTHENTICATED" },
+      select: { id: true },
+    });
+    if (!hasAccount) {
+      return {
+        success: false,
+        error:
+          "At least one authenticated account is needed to scan the destination channel",
+      };
+    }
+
+    // Need a destination channel
+    const destSetting = await prisma.globalSetting.findUnique({
+      where: { key: "destination_channel_id" },
+    });
+    if (!destSetting) {
+      return {
+        success: false,
+        error: "No destination channel configured",
+      };
+    }
+
+    // Create a fetch request to track progress
+    const fetchRequest = await prisma.channelFetchRequest.create({
+      data: {
+        accountId: hasAccount.id,
+        status: "PENDING",
+      },
+    });
+
+    // Signal worker via pg_notify
+    await prisma.$queryRawUnsafe(
+      `SELECT pg_notify('rebuild_packages', $1)`,
+      fetchRequest.id
+    );
+
+    return { success: true, data: { requestId: fetchRequest.id } };
+  } catch {
+    return { success: false, error: "Failed to request package database rebuild" };
   }
 }
 

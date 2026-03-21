@@ -100,7 +100,11 @@ export default function RegisterPage() {
                   <FormItem>
                     <FormLabel>Invite Code</FormLabel>
                     <FormControl>
-                      <Input placeholder="Enter your invite code" {...field} />
+                      <Input
+                        placeholder="Enter your invite code"
+                        autoComplete="off"
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

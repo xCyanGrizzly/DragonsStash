@@ -438,3 +438,35 @@ export async function getExistingChannelsByTelegramId(): Promise<Map<string, str
 export async function getAccountById(accountId: string) {
   return db.telegramAccount.findUnique({ where: { id: accountId } });
 }
+
+/**
+ * Find packages that have a destMessageId set (appear uploaded) but may
+ * reference messages that no longer exist in Telegram. These need
+ * verification on startup.
+ *
+ * Groups by destChannelId so the caller can batch-verify per channel.
+ */
+export async function getPackagesWithDestMessage() {
+  return db.package.findMany({
+    where: { destMessageId: { not: null }, destChannelId: { not: null } },
+    select: {
+      id: true,
+      fileName: true,
+      contentHash: true,
+      destChannelId: true,
+      destMessageId: true,
+      sourceChannel: { select: { telegramId: true } },
+    },
+  });
+}
+
+/**
+ * Reset a package's destination fields so it will be re-processed
+ * on the next ingestion run (treated as not-yet-uploaded).
+ */
+export async function resetPackageDestination(packageId: string) {
+  return db.package.update({
+    where: { id: packageId },
+    data: { destChannelId: null, destMessageId: null },
+  });
+}
