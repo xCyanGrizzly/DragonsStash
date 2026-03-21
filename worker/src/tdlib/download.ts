@@ -154,114 +154,98 @@ export async function getChannelMessages(
   const photos: TelegramPhoto[] = [];
   const boundary = lastProcessedMessageId ? Number(lastProcessedMessageId) : null;
 
-  // Open the chat so TDLib loads remote messages, then load chat history
-  // from the server. getChat forces TDLib to fetch chat metadata and
-  // getChatHistory with from_message_id=0 triggers a server-side fetch.
-  await invokeWithTimeout(client, {
-    _: "openChat",
-    chat_id: Number(chatId),
-  });
-
-  // Force TDLib to load the full chat list which populates chat state
+  // Open the chat so TDLib can access it
   try {
-    await invokeWithTimeout(client, {
-      _: "getChat",
-      chat_id: Number(chatId),
-    });
+    await invokeWithTimeout(client, { _: "openChat", chat_id: Number(chatId) });
   } catch {
-    // Ignore - chat may already be loaded
+    // Ignore — may already be open
   }
 
-  // Give TDLib time to sync chat data from the server
-  await sleep(2000);
-
-  let currentFromId = 0;
   let totalScanned = 0;
   let pageCount = 0;
 
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    if (pageCount >= MAX_SCAN_PAGES) {
-      log.warn(
-        { chatId: chatId.toString(), pageCount, totalScanned },
-        "Hit max page limit for channel scan, stopping"
-      );
-      break;
-    }
-    pageCount++;
+  // Use searchChatMessages with document filter — this works even when
+  // getChatHistory is restricted (e.g. hidden history for new members).
+  // We search for documents first, then photos separately.
+  for (const filter of [
+    { _: "searchMessagesFilterDocument" as const, kind: "document" },
+    { _: "searchMessagesFilterPhoto" as const, kind: "photo" },
+  ]) {
+    let fromMessageId = 0;
 
-    const previousFromId = currentFromId;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      if (pageCount >= MAX_SCAN_PAGES) {
+        log.warn(
+          { chatId: chatId.toString(), pageCount, totalScanned },
+          "Hit max page limit for channel scan, stopping"
+        );
+        break;
+      }
+      pageCount++;
 
-    const result = await invokeWithTimeout<{ messages: TdMessage[] }>(client, {
-      _: "getChatHistory",
-      chat_id: Number(chatId),
-      from_message_id: currentFromId,
-      offset: 0,
-      limit: Math.min(limit, 100),
-      only_local: false,
-    });
+      const result = await invokeWithTimeout<{ messages: TdMessage[]; total_count?: number }>(client, {
+        _: "searchChatMessages",
+        chat_id: Number(chatId),
+        query: "",
+        from_message_id: fromMessageId,
+        offset: 0,
+        limit: Math.min(limit, 100),
+        filter,
+        message_thread_id: 0,
+      });
 
-    if (!result.messages || result.messages.length === 0) break;
+      if (!result.messages || result.messages.length === 0) break;
 
-    totalScanned += result.messages.length;
+      totalScanned += result.messages.length;
 
-    for (const msg of result.messages) {
-      // Check for archive documents
-      const doc = msg.content?.document;
-      if (doc?.file_name && doc.document && isArchiveAttachment(doc.file_name)) {
-        archives.push({
-          id: BigInt(msg.id),
-          fileName: doc.file_name,
-          fileId: String(doc.document.id),
-          fileSize: BigInt(doc.document.size),
-          date: new Date(msg.date * 1000),
-        });
-        continue;
+      for (const msg of result.messages) {
+        // Check for archive documents
+        const doc = msg.content?.document;
+        if (doc?.file_name && doc.document && isArchiveAttachment(doc.file_name)) {
+          // Skip if we've already processed past this message
+          if (boundary && msg.id <= boundary) continue;
+          archives.push({
+            id: BigInt(msg.id),
+            fileName: doc.file_name,
+            fileId: String(doc.document.id),
+            fileSize: BigInt(doc.document.size),
+            date: new Date(msg.date * 1000),
+          });
+          continue;
+        }
+
+        // Check for photo messages (potential previews)
+        const photo = msg.content?.photo;
+        const caption = msg.content?.caption?.text ?? "";
+        if (photo?.sizes && photo.sizes.length > 0) {
+          if (boundary && msg.id <= boundary) continue;
+          const smallest = photo.sizes[0];
+          photos.push({
+            id: BigInt(msg.id),
+            date: new Date(msg.date * 1000),
+            caption,
+            fileId: String(smallest.photo.id),
+            fileSize: smallest.photo.size || smallest.photo.expected_size,
+          });
+        }
       }
 
-      // Check for photo messages (potential previews)
-      const photo = msg.content?.photo;
-      const caption = msg.content?.caption?.text ?? "";
-      if (photo?.sizes && photo.sizes.length > 0) {
-        const smallest = photo.sizes[0];
-        photos.push({
-          id: BigInt(msg.id),
-          date: new Date(msg.date * 1000),
-          caption,
-          fileId: String(smallest.photo.id),
-          fileSize: smallest.photo.size || smallest.photo.expected_size,
-        });
-      }
+      onProgress?.(totalScanned);
+
+      // Advance pagination
+      fromMessageId = result.messages[result.messages.length - 1].id;
+      if (result.messages.length < Math.min(limit, 100)) break;
+
+      await sleep(config.apiDelayMs);
     }
-
-    // Report scanning progress after each page
-    onProgress?.(totalScanned);
-
-    currentFromId = result.messages[result.messages.length - 1].id;
-
-    // Stuck detection: if from_message_id didn't advance, break to prevent infinite loop
-    if (currentFromId === previousFromId) {
-      log.warn(
-        { chatId: chatId.toString(), currentFromId, totalScanned },
-        "Pagination stuck (from_message_id not advancing), breaking"
-      );
-      break;
-    }
-
-    // Stop scanning once we've gone past the boundary (this page is the lookback)
-    if (boundary && currentFromId < boundary) break;
-
-    if (result.messages.length < Math.min(limit, 100)) break;
-
-    // Rate limit delay
-    await sleep(config.apiDelayMs);
   }
 
   // Close the chat after scanning
   await invokeWithTimeout(client, {
     _: "closeChat",
     chat_id: Number(chatId),
-  }).catch(() => {}); // Ignore close errors
+  }).catch(() => {});
 
   log.info(
     { chatId: chatId.toString(), archives: archives.length, photos: photos.length, totalScanned, pages: pageCount },

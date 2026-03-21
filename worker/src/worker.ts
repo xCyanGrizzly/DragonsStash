@@ -333,6 +333,18 @@ export async function runWorkerForAccount(
       phone: account.phone,
     });
 
+    // Load the chat list so TDLib knows about all chats
+    // Without this, getChat/getChatHistory fail with "Chat not found"
+    try {
+      await client.invoke({
+        _: "getChats",
+        chat_list: { _: "chatListMain" },
+        limit: 1000,
+      });
+    } catch {
+      // Ignore — chat list may already be loaded
+    }
+
     const counters = {
       messagesScanned: 0,
       zipsFound: 0,
