@@ -38,6 +38,7 @@ model User {
   tags         Tag[]
   settings     UserSettings?
   telegramLink TelegramLink?
+  inviteCodes  InviteCode[]
 }
 
 model Account {
@@ -552,6 +553,21 @@ model GlobalSetting {
   updatedAt DateTime @updatedAt
 
   @@map("global_settings")
+}
+
+model InviteCode {
+  id        String    @id @default(cuid())
+  code      String    @unique @db.VarChar(32)
+  maxUses   Int       @default(1)
+  uses      Int       @default(0)
+  expiresAt DateTime?
+  createdBy String
+  createdAt DateTime  @default(now())
+
+  creator User @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+
+  @@index([code])
+  @@map("invite_codes")
 }
 
 model ChannelFetchRequest {

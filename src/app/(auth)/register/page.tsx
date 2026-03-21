@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -24,12 +24,19 @@ import { APP_NAME } from "@/lib/constants";
 
 export default function RegisterPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const form = useForm<RegisterInput>({
     resolver: zodResolver(registerSchema),
-    defaultValues: { name: "", email: "", password: "", confirmPassword: "" },
+    defaultValues: {
+      name: "",
+      email: "",
+      password: "",
+      confirmPassword: "",
+      inviteCode: searchParams.get("code") ?? "",
+    },
   });
 
   function onSubmit(values: RegisterInput) {
@@ -75,7 +82,7 @@ export default function RegisterPage() {
       <Card>
         <CardHeader>
           <CardTitle>Create Account</CardTitle>
-          <CardDescription>Fill in your details below</CardDescription>
+          <CardDescription>You need an invite code to register</CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
@@ -85,6 +92,20 @@ export default function RegisterPage() {
                   {error}
                 </div>
               )}
+
+              <FormField
+                control={form.control}
+                name="inviteCode"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Invite Code</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Enter your invite code" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
               <FormField
                 control={form.control}

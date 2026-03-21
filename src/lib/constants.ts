@@ -8,6 +8,7 @@ export const NAV_ITEMS = [
   { label: "Supplies", href: "/supplies", icon: "Gem", adminOnly: false },
   { label: "STL Files", href: "/stls", icon: "FileBox", adminOnly: false },
   { label: "Telegram", href: "/telegram", icon: "Send", adminOnly: true },
+  { label: "Invites", href: "/invites", icon: "UserPlus", adminOnly: true },
   { label: "Usage", href: "/usage", icon: "ClipboardList", adminOnly: false },
   { label: "Vendors", href: "/vendors", icon: "Building2", adminOnly: false },
   { label: "Locations", href: "/locations", icon: "MapPin", adminOnly: false },

@@ -15,13 +15,14 @@ import {
   Building2,
   MapPin,
   Settings,
+  UserPlus,
   Flame,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { APP_NAME, NAV_ITEMS } from "@/lib/constants";
 import { SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
-const icons = { LayoutDashboard, Cylinder, Droplets, Paintbrush, Gem, FileBox, Send, ClipboardList, Building2, MapPin, Settings };
+const icons = { LayoutDashboard, Cylinder, Droplets, Paintbrush, Gem, FileBox, Send, ClipboardList, Building2, MapPin, Settings, UserPlus };
 
 export function MobileSidebar() {
   const pathname = usePathname();

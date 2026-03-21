@@ -16,6 +16,7 @@ import {
   Building2,
   MapPin,
   Settings,
+  UserPlus,
   Flame,
   PanelLeftClose,
   PanelLeft,
@@ -37,6 +38,7 @@ const icons = {
   Building2,
   MapPin,
   Settings,
+  UserPlus,
 } as const;
 
 export function Sidebar() {
