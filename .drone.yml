@@ -1,35 +1,66 @@
 ---
-  kind: pipeline
-  type: docker
-  name: build-and-deploy
+kind: pipeline
+type: docker
+name: build-and-deploy
 
-  trigger:
-    branch: [main]
-    event: [push]
+trigger:
+  branch: [main]
+  event: [push]
 
-  steps:
-    - name: build
-      image: plugins/docker
-      settings:
-        repo: git.samagsteribbe.nl/admin/dragonsstash
-        registry: git.samagsteribbe.nl
-        tags:
-          - latest
-          - "${DRONE_COMMIT_SHA:0:8}"
-        username:
-          from_secret: gitea_username
-        password:
-          from_secret: gitea_password
+steps:
+  - name: build-app
+    image: plugins/docker
+    settings:
+      repo: git.samagsteribbe.nl/admin/dragonsstash
+      registry: git.samagsteribbe.nl
+      dockerfile: Dockerfile
+      tags:
+        - latest
+        - "${DRONE_COMMIT_SHA:0:8}"
+      build_args:
+        - NEXT_PUBLIC_APP_URL=https://dragonsstash.samagsteribbe.nl
+      username:
+        from_secret: gitea_username
+      password:
+        from_secret: gitea_password
 
-    - name: deploy
-      image: alpine
-      environment:
-        SSH_KEY:
-          from_secret: ssh_key
-      commands:
-        - apk add --no-cache openssh-client
-        - mkdir -p ~/.ssh
-        - printf "%s" "$SSH_KEY" > ~/.ssh/id_ed25519
-        - chmod 600 ~/.ssh/id_ed25519
-        - ssh-keyscan -t ed25519 192.168.68.68 > ~/.ssh/known_hosts 2>/dev/null
-        - ssh sam@192.168.68.68 "cd /opt/stacks/DragonsStash && docker compose pull && docker compose up -d"
+  - name: build-worker
+    image: plugins/docker
+    settings:
+      repo: git.samagsteribbe.nl/admin/dragonsstash-worker
+      registry: git.samagsteribbe.nl
+      dockerfile: worker/Dockerfile
+      tags:
+        - latest
+        - "${DRONE_COMMIT_SHA:0:8}"
+      username:
+        from_secret: gitea_username
+      password:
+        from_secret: gitea_password
+
+  - name: build-bot
+    image: plugins/docker
+    settings:
+      repo: git.samagsteribbe.nl/admin/dragonsstash-bot
+      registry: git.samagsteribbe.nl
+      dockerfile: bot/Dockerfile
+      tags:
+        - latest
+        - "${DRONE_COMMIT_SHA:0:8}"
+      username:
+        from_secret: gitea_username
+      password:
+        from_secret: gitea_password
+
+  - name: deploy
+    image: alpine
+    environment:
+      SSH_KEY:
+        from_secret: ssh_key
+    commands:
+      - apk add --no-cache openssh-client
+      - mkdir -p ~/.ssh
+      - printf "%s" "$SSH_KEY" > ~/.ssh/id_ed25519
+      - chmod 600 ~/.ssh/id_ed25519
+      - ssh-keyscan -t ed25519 192.168.68.68 > ~/.ssh/known_hosts 2>/dev/null
+      - ssh sam@192.168.68.68 "cd /opt/stacks/DragonsStash && docker compose pull && docker compose up -d"
