@@ -32,5 +32,4 @@
         - printf "%s" "$SSH_KEY" > ~/.ssh/id_ed25519
         - chmod 600 ~/.ssh/id_ed25519
         - ssh-keyscan -t ed25519 192.168.68.68 > ~/.ssh/known_hosts 2>/dev/null
-        - ssh sam@192.168.68.68 "cd /opt/stacks/DragonsStash && docker compose
-  pull && docker compose up -d"
+        - ssh sam@192.168.68.68 "cd /opt/stacks/DragonsStash && docker compose pull && docker compose up -d"
