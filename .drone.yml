@@ -23,14 +23,15 @@ steps:
         from_secret: gitea_password
 
   # SSH into your server and redeploy
-  - name: deploy
-    image: appleboy/drone-ssh
-    settings:
-      host: 192.168.68.68
-      username: sam
-      key:
-        from_secret: ssh_key
-      script:
-        - cd /opt/stacks/DragonsStash
-        - docker compose pull
-        - docker compose up -d
+  - name: deploy                                                              
+      image: appleboy/drone-ssh                                                 
+      environment:                                                              
+        PLUGIN_HOST: 192.168.68.68                                              
+        PLUGIN_USERNAME: sam                                                    
+        PLUGIN_PORT: 22                                     
+        PLUGIN_KEY:                                                             
+          from_secret: ssh_key                              
+        PLUGIN_SCRIPT: |
+          cd /opt/stacks/DragonsStash                                           
+          docker compose pull                                                   
+          docker compose up -d
