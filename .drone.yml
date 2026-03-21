@@ -31,5 +31,4 @@ steps:
         PLUGIN_PORT: "22"                                                       
         PLUGIN_KEY:                                                             
           from_secret: ssh_key                                                  
-        PLUGIN_SCRIPT: "cd /opt/stacks/DragonsStash && docker compose pull &&   
-  docker compose up -d" 
+        PLUGIN_SCRIPT: "cd /opt/stacks/DragonsStash && docker compose pull && docker compose up -d" 
