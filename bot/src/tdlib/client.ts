@@ -66,10 +66,11 @@ export async function copyMessageToUser(
   toUserId: bigint
 ): Promise<void> {
   if (!client) throw new Error("Bot client not initialized");
+  const c = client;
 
   await withFloodWait(
     () =>
-      client.invoke({
+      c.invoke({
         _: "forwardMessages",
         chat_id: Number(toUserId),
         from_chat_id: Number(fromChatId),
@@ -90,11 +91,12 @@ export async function sendTextMessage(
   parseMode: "textParseModeMarkdown" | "textParseModeHTML" = "textParseModeMarkdown"
 ): Promise<void> {
   if (!client) throw new Error("Bot client not initialized");
+  const c = client;
 
   // Parse the text first
   const parsed = await withFloodWait(
     () =>
-      client.invoke({
+      c.invoke({
         _: "parseTextEntities",
         text,
         parse_mode: { _: parseMode, version: parseMode === "textParseModeMarkdown" ? 2 : 0 },
@@ -104,7 +106,7 @@ export async function sendTextMessage(
 
   await withFloodWait(
     () =>
-      client.invoke({
+      c.invoke({
         _: "sendMessage",
         chat_id: Number(chatId),
         input_message_content: {
@@ -125,6 +127,7 @@ export async function sendPhotoMessage(
   caption: string
 ): Promise<void> {
   if (!client) throw new Error("Bot client not initialized");
+  const c = client;
 
   // Write the photo to a temp file
   const { writeFile, unlink } = await import("fs/promises");
@@ -136,7 +139,7 @@ export async function sendPhotoMessage(
 
     const parsedCaption = await withFloodWait(
       () =>
-        client.invoke({
+        c.invoke({
           _: "parseTextEntities",
           text: caption,
           parse_mode: { _: "textParseModeMarkdown", version: 2 },
@@ -146,7 +149,7 @@ export async function sendPhotoMessage(
 
     await withFloodWait(
       () =>
-        client.invoke({
+        c.invoke({
           _: "sendMessage",
           chat_id: Number(chatId),
           input_message_content: {
@@ -171,9 +174,10 @@ export async function getUser(
   userId: number
 ): Promise<{ firstName: string; lastName?: string; username?: string }> {
   if (!client) throw new Error("Bot client not initialized");
+  const c = client;
   const user = (await withFloodWait(
     () =>
-      client.invoke({
+      c.invoke({
         _: "getUser",
         user_id: userId,
       }),
