@@ -1,7 +1,7 @@
 "use client";
 
 import { type ColumnDef } from "@tanstack/react-table";
-import { FileArchive, Eye, ImageIcon } from "lucide-react";
+import { FileArchive, Eye, Pencil } from "lucide-react";
 import { DataTableColumnHeader } from "@/components/shared/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ export interface PackageRow {
 
 interface PackageColumnsProps {
   onViewFiles: (pkg: PackageRow) => void;
+  onSetCreator: (pkg: PackageRow) => void;
 }
 
 function formatBytes(bytesStr: string): string {
@@ -57,6 +58,7 @@ function PreviewCell({ pkg }: { pkg: PackageRow }) {
 
 export function getPackageColumns({
   onViewFiles,
+  onSetCreator,
 }: PackageColumnsProps): ColumnDef<PackageRow, unknown>[] {
   return [
     {
@@ -113,9 +115,13 @@ export function getPackageColumns({
       accessorKey: "creator",
       header: ({ column }) => <DataTableColumnHeader column={column} title="Creator" />,
       cell: ({ row }) => (
-        <span className="text-sm text-muted-foreground truncate max-w-[160px] block">
-          {row.original.creator ?? "\u2014"}
-        </span>
+        <button
+          className="text-sm text-muted-foreground truncate max-w-[160px] block hover:text-foreground hover:underline cursor-pointer text-left"
+          onClick={() => onSetCreator(row.original)}
+          title="Click to edit creator"
+        >
+          {row.original.creator || "\u2014"}
+        </button>
       ),
     },
     {

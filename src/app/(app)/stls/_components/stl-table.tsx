@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useTransition } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
 import { Search, FileBox } from "lucide-react";
 import { useDataTable } from "@/hooks/use-data-table";
 import { getPackageColumns, type PackageRow } from "./package-columns";
@@ -13,6 +14,7 @@ import { DataTableViewOptions } from "@/components/shared/data-table-view-option
 import { PageHeader } from "@/components/shared/page-header";
 import { Input } from "@/components/ui/input";
 import type { IngestionAccountStatus } from "@/lib/telegram/types";
+import { updatePackageCreator } from "../actions";
 
 interface StlTableProps {
   data: PackageRow[];
@@ -33,6 +35,7 @@ export function StlTable({
 
   const [searchValue, setSearchValue] = useState(searchParams.get("search") ?? "");
   const [viewPkg, setViewPkg] = useState<PackageRow | null>(null);
+  const [, startTransition] = useTransition();
 
   const updateSearch = useCallback(
     (value: string) => {
@@ -51,6 +54,19 @@ export function StlTable({
 
   const columns = getPackageColumns({
     onViewFiles: (pkg) => setViewPkg(pkg),
+    onSetCreator: (pkg) => {
+      const value = prompt("Enter creator name:", pkg.creator ?? "");
+      if (value === null) return;
+      startTransition(async () => {
+        const result = await updatePackageCreator(pkg.id, value || null);
+        if (result.success) {
+          toast.success(value ? `Creator set to "${value}"` : "Creator removed");
+          router.refresh();
+        } else {
+          toast.error(result.error);
+        }
+      });
+    },
   });
 
   const { table } = useDataTable({ data, columns, pageCount });
