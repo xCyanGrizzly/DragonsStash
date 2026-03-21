@@ -55,20 +55,23 @@ function parse7zOutput(output: string): FileEntry[] {
 
     if (!inFileList) continue;
 
-    // Parse: Date Time Attr Size Compressed Name
-    // 2024-01-15 10:30:00 ....A        12345        10234  folder/file.stl
+    // Parse: Date Time Attr Size [Compressed] Name
+    // In solid archives, Compressed is only shown for the first file.
+    // 2024-06-14 16:23:14 ....A       225863    595992954  IDP02S02_Steak/01.jpg
+    // 2024-06-14 16:26:30 ....A       188040               IDP02S02_Steak/02.jpg
     const match = trimmed.match(
-      /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+\S+\s+(\d+)\s+(\d+)\s+(.+)$/
+      /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+(\S+)\s+(\d+)\s+(\d+\s+)?(.+)$/
     );
 
     if (match) {
-      const [, uncompressedStr, compressedStr, filePath] = match;
+      const [, attr, uncompressedStr, compressedRaw, filePath] = match;
 
-      // Skip directory entries
-      if (filePath.endsWith("/") || filePath.endsWith("\\")) continue;
-      // Skip entries with 0 size (typically directories without trailing slash)
-      if (uncompressedStr === "0" && compressedStr === "0") continue;
+      // Skip directory entries (D attribute or trailing slash)
+      if (attr.startsWith("D") || filePath.endsWith("/") || filePath.endsWith("\\")) continue;
+      // Skip entries with 0 size
+      if (uncompressedStr === "0") continue;
 
+      const compressedStr = compressedRaw?.trim() || uncompressedStr;
       const ext = path.extname(filePath).toLowerCase();
       entries.push({
         path: filePath,
