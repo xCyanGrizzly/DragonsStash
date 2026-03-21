@@ -10,6 +10,7 @@ import {
   deleteChannel,
   toggleChannelActive,
   setChannelType,
+  setChannelCategory,
   rescanChannel,
 } from "../actions";
 import { DataTable } from "@/components/shared/data-table";
@@ -50,6 +51,13 @@ export function ChannelsTab({ channels, globalDestination, accounts }: ChannelsT
       });
     },
     onRescan: (id) => setRescanId(id),
+    onSetCategory: (id, category) => {
+      startTransition(async () => {
+        const result = await setChannelCategory(id, category);
+        if (result.success) toast.success(category ? `Category set to "${category}"` : "Category removed");
+        else toast.error(result.error);
+      });
+    },
   });
 
   const { table } = useDataTable({

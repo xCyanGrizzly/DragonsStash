@@ -3,7 +3,7 @@ export interface PackageListItem {
   fileName: string;
   fileSize: string; // BigInt serialized as string
   contentHash: string;
-  archiveType: "ZIP" | "RAR";
+  archiveType: "ZIP" | "RAR" | "SEVEN_Z" | "DOCUMENT";
   fileCount: number;
   isMultipart: boolean;
   hasPreview: boolean;

@@ -259,6 +259,25 @@ export async function deleteChannel(id: string): Promise<ActionResult> {
   }
 }
 
+export async function setChannelCategory(
+  id: string,
+  category: string | null
+): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  if (!admin.success) return admin;
+
+  try {
+    await prisma.telegramChannel.update({
+      where: { id },
+      data: { category: category?.trim() || null },
+    });
+    revalidatePath("/telegram");
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to update category" };
+  }
+}
+
 export async function setChannelType(
   id: string,
   type: "SOURCE" | "DESTINATION"

@@ -42,6 +42,7 @@ export async function listChannels() {
     title: c.title,
     type: c.type,
     isActive: c.isActive,
+    category: c.category,
     createdAt: c.createdAt.toISOString(),
     accountCount: c._count.accountMaps,
     packageCount: c._count.packages,

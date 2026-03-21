@@ -36,7 +36,7 @@ import { isChatForum, getForumTopicList, getTopicMessages } from "./tdlib/topics
 import { matchPreviewToArchive } from "./preview/match.js";
 import { groupArchiveSets } from "./archive/multipart.js";
 import type { ArchiveSet } from "./archive/multipart.js";
-import { extractCreatorFromFileName } from "./archive/creator.js";
+import { extractCreatorFromFileName, extractCreatorFromChannelTitle } from "./archive/creator.js";
 import { hashParts } from "./archive/hash.js";
 import { readZipCentralDirectory } from "./archive/zip-reader.js";
 import { readRarContents } from "./archive/rar-reader.js";
@@ -968,8 +968,11 @@ async function processOneArchiveSet(
       previewMsgId = matchedPhoto.id;
     }
 
-    // ── Resolve creator: topic name > filename extraction > null ──
-    const creator = topicCreator ?? extractCreatorFromFileName(archiveName) ?? null;
+    // ── Resolve creator: topic name > filename extraction > channel title > null ──
+    const creator = topicCreator
+      ?? extractCreatorFromFileName(archiveName)
+      ?? extractCreatorFromChannelTitle(channelTitle)
+      ?? null;
 
     // ── Indexing ──
     await updateRunActivity(runId, {

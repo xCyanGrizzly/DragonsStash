@@ -8,6 +8,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   RefreshCcw,
+  Tag,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ interface ChannelColumnsProps {
   onDelete: (id: string) => void;
   onSetType: (id: string, type: "SOURCE" | "DESTINATION") => void;
   onRescan: (id: string) => void;
+  onSetCategory: (id: string, category: string | null) => void;
 }
 
 export function getChannelColumns({
@@ -32,6 +34,7 @@ export function getChannelColumns({
   onDelete,
   onSetType,
   onRescan,
+  onSetCategory,
 }: ChannelColumnsProps): ColumnDef<ChannelRow, unknown>[] {
   return [
     {
@@ -62,6 +65,18 @@ export function getChannelColumns({
           {row.original.type}
         </Badge>
       ),
+    },
+    {
+      accessorKey: "category",
+      header: "Category",
+      cell: ({ row }) => {
+        const category = row.original.category;
+        return category ? (
+          <Badge variant="outline">{category}</Badge>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        );
+      },
     },
     {
       accessorKey: "isActive",
@@ -132,6 +147,15 @@ export function getChannelColumns({
                 Rescan Channel
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem
+              onClick={() => {
+                const cat = prompt("Enter category (e.g. STL, PDF, D&D, Cosplay):", row.original.category ?? "");
+                if (cat !== null) onSetCategory(row.original.id, cat || null);
+              }}
+            >
+              <Tag className="mr-2 h-3.5 w-3.5" />
+              Set Category
+            </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => onToggleActive(row.original.id)}
             >
