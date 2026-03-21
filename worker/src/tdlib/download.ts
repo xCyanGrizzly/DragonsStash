@@ -154,6 +154,12 @@ export async function getChannelMessages(
   const photos: TelegramPhoto[] = [];
   const boundary = lastProcessedMessageId ? Number(lastProcessedMessageId) : null;
 
+  // Open the chat so TDLib loads remote messages
+  await invokeWithTimeout(client, {
+    _: "openChat",
+    chat_id: Number(chatId),
+  });
+
   let currentFromId = 0;
   let totalScanned = 0;
   let pageCount = 0;
@@ -235,6 +241,12 @@ export async function getChannelMessages(
     // Rate limit delay
     await sleep(config.apiDelayMs);
   }
+
+  // Close the chat after scanning
+  await invokeWithTimeout(client, {
+    _: "closeChat",
+    chat_id: Number(chatId),
+  }).catch(() => {}); // Ignore close errors
 
   log.info(
     { chatId: chatId.toString(), archives: archives.length, photos: photos.length, totalScanned, pages: pageCount },
