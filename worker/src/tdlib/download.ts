@@ -154,11 +154,26 @@ export async function getChannelMessages(
   const photos: TelegramPhoto[] = [];
   const boundary = lastProcessedMessageId ? Number(lastProcessedMessageId) : null;
 
-  // Open the chat so TDLib loads remote messages
+  // Open the chat so TDLib loads remote messages, then load chat history
+  // from the server. getChat forces TDLib to fetch chat metadata and
+  // getChatHistory with from_message_id=0 triggers a server-side fetch.
   await invokeWithTimeout(client, {
     _: "openChat",
     chat_id: Number(chatId),
   });
+
+  // Force TDLib to load the full chat list which populates chat state
+  try {
+    await invokeWithTimeout(client, {
+      _: "getChat",
+      chat_id: Number(chatId),
+    });
+  } catch {
+    // Ignore - chat may already be loaded
+  }
+
+  // Give TDLib time to sync chat data from the server
+  await sleep(2000);
 
   let currentFromId = 0;
   let totalScanned = 0;
