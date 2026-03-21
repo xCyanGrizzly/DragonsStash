@@ -377,6 +377,8 @@ enum ChannelRole {
 enum ArchiveType {
   ZIP
   RAR
+  SEVEN_Z
+  DOCUMENT
 }
 
 enum IngestionStatus {

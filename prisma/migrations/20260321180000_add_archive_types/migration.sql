@@ -1,0 +1,3 @@
+-- AlterEnum
+ALTER TYPE "ArchiveType" ADD VALUE 'SEVEN_Z';
+ALTER TYPE "ArchiveType" ADD VALUE 'DOCUMENT';

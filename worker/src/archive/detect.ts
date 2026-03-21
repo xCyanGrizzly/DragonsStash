@@ -1,4 +1,4 @@
-export type ArchiveFormat = "ZIP" | "RAR";
+export type ArchiveFormat = "ZIP" | "RAR" | "7Z" | "DOCUMENT";
 
 export interface MultipartInfo {
   baseName: string;
@@ -48,6 +48,9 @@ const patterns: {
   },
 ];
 
+/** Extensions we recognize as fetchable documents (archives + standalone files) */
+const DOCUMENT_EXTENSIONS = /\.(pdf|stl|obj|3mf|step|stp|blend|gcode|svg|dxf|ai|eps|psd)$/i;
+
 /**
  * Detect if a filename is an archive and extract multipart info.
  */
@@ -85,11 +88,32 @@ export function detectArchive(fileName: string): MultipartInfo | null {
     };
   }
 
+  // Single .7z file
+  if (/\.7z$/i.test(fileName)) {
+    return {
+      baseName: fileName.replace(/\.7z$/i, ""),
+      partNumber: -1,
+      format: "7Z",
+      pattern: "SINGLE",
+    };
+  }
+
+  // Standalone documents (PDFs, STLs, 3D files, etc.)
+  if (DOCUMENT_EXTENSIONS.test(fileName)) {
+    const ext = fileName.match(DOCUMENT_EXTENSIONS)![0];
+    return {
+      baseName: fileName.replace(DOCUMENT_EXTENSIONS, ""),
+      partNumber: -1,
+      format: "DOCUMENT",
+      pattern: "SINGLE",
+    };
+  }
+
   return null;
 }
 
 /**
- * Check if a filename looks like any archive attachment we should process.
+ * Check if a filename looks like any attachment we should process.
  */
 export function isArchiveAttachment(fileName: string): boolean {
   return detectArchive(fileName) !== null;

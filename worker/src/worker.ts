@@ -873,8 +873,21 @@ async function processOneArchiveSet(
     try {
       if (archiveSet.type === "ZIP") {
         entries = await readZipCentralDirectory(tempPaths);
-      } else {
+      } else if (archiveSet.type === "RAR") {
         entries = await readRarContents(tempPaths[0]);
+      } else if (archiveSet.type === "DOCUMENT" || archiveSet.type === "7Z") {
+        // Standalone documents (PDF, STL, etc.) and 7z files — no extraction needed,
+        // just record the file itself as the single entry
+        const part = archiveSet.parts[0];
+        const ext = part.fileName.match(/\.([^.]+)$/)?.[1] ?? null;
+        entries = [{
+          path: part.fileName,
+          fileName: part.fileName,
+          extension: ext,
+          compressedSize: part.fileSize,
+          uncompressedSize: part.fileSize,
+          crc32: null,
+        }];
       }
     } catch (err) {
       accountLog.warn({ err, baseName: archiveSet.baseName }, "Failed to read archive metadata, ingesting without file list");
@@ -975,7 +988,7 @@ async function processOneArchiveSet(
       contentHash,
       fileName: archiveName,
       fileSize: totalSize,
-      archiveType: archiveSet.type,
+      archiveType: archiveSet.type === "7Z" ? "SEVEN_Z" : archiveSet.type,
       sourceChannelId: channel.id,
       sourceMessageId: archiveSet.parts[0].id,
       sourceTopicId,
