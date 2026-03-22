@@ -69,7 +69,7 @@ export async function closeBotClient(): Promise<void> {
 
 /**
  * Copy a message from a channel to a user's DM.
- * Uses forwardMessages (not send_copy) to forward the file directly.
+ * Uses forwardMessages with send_copy so it appears sent by the bot.
  *
  * The fromChatId is the Telegram chat ID from the DB (e.g. -1003767441152).
  * The messageId is the TDLib message ID stored in the DB.
@@ -84,8 +84,15 @@ export async function copyMessageToUser(
 
   log.info(
     { fromChatId: fromChatId.toString(), messageId: messageId.toString(), toUserId: toUserId.toString() },
-    "Forwarding message to user"
+    "Copying message to user"
   );
+
+  // First, ensure TDLib knows about the source chat by opening it
+  try {
+    await c.invoke({ _: "getChat", chat_id: Number(fromChatId) });
+  } catch (err) {
+    log.warn({ err, chatId: fromChatId.toString() }, "getChat failed for source channel");
+  }
 
   const result = await withFloodWait(
     () =>
@@ -94,13 +101,18 @@ export async function copyMessageToUser(
         chat_id: Number(toUserId),
         from_chat_id: Number(fromChatId),
         message_ids: [Number(messageId)],
-        send_copy: false,
+        send_copy: true,
         remove_caption: false,
       }),
     "copyMessageToUser"
   );
 
-  log.info({ result: JSON.stringify(result) }, "forwardMessages result");
+  // forwardMessages returns immediately with temp messages — check result
+  const messages = (result as { messages?: unknown[] })?.messages;
+  log.info(
+    { messageCount: messages?.length ?? 0, result: JSON.stringify(result).slice(0, 500) },
+    "forwardMessages result"
+  );
 }
 
 /**
