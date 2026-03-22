@@ -73,6 +73,11 @@ export async function closeBotClient(): Promise<void> {
  *
  * The fromChatId is the Telegram chat ID from the DB (e.g. -1003767441152).
  * The messageId is the TDLib message ID stored in the DB.
+ *
+ * IMPORTANT: forwardMessages with send_copy returns a *temporary* message
+ * synchronously. The actual file copy/send is asynchronous inside TDLib.
+ * We must listen for updateMessageSendSucceeded / updateMessageSendFailed
+ * to know whether the message actually reached the user.
  */
 export async function copyMessageToUser(
   fromChatId: bigint,
@@ -94,25 +99,114 @@ export async function copyMessageToUser(
     log.warn({ err, chatId: fromChatId.toString() }, "getChat failed for source channel");
   }
 
-  const result = await withFloodWait(
-    () =>
-      c.invoke({
-        _: "forwardMessages",
-        chat_id: Number(toUserId),
-        from_chat_id: Number(fromChatId),
-        message_ids: [Number(messageId)],
-        send_copy: true,
-        remove_caption: false,
-      }),
-    "copyMessageToUser"
-  );
+  // Wait for the actual send to complete, not just the temporary message.
+  // Pattern mirrors worker/src/upload/channel.ts sendAndWaitForUpload.
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let tempMsgId: number | null = null;
 
-  // forwardMessages returns immediately with temp messages — check result
-  const messages = (result as { messages?: unknown[] })?.messages;
-  log.info(
-    { messageCount: messages?.length ?? 0, result: JSON.stringify(result).slice(0, 500) },
-    "forwardMessages result"
-  );
+    // Timeout: 5 minutes for the copy to complete
+    const TIMEOUT_MS = 5 * 60_000;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        reject(
+          new Error(
+            `copyMessageToUser timed out after ${TIMEOUT_MS / 60_000}min ` +
+            `(from=${fromChatId}, msg=${messageId}, to=${toUserId})`
+          )
+        );
+      }
+    }, TIMEOUT_MS);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handleUpdate = (update: any) => {
+      if (update?._ === "updateMessageSendSucceeded") {
+        const oldMsgId = update.old_message_id;
+        if (tempMsgId !== null && oldMsgId === tempMsgId) {
+          if (!settled) {
+            settled = true;
+            cleanup();
+            const finalId = update.message?.id;
+            log.info(
+              { tempMsgId, finalMsgId: finalId, toUserId: toUserId.toString() },
+              "Message copy confirmed by Telegram"
+            );
+            resolve();
+          }
+        }
+      }
+
+      if (update?._ === "updateMessageSendFailed") {
+        const oldMsgId = update.old_message_id;
+        if (tempMsgId !== null && oldMsgId === tempMsgId) {
+          if (!settled) {
+            settled = true;
+            cleanup();
+            const errorMsg = update.error?.message ?? "Unknown send error";
+            const errorCode = update.error?.code ?? 0;
+            log.error(
+              { tempMsgId, errorCode, errorMsg, toUserId: toUserId.toString() },
+              "Message copy failed"
+            );
+            reject(new Error(`copyMessageToUser failed: [${errorCode}] ${errorMsg}`));
+          }
+        }
+      }
+    };
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      c.off("update", handleUpdate);
+    };
+
+    // Attach listener BEFORE sending to avoid missing fast completions
+    c.on("update", handleUpdate);
+
+    // Send the copy — returns a temporary message immediately
+    withFloodWait(
+      () =>
+        c.invoke({
+          _: "forwardMessages",
+          chat_id: Number(toUserId),
+          from_chat_id: Number(fromChatId),
+          message_ids: [Number(messageId)],
+          send_copy: true,
+          remove_caption: false,
+        }),
+      "copyMessageToUser"
+    )
+      .then((result) => {
+        // forwardMessages returns { messages: [tempMsg, ...] }
+        const messages = (result as { messages?: Array<{ id: number }> })?.messages;
+        if (messages && messages.length > 0 && messages[0]) {
+          tempMsgId = messages[0].id;
+          log.debug(
+            { tempMsgId, toUserId: toUserId.toString() },
+            "forwardMessages returned temp message, waiting for send confirmation"
+          );
+        } else {
+          // No temp message returned — likely an error in the API call itself
+          if (!settled) {
+            settled = true;
+            cleanup();
+            reject(
+              new Error(
+                `forwardMessages returned no messages (result: ${JSON.stringify(result).slice(0, 300)})`
+              )
+            );
+          }
+        }
+      })
+      .catch((err) => {
+        if (!settled) {
+          settled = true;
+          cleanup();
+          reject(err);
+        }
+      });
+  });
 }
 
 /**

@@ -335,6 +335,7 @@ export function PackageFilesDrawer({ pkg, open, onOpenChange }: PackageFilesDraw
   }, [filtered]);
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[80vh] flex flex-col gap-0 p-0">
         <DialogHeader className="px-6 pt-6 pb-4 border-b border-border space-y-3">
@@ -408,6 +409,20 @@ export function PackageFilesDrawer({ pkg, open, onOpenChange }: PackageFilesDraw
                       Pick Preview
                     </Button>
                   )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                  >
+                    {uploading ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Upload className="h-3.5 w-3.5" />
+                    )}
+                    Upload Preview
+                  </Button>
                 </div>
               )}
             </div>
@@ -512,19 +527,21 @@ export function PackageFilesDrawer({ pkg, open, onOpenChange }: PackageFilesDraw
         </ScrollArea>
       </DialogContent>
 
-      {/* Archive preview picker modal */}
-      {pkg && pkg.archiveType !== "DOCUMENT" && !pkg.isMultipart && (
-        <ArchivePreviewPicker
-          packageId={pkg.id}
-          packageName={pkg.fileName}
-          open={showPreviewPicker}
-          onOpenChange={setShowPreviewPicker}
-          onPreviewSet={() => {
-            // Refresh the preview by setting a cache-busting URL
-            setLocalPreviewUrl(`/api/zips/${pkg.id}/preview?t=${Date.now()}`);
-          }}
-        />
-      )}
     </Dialog>
+
+    {/* Archive preview picker modal — rendered as sibling to avoid nested Dialog issues */}
+    {pkg && pkg.archiveType !== "DOCUMENT" && !pkg.isMultipart && (
+      <ArchivePreviewPicker
+        packageId={pkg.id}
+        packageName={pkg.fileName}
+        open={showPreviewPicker}
+        onOpenChange={setShowPreviewPicker}
+        onPreviewSet={() => {
+          // Refresh the preview by setting a cache-busting URL
+          setLocalPreviewUrl(`/api/zips/${pkg.id}/preview?t=${Date.now()}`);
+        }}
+      />
+    )}
+    </>
   );
 }
