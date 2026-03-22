@@ -189,8 +189,8 @@ async function waitForSendConfirmation(
       }),
       "sendMessage:copyToUser"
     )
-      .then((result: { id: number }) => {
-        tempMsgId = result.id;
+      .then((result) => {
+        tempMsgId = (result as { id: number }).id;
         log.debug({ tempMsgId, label }, "Message queued, waiting for confirmation");
       })
       .catch((err: Error) => {
