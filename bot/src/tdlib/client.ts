@@ -68,11 +68,11 @@ export async function closeBotClient(): Promise<void> {
 }
 
 /**
- * Forward a message from a channel to a user's DM.
- * Uses forwardMessages with send_copy to make it appear as sent by the bot.
+ * Copy a message from a channel to a user's DM.
+ * Uses forwardMessages (not send_copy) to forward the file directly.
  *
- * The fromChatId is the TDLib chat ID stored in the DB — already in the correct
- * format (negative for supergroups/channels, e.g. -1001234567890).
+ * The fromChatId is the Telegram chat ID from the DB (e.g. -1003767441152).
+ * The messageId is the TDLib message ID stored in the DB.
  */
 export async function copyMessageToUser(
   fromChatId: bigint,
@@ -82,18 +82,25 @@ export async function copyMessageToUser(
   if (!client) throw new Error("Bot client not initialized");
   const c = client;
 
-  await withFloodWait(
+  log.info(
+    { fromChatId: fromChatId.toString(), messageId: messageId.toString(), toUserId: toUserId.toString() },
+    "Forwarding message to user"
+  );
+
+  const result = await withFloodWait(
     () =>
       c.invoke({
         _: "forwardMessages",
         chat_id: Number(toUserId),
         from_chat_id: Number(fromChatId),
         message_ids: [Number(messageId)],
-        send_copy: true,
+        send_copy: false,
         remove_caption: false,
       }),
     "copyMessageToUser"
   );
+
+  log.info({ result: JSON.stringify(result) }, "forwardMessages result");
 }
 
 /**
