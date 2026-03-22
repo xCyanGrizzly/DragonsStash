@@ -172,7 +172,7 @@ export async function rebuildPackageDatabase(
         // We don't have the source message or content hash, so generate a placeholder hash
         const placeholderHash = `rebuild:${destChannel.id}:${destMessageId}`;
         const creator = extractCreatorFromFileName(fileName) ?? null;
-        const archiveType = archiveSet.type;
+        const archiveType = archiveSet.type === "7Z" ? "SEVEN_Z" as const : archiveSet.type as "ZIP" | "RAR" | "DOCUMENT";
 
         // We need a sourceChannelId (required FK). Use fallback if available.
         if (!fallbackSourceId) {
