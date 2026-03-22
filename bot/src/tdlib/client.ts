@@ -38,6 +38,20 @@ export async function createBotClient(): Promise<tdl.Client> {
   }));
 
   log.info("Bot client authenticated successfully");
+
+  // Load chat list so TDLib knows about channels the bot has access to.
+  // Without this, forwardMessages/copyMessage will fail with "Chat not found".
+  try {
+    await client.invoke({
+      _: "getChats",
+      chat_list: { _: "chatListMain" },
+      limit: 200,
+    });
+    log.info("Chat list loaded");
+  } catch (err) {
+    log.warn({ err }, "Failed to load chat list — forwarding may fail");
+  }
+
   return client;
 }
 
