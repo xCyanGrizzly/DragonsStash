@@ -60,7 +60,7 @@ export async function uploadPackagePreview(
       data: {
         previewData: buffer,
         // Set previewMsgId to 0 as sentinel so hasPreview checks work
-        previewMsgId: 0n,
+        previewMsgId: BigInt(0),
       },
     });
 
@@ -125,7 +125,7 @@ export async function setPreviewFromExtract(
         previewData: extractReq.imageData,
         // Set previewMsgId to 0 as sentinel so hasPreview checks work
         // (original Telegram-matched previews have the actual message ID)
-        previewMsgId: 0n,
+        previewMsgId: BigInt(0),
       },
     });
 

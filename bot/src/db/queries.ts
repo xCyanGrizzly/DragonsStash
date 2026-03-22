@@ -21,7 +21,16 @@ export async function findLinkByUserId(userId: string) {
 export async function validateLinkCode(code: string): Promise<string | null> {
   const key = `link_code:${code}`;
   const setting = await db.globalSetting.findUnique({ where: { key } });
-  return setting?.value ?? null;
+  if (!setting) return null;
+
+  try {
+    const parsed = JSON.parse(setting.value);
+    if (parsed.expiresAt && new Date(parsed.expiresAt) < new Date()) return null;
+    return parsed.userId ?? null;
+  } catch {
+    // Legacy format: value is the userId directly
+    return setting.value;
+  }
 }
 
 export async function deleteLinkCode(code: string): Promise<void> {
