@@ -21,7 +21,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 interface FetchedChannel {
   chatId: string;
   title: string;
-  type: "channel" | "supergroup";
+  type: string;
   isForum: boolean;
   memberCount: number | null;
   alreadyLinked: boolean;

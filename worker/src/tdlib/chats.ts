@@ -16,12 +16,23 @@ export interface TelegramChatInfo {
 /**
  * Fetch all chats the account is a member of.
  * Uses TDLib's getChats to load the chat list, then getChat for details.
- * Filters to channels and supergroups only (groups/privates are not useful for ingestion).
+ * Returns ALL chat types: channels, supergroups, groups, private chats,
+ * and the special "Saved Messages" (self) chat.
  */
 export async function getAccountChats(
   client: Client
 ): Promise<TelegramChatInfo[]> {
   const chats: TelegramChatInfo[] = [];
+
+  // Get the current user's ID so we can label Saved Messages
+  let selfUserId: number | null = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const me = (await client.invoke({ _: "getMe" })) as any;
+    selfUserId = me.id;
+  } catch {
+    log.warn("Failed to get current user via getMe");
+  }
 
   // Load ALL chats from the main list by paginating getChats.
   // TDLib's getChats returns batches — keep calling until it returns
@@ -56,6 +67,7 @@ export async function getAccountChats(
         const chatType = chat.type?._;
         let type: TelegramChatInfo["type"] = "other";
         let isForum = false;
+        let title = chat.title ?? `Chat ${chatId}`;
 
         if (chatType === "chatTypeSupergroup") {
           // Get supergroup details to check if it's a channel or group
@@ -78,17 +90,18 @@ export async function getAccountChats(
           type = "group";
         } else if (chatType === "chatTypePrivate" || chatType === "chatTypeSecret") {
           type = "private";
+          // Label the self-chat as "Saved Messages"
+          if (selfUserId !== null && chat.type?.user_id === selfUserId) {
+            title = "Saved Messages";
+          }
         }
 
-        // Only include channels and supergroups
-        if (type === "channel" || type === "supergroup") {
-          chats.push({
-            chatId: BigInt(chatId),
-            title: chat.title ?? `Chat ${chatId}`,
-            type,
-            isForum,
-          });
-        }
+        chats.push({
+          chatId: BigInt(chatId),
+          title,
+          type,
+          isForum,
+        });
       } catch (err) {
         log.warn({ chatId, err }, "Failed to get chat details, skipping");
       }
@@ -99,7 +112,7 @@ export async function getAccountChats(
 
   log.info(
     { total: chats.length },
-    "Fetched channels/supergroups from Telegram"
+    "Fetched all chats from Telegram"
   );
 
   return chats;

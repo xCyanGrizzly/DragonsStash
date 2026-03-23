@@ -150,6 +150,7 @@ export async function createPackageWithFiles(input: CreatePackageInput) {
         packageId: pkg.id,
         fileName: input.fileName,
         creator: input.creator ?? null,
+        tags: input.tags ?? [],
       })
     );
   } catch {

@@ -134,9 +134,22 @@ async function processSendRequest(requestId: string): Promise<void> {
       throw new Error("No global destination channel configured");
     }
 
-    // Send preview if available
+    // Send preview with rich caption if available
     if (pkg.previewData) {
-      const caption = `📦 *${pkg.fileName}*\n\nSent from Dragon's Stash`;
+      const lines: string[] = [];
+      lines.push(`📦 *${escapeMarkdown(pkg.fileName)}*`);
+      if (pkg.creator) lines.push(`👤 ${escapeMarkdown(pkg.creator)}`);
+      if (pkg.fileCount > 0) lines.push(`📁 ${pkg.fileCount} files`);
+      if (pkg.tags && pkg.tags.length > 0) {
+        lines.push(`🏷️ ${pkg.tags.map((t: string) => escapeMarkdown(t)).join(", ")}`);
+      }
+      if (pkg.sourceChannel) {
+        lines.push(`📡 Source: ${escapeMarkdown(pkg.sourceChannel.title)}`);
+      }
+      lines.push("");
+      lines.push("_Sent from Dragon's Stash_");
+
+      const caption = lines.join("\n");
       await sendPhotoMessage(targetUserId, Buffer.from(pkg.previewData), caption);
     }
 
@@ -189,6 +202,9 @@ async function handleNewPackage(payload: string): Promise<void> {
         `🔔 <b>New package matching your subscriptions:</b>`,
         ``,
         `📦 <b>${escapeHtml(data.fileName)}</b>${creator}`,
+        ...(data.tags && data.tags.length > 0
+          ? [`🏷️ ${data.tags.map((t: string) => escapeHtml(t)).join(", ")}`]
+          : []),
         ``,
         `Matched: ${patterns.map((p) => `"${escapeHtml(p)}"`).join(", ")}`,
         ``,
@@ -212,4 +228,8 @@ async function handleNewPackage(payload: string): Promise<void> {
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function escapeMarkdown(text: string): string {
+  return text.replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, "\\$1");
 }
