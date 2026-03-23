@@ -177,6 +177,7 @@ async function handleNewPackage(payload: string): Promise<void> {
       packageId: string;
       fileName: string;
       creator: string | null;
+      tags?: string[];
     };
 
     const subs = await findMatchingSubscriptions(data.fileName, data.creator);
