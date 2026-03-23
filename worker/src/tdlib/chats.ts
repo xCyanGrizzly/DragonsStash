@@ -34,95 +34,123 @@ export async function getAccountChats(
     log.warn("Failed to get current user via getMe");
   }
 
-  // Load ALL chats from both main and archive lists by paginating getChats.
-  // TDLib's getChats returns batches — keep calling until it returns
-  // an empty list, which signals all chats have been loaded.
+  // First, load all chats into TDLib's cache using loadChats (the proper API).
+  // loadChats returns 404 when all chats have been loaded.
+  // Then use getChats to retrieve the IDs for enrichment.
+  // Load from main, archive, AND chat folders to cover all chat types.
+  const folderLists: { _: "chatListFolder"; chat_folder_id: number }[] = [];
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const folders = (await client.invoke({ _: "getChatFolders" })) as any;
+    if (folders?.chat_folders) {
+      for (const f of folders.chat_folders) {
+        folderLists.push({ _: "chatListFolder", chat_folder_id: f.id });
+      }
+    }
+  } catch {
+    // getChatFolders may not be available in older TDLib versions
+  }
+
+  const chatLists: Record<string, unknown>[] = [
+    { _: "chatListMain" },
+    { _: "chatListArchive" },
+    ...folderLists,
+  ];
+
+  // Phase 1: Load all chats into TDLib's cache
+  for (const chatList of chatLists) {
+    try {
+      for (let page = 0; page < 500; page++) {
+        await withFloodWait(
+          () => client.invoke({ _: "loadChats", chat_list: chatList, limit: 100 }),
+          "loadChats"
+        );
+      }
+    } catch {
+      // 404 = all chats loaded (expected), or unsupported list type
+    }
+  }
+
+  // Phase 2: Retrieve chat IDs and enrich with details
   const seenChatIds = new Set<number>();
 
-  for (const chatList of [
-    { _: "chatListMain" as const },
-    { _: "chatListArchive" as const },
-  ]) {
-    const MAX_PAGES = 500; // support up to 50,000 chats per list
-    for (let page = 0; page < MAX_PAGES; page++) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = (await withFloodWait(
+  for (const chatList of chatLists) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let result: { chat_ids: number[] };
+    try {
+      result = (await withFloodWait(
         () => client.invoke({
           _: "getChats",
           chat_list: chatList,
-          limit: 100,
+          limit: 50000,
         }),
         "getChats"
       )) as { chat_ids: number[] };
+    } catch {
+      continue;
+    }
 
-      if (!result.chat_ids || result.chat_ids.length === 0) {
-        break;
-      }
+    if (!result.chat_ids || result.chat_ids.length === 0) continue;
 
-      for (const chatId of result.chat_ids) {
-        if (seenChatIds.has(chatId)) continue;
-        seenChatIds.add(chatId);
+    for (const chatId of result.chat_ids) {
+      if (seenChatIds.has(chatId)) continue;
+      seenChatIds.add(chatId);
 
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const chat = (await withFloodWait(
-            () => client.invoke({
-              _: "getChat",
-              chat_id: chatId,
-            }),
-            "getChat"
-          )) as any;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const chat = (await withFloodWait(
+          () => client.invoke({
+            _: "getChat",
+            chat_id: chatId,
+          }),
+          "getChat"
+        )) as any;
 
-          const chatType = chat.type?._;
-          let type: TelegramChatInfo["type"] = "other";
-          let isForum = false;
-          let title = chat.title ?? `Chat ${chatId}`;
+        const chatType = chat.type?._;
+        let type: TelegramChatInfo["type"] = "other";
+        let isForum = false;
+        let title = chat.title ?? `Chat ${chatId}`;
 
-          if (chatType === "chatTypeSupergroup") {
-            // Get supergroup details to check if it's a channel or group
-            try {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const sg = (await withFloodWait(
-                () => client.invoke({
-                  _: "getSupergroup",
-                  supergroup_id: chat.type.supergroup_id,
-                }),
-                "getSupergroup"
-              )) as any;
+        if (chatType === "chatTypeSupergroup") {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const sg = (await withFloodWait(
+              () => client.invoke({
+                _: "getSupergroup",
+                supergroup_id: chat.type.supergroup_id,
+              }),
+              "getSupergroup"
+            )) as any;
 
-              type = sg.is_channel ? "channel" : "supergroup";
-              isForum = sg.is_forum ?? false;
-            } catch {
-              type = "supergroup";
-            }
-          } else if (chatType === "chatTypeBasicGroup") {
-            type = "group";
-          } else if (chatType === "chatTypePrivate" || chatType === "chatTypeSecret") {
-            type = "private";
-            // Label the self-chat as "Saved Messages"
-            if (selfUserId !== null && chat.type?.user_id === selfUserId) {
-              title = "Saved Messages";
-            }
+            type = sg.is_channel ? "channel" : "supergroup";
+            isForum = sg.is_forum ?? false;
+          } catch {
+            type = "supergroup";
           }
-
-          chats.push({
-            chatId: BigInt(chatId),
-            title,
-            type,
-            isForum,
-          });
-        } catch (err) {
-          log.warn({ chatId, err }, "Failed to get chat details, skipping");
+        } else if (chatType === "chatTypeBasicGroup") {
+          type = "group";
+        } else if (chatType === "chatTypePrivate" || chatType === "chatTypeSecret") {
+          type = "private";
+          if (selfUserId !== null && chat.type?.user_id === selfUserId) {
+            title = "Saved Messages";
+          }
         }
-      }
 
-      await sleep(config.apiDelayMs);
+        chats.push({
+          chatId: BigInt(chatId),
+          title,
+          type,
+          isForum,
+        });
+      } catch (err) {
+        log.warn({ chatId, err }, "Failed to get chat details, skipping");
+      }
     }
   }
 
   log.info(
     { total: chats.length },
-    "Fetched all chats from Telegram (main + archive)"
+    "Fetched all chats from Telegram (main + archive + folders)"
   );
 
   return chats;

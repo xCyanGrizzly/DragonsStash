@@ -335,25 +335,45 @@ export async function runWorkerForAccount(
       phone: account.phone,
     });
 
-    // Load the full chat list so TDLib knows about all chats.
+    // Load all chats into TDLib's local cache using loadChats (the recommended API).
     // Without this, getChat/searchChatMessages fail with "Chat not found".
-    // TDLib returns chats in batches — keep calling until empty.
-    // Load from both main and archive lists to cover older/archived chats.
-    for (const chatList of [
-      { _: "chatListMain" as const },
-      { _: "chatListArchive" as const },
-    ]) {
+    // loadChats returns a 404 when all chats have been loaded — that's the stop signal.
+    // Load from main, archive, AND chat folders to cover all chat types.
+    {
+      // Discover chat folders first
+      const folderLists: { _: "chatListFolder"; chat_folder_id: number }[] = [];
       try {
-        for (let page = 0; page < 500; page++) {
-          const chatResult = await client.invoke({
-            _: "getChats",
-            chat_list: chatList,
-            limit: 100,
-          }) as { chat_ids?: number[] };
-          if (!chatResult.chat_ids || chatResult.chat_ids.length === 0) break;
+        const folders = await client.invoke({ _: "getChatFolders" }) as {
+          chat_folders?: { id: number }[];
+        };
+        if (folders.chat_folders) {
+          for (const f of folders.chat_folders) {
+            folderLists.push({ _: "chatListFolder", chat_folder_id: f.id });
+          }
         }
       } catch {
-        // Ignore — chat list may already be loaded
+        // getChatFolders may not be available in older TDLib versions
+      }
+
+      const chatLists: Record<string, unknown>[] = [
+        { _: "chatListMain" },
+        { _: "chatListArchive" },
+        ...folderLists,
+      ];
+
+      for (const chatList of chatLists) {
+        try {
+          for (let page = 0; page < 500; page++) {
+            await client.invoke({
+              _: "loadChats",
+              chat_list: chatList,
+              limit: 100,
+            });
+            // loadChats returns ok — keep going until 404
+          }
+        } catch {
+          // 404 = all chats loaded (expected), or unsupported list type
+        }
       }
     }
 
