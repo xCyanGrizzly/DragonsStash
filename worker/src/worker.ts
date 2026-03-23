@@ -338,17 +338,23 @@ export async function runWorkerForAccount(
     // Load the full chat list so TDLib knows about all chats.
     // Without this, getChat/searchChatMessages fail with "Chat not found".
     // TDLib returns chats in batches — keep calling until empty.
-    try {
-      for (let page = 0; page < 50; page++) {
-        const chatResult = await client.invoke({
-          _: "getChats",
-          chat_list: { _: "chatListMain" },
-          limit: 100,
-        }) as { chat_ids?: number[] };
-        if (!chatResult.chat_ids || chatResult.chat_ids.length === 0) break;
+    // Load from both main and archive lists to cover older/archived chats.
+    for (const chatList of [
+      { _: "chatListMain" as const },
+      { _: "chatListArchive" as const },
+    ]) {
+      try {
+        for (let page = 0; page < 500; page++) {
+          const chatResult = await client.invoke({
+            _: "getChats",
+            chat_list: chatList,
+            limit: 100,
+          }) as { chat_ids?: number[] };
+          if (!chatResult.chat_ids || chatResult.chat_ids.length === 0) break;
+        }
+      } catch {
+        // Ignore — chat list may already be loaded
       }
-    } catch {
-      // Ignore — chat list may already be loaded
     }
 
     const counters = {
