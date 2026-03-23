@@ -103,6 +103,7 @@ export interface CreatePackageInput {
   partCount: number;
   ingestionRunId: string;
   creator?: string | null;
+  tags?: string[];
   previewData?: Buffer | null;
   previewMsgId?: bigint | null;
   files: {
@@ -132,6 +133,7 @@ export async function createPackageWithFiles(input: CreatePackageInput) {
       fileCount: input.files.length,
       ingestionRunId: input.ingestionRunId,
       creator: input.creator ?? undefined,
+      tags: input.tags && input.tags.length > 0 ? input.tags : undefined,
       previewData: input.previewData ? new Uint8Array(input.previewData) : undefined,
       previewMsgId: input.previewMsgId ?? undefined,
       files: {

@@ -11,12 +11,14 @@ export async function listPackages(options: {
   limit: number;
   channelId?: string;
   creator?: string;
+  tag?: string;
   sortBy: "indexedAt" | "fileName" | "fileSize";
   order: "asc" | "desc";
 }) {
   const where: Record<string, unknown> = {};
   if (options.channelId) where.sourceChannelId = options.channelId;
   if (options.creator) where.creator = options.creator;
+  if (options.tag) where.tags = { has: options.tag };
 
   const [items, total] = await Promise.all([
     prisma.package.findMany({
@@ -34,7 +36,8 @@ export async function listPackages(options: {
         isMultipart: true,
         indexedAt: true,
         creator: true,
-        previewMsgId: true, // cheap null check — avoids loading blob
+        tags: true,
+        previewData: true, // check actual image data, not previewMsgId proxy
         sourceChannel: { select: { id: true, title: true } },
       },
     }),
@@ -49,8 +52,9 @@ export async function listPackages(options: {
     archiveType: pkg.archiveType,
     fileCount: pkg.fileCount,
     isMultipart: pkg.isMultipart,
-    hasPreview: pkg.previewMsgId !== null,
+    hasPreview: pkg.previewData !== null,
     creator: pkg.creator,
+    tags: pkg.tags,
     indexedAt: pkg.indexedAt.toISOString(),
     sourceChannel: pkg.sourceChannel,
   }));
@@ -96,8 +100,9 @@ export async function getPackageById(
     archiveType: pkg.archiveType,
     fileCount: pkg.fileCount,
     isMultipart: pkg.isMultipart,
-    hasPreview: pkg.previewMsgId !== null,
+    hasPreview: pkg.previewData !== null,
     creator: pkg.creator,
+    tags: pkg.tags,
     partCount: pkg.partCount,
     indexedAt: pkg.indexedAt.toISOString(),
     sourceChannel: pkg.sourceChannel,
@@ -208,7 +213,8 @@ export async function searchPackages(options: {
           isMultipart: true,
           indexedAt: true,
           creator: true,
-          previewMsgId: true,
+          tags: true,
+          previewData: true,
           sourceChannel: { select: { id: true, title: true } },
         },
       }),
@@ -223,8 +229,9 @@ export async function searchPackages(options: {
       archiveType: pkg.archiveType,
       fileCount: pkg.fileCount,
       isMultipart: pkg.isMultipart,
-      hasPreview: pkg.previewMsgId !== null,
+      hasPreview: pkg.previewData !== null,
       creator: pkg.creator,
+      tags: pkg.tags,
       indexedAt: pkg.indexedAt.toISOString(),
       sourceChannel: pkg.sourceChannel,
     }));
@@ -247,6 +254,16 @@ export async function searchPackages(options: {
     sortBy: "indexedAt",
     order: "desc",
   });
+}
+
+/**
+ * Get all distinct tags across all packages (for filter dropdowns).
+ */
+export async function getAllPackageTags(): Promise<string[]> {
+  const result = await prisma.$queryRaw<{ tag: string }[]>`
+    SELECT DISTINCT unnest(tags) AS tag FROM packages ORDER BY tag
+  `;
+  return result.map((r) => r.tag);
 }
 
 export async function getIngestionStatus(): Promise<IngestionAccountStatus[]> {

@@ -38,6 +38,7 @@ model User {
   tags         Tag[]
   settings     UserSettings?
   telegramLink TelegramLink?
+  kickstarters Kickstarter[]
   inviteCodes  InviteCode[]   @relation("InviteCreator")
   usedInvite   InviteCode?    @relation("InviteUser", fields: [usedInviteId], references: [id], onDelete: SetNull)
   usedInviteId String?
@@ -468,6 +469,7 @@ model Package {
   isMultipart     Boolean     @default(false)
   partCount       Int         @default(1)
   fileCount       Int         @default(0)
+  tags            String[]    @default([])
   previewData     Bytes?      // JPEG thumbnail from nearby Telegram photo (stored as raw bytes)
   previewMsgId    BigInt?     // Telegram message ID of the matched photo
   indexedAt        DateTime   @default(now())
@@ -477,8 +479,9 @@ model Package {
   files           PackageFile[]
   ingestionRun    IngestionRun?        @relation(fields: [ingestionRunId], references: [id])
   ingestionRunId  String?
-  sendRequests    BotSendRequest[]
-  extractRequests ArchiveExtractRequest[]
+  sendRequests      BotSendRequest[]
+  extractRequests   ArchiveExtractRequest[]
+  kickstarterLinks  KickstarterPackage[]
 
   @@index([sourceChannelId])
   @@index([destChannelId])
@@ -681,4 +684,64 @@ model ArchiveExtractRequest {
   @@index([packageId, filePath])
   @@index([status])
   @@map("archive_extract_requests")
+}
+
+// ───────────────────────────────────────
+// Purchased Kickstarters
+// ───────────────────────────────────────
+
+enum DeliveryStatus {
+  NOT_DELIVERED
+  PARTIAL
+  DELIVERED
+}
+
+enum PaymentStatus {
+  PAID
+  UNPAID
+}
+
+model KickstarterHost {
+  id           String        @id @default(cuid())
+  name         String        @unique
+  createdAt    DateTime      @default(now())
+
+  kickstarters Kickstarter[]
+
+  @@map("kickstarter_hosts")
+}
+
+model Kickstarter {
+  id              String          @id @default(cuid())
+  name            String
+  link            String?
+  filesUrl        String?
+  deliveryStatus  DeliveryStatus  @default(NOT_DELIVERED)
+  paymentStatus   PaymentStatus   @default(UNPAID)
+  notes           String?
+  hostId          String?
+  userId          String
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  host     KickstarterHost?     @relation(fields: [hostId], references: [id], onDelete: SetNull)
+  user     User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  packages KickstarterPackage[]
+
+  @@index([hostId])
+  @@index([userId])
+  @@index([deliveryStatus])
+  @@index([paymentStatus])
+  @@map("kickstarters")
+}
+
+model KickstarterPackage {
+  kickstarterId String
+  packageId     String
+
+  kickstarter Kickstarter @relation(fields: [kickstarterId], references: [id], onDelete: Cascade)
+  package     Package     @relation(fields: [packageId], references: [id], onDelete: Cascade)
+
+  @@id([kickstarterId, packageId])
+  @@map("kickstarter_packages")
 }

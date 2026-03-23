@@ -71,6 +71,48 @@ export async function uploadPackagePreview(
   }
 }
 
+export async function updatePackageTags(
+  packageId: string,
+  tags: string[]
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { success: false, error: "Unauthorized" };
+
+  try {
+    const cleaned = tags.map((t) => t.trim()).filter(Boolean);
+    // Deduplicate
+    const unique = [...new Set(cleaned)];
+    await prisma.package.update({
+      where: { id: packageId },
+      data: { tags: unique },
+    });
+    revalidatePath("/stls");
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to update tags" };
+  }
+}
+
+export async function bulkSetTags(
+  packageIds: string[],
+  tags: string[]
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { success: false, error: "Unauthorized" };
+
+  try {
+    const cleaned = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
+    await prisma.package.updateMany({
+      where: { id: { in: packageIds } },
+      data: { tags: cleaned },
+    });
+    revalidatePath("/stls");
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to update tags" };
+  }
+}
+
 export async function bulkSetCreator(
   packageIds: string[],
   creator: string

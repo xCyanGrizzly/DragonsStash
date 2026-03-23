@@ -3,7 +3,7 @@
 import { useState, useCallback, useTransition } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Search, FileBox } from "lucide-react";
+import { Search } from "lucide-react";
 import { useDataTable } from "@/hooks/use-data-table";
 import { getPackageColumns, type PackageRow } from "./package-columns";
 import { PackageFilesDrawer } from "./package-files-drawer";
@@ -13,14 +13,22 @@ import { DataTablePagination } from "@/components/shared/data-table-pagination";
 import { DataTableViewOptions } from "@/components/shared/data-table-view-options";
 import { PageHeader } from "@/components/shared/page-header";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { IngestionAccountStatus } from "@/lib/telegram/types";
-import { updatePackageCreator } from "../actions";
+import { updatePackageCreator, updatePackageTags } from "../actions";
 
 interface StlTableProps {
   data: PackageRow[];
   pageCount: number;
   totalCount: number;
   ingestionStatus: IngestionAccountStatus[];
+  availableTags: string[];
 }
 
 export function StlTable({
@@ -28,6 +36,7 @@ export function StlTable({
   pageCount,
   totalCount,
   ingestionStatus,
+  availableTags,
 }: StlTableProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -52,6 +61,20 @@ export function StlTable({
     [router, pathname, searchParams]
   );
 
+  const updateTagFilter = useCallback(
+    (value: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (value && value !== "all") {
+        params.set("tag", value);
+        params.set("page", "1");
+      } else {
+        params.delete("tag");
+      }
+      router.push(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [router, pathname, searchParams]
+  );
+
   const columns = getPackageColumns({
     onViewFiles: (pkg) => setViewPkg(pkg),
     onSetCreator: (pkg) => {
@@ -67,9 +90,28 @@ export function StlTable({
         }
       });
     },
+    onSetTags: (pkg) => {
+      const value = prompt(
+        "Enter tags (comma-separated):",
+        pkg.tags.join(", ")
+      );
+      if (value === null) return;
+      const tags = value.split(",").map((t) => t.trim()).filter(Boolean);
+      startTransition(async () => {
+        const result = await updatePackageTags(pkg.id, tags);
+        if (result.success) {
+          toast.success(tags.length > 0 ? `Tags updated` : "Tags removed");
+          router.refresh();
+        } else {
+          toast.error(result.error);
+        }
+      });
+    },
   });
 
   const { table } = useDataTable({ data, columns, pageCount });
+
+  const activeTag = searchParams.get("tag") ?? "";
 
   return (
     <div className="space-y-4">
@@ -90,6 +132,21 @@ export function StlTable({
             className="pl-9 h-9"
           />
         </div>
+        {availableTags.length > 0 && (
+          <Select value={activeTag || "all"} onValueChange={updateTagFilter}>
+            <SelectTrigger className="w-[160px] h-9">
+              <SelectValue placeholder="All Tags" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Tags</SelectItem>
+              {availableTags.map((tag) => (
+                <SelectItem key={tag} value={tag}>
+                  {tag}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <DataTableViewOptions table={table} />
       </div>
 

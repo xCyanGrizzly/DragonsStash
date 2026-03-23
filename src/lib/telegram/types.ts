@@ -8,6 +8,7 @@ export interface PackageListItem {
   isMultipart: boolean;
   hasPreview: boolean;
   creator: string | null;
+  tags: string[];
   indexedAt: string;
   sourceChannel: {
     id: string;

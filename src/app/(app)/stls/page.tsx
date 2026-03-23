@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { listPackages, searchPackages, getIngestionStatus } from "@/lib/telegram/queries";
+import { listPackages, searchPackages, getIngestionStatus, getAllPackageTags } from "@/lib/telegram/queries";
 import { StlTable } from "./_components/stl-table";
 
 interface Props {
@@ -19,9 +19,10 @@ export default async function StlFilesPage({ searchParams }: Props) {
   const order = (params.order as "asc" | "desc") ?? "desc";
   const search = (params.search as string) ?? "";
   const creator = (params.creator as string) || undefined;
+  const tag = (params.tag as string) || undefined;
 
-  // Fetch packages and ingestion status in parallel
-  const [result, ingestionStatus] = await Promise.all([
+  // Fetch packages, ingestion status, and available tags in parallel
+  const [result, ingestionStatus, availableTags] = await Promise.all([
     search
       ? searchPackages({
           query: search,
@@ -33,10 +34,12 @@ export default async function StlFilesPage({ searchParams }: Props) {
           page,
           limit: perPage,
           creator,
+          tag,
           sortBy: sort as "indexedAt" | "fileName" | "fileSize",
           order,
         }),
     getIngestionStatus(),
+    getAllPackageTags(),
   ]);
 
   return (
@@ -45,6 +48,7 @@ export default async function StlFilesPage({ searchParams }: Props) {
       pageCount={result.pagination.totalPages}
       totalCount={result.pagination.total}
       ingestionStatus={ingestionStatus}
+      availableTags={availableTags}
     />
   );
 }

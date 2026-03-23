@@ -23,12 +23,11 @@ export async function getAccountChats(
 ): Promise<TelegramChatInfo[]> {
   const chats: TelegramChatInfo[] = [];
 
-  // Load main chat list — TDLib loads in batches
-  let offsetOrder = "9223372036854775807"; // max int64 as string
-  let offsetChatId = 0;
-  let hasMore = true;
-
-  while (hasMore) {
+  // Load ALL chats from the main list by paginating getChats.
+  // TDLib's getChats returns batches — keep calling until it returns
+  // an empty list, which signals all chats have been loaded.
+  const MAX_PAGES = 50; // safety limit (50 × 100 = 5000 chats)
+  for (let page = 0; page < MAX_PAGES; page++) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = (await withFloodWait(
       () => client.invoke({
@@ -94,10 +93,6 @@ export async function getAccountChats(
         log.warn({ chatId, err }, "Failed to get chat details, skipping");
       }
     }
-
-    // getChats with chatListMain returns all chats at once in newer TDLib versions
-    // So we break after the first batch
-    hasMore = false;
 
     await sleep(config.apiDelayMs);
   }

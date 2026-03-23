@@ -1,7 +1,7 @@
 "use client";
 
 import { type ColumnDef } from "@tanstack/react-table";
-import { FileArchive, Eye, Pencil } from "lucide-react";
+import { FileArchive, Eye } from "lucide-react";
 import { DataTableColumnHeader } from "@/components/shared/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ export interface PackageRow {
   isMultipart: boolean;
   hasPreview: boolean;
   creator: string | null;
+  tags: string[];
   indexedAt: string;
   sourceChannel: {
     id: string;
@@ -27,6 +28,7 @@ export interface PackageRow {
 interface PackageColumnsProps {
   onViewFiles: (pkg: PackageRow) => void;
   onSetCreator: (pkg: PackageRow) => void;
+  onSetTags: (pkg: PackageRow) => void;
 }
 
 function formatBytes(bytesStr: string): string {
@@ -59,6 +61,7 @@ function PreviewCell({ pkg }: { pkg: PackageRow }) {
 export function getPackageColumns({
   onViewFiles,
   onSetCreator,
+  onSetTags,
 }: PackageColumnsProps): ColumnDef<PackageRow, unknown>[] {
   return [
     {
@@ -123,6 +126,42 @@ export function getPackageColumns({
           {row.original.creator || "\u2014"}
         </button>
       ),
+    },
+    {
+      id: "tags",
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Tags" />,
+      cell: ({ row }) => {
+        const tags = row.original.tags;
+        if (tags.length === 0) {
+          return (
+            <button
+              className="text-sm text-muted-foreground hover:text-foreground cursor-pointer"
+              onClick={() => onSetTags(row.original)}
+              title="Click to add tags"
+            >
+              {"\u2014"}
+            </button>
+          );
+        }
+        return (
+          <button
+            className="flex flex-wrap gap-1 cursor-pointer"
+            onClick={() => onSetTags(row.original)}
+            title="Click to edit tags"
+          >
+            {tags.map((tag) => (
+              <Badge
+                key={tag}
+                variant="outline"
+                className="text-[10px] bg-primary/5"
+              >
+                {tag}
+              </Badge>
+            ))}
+          </button>
+        );
+      },
+      accessorFn: (row) => row.tags.join(", "),
     },
     {
       id: "channel",

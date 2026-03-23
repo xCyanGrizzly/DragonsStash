@@ -335,14 +335,18 @@ export async function runWorkerForAccount(
       phone: account.phone,
     });
 
-    // Load the chat list so TDLib knows about all chats
-    // Without this, getChat/getChatHistory fail with "Chat not found"
+    // Load the full chat list so TDLib knows about all chats.
+    // Without this, getChat/searchChatMessages fail with "Chat not found".
+    // TDLib returns chats in batches — keep calling until empty.
     try {
-      await client.invoke({
-        _: "getChats",
-        chat_list: { _: "chatListMain" },
-        limit: 1000,
-      });
+      for (let page = 0; page < 50; page++) {
+        const chatResult = await client.invoke({
+          _: "getChats",
+          chat_list: { _: "chatListMain" },
+          limit: 100,
+        }) as { chat_ids?: number[] };
+        if (!chatResult.chat_ids || chatResult.chat_ids.length === 0) break;
+      }
     } catch {
       // Ignore — chat list may already be loaded
     }
@@ -377,6 +381,22 @@ export async function runWorkerForAccount(
           : channel.title;
 
         try {
+        // ── Ensure TDLib knows about this chat ──
+        // getChats may not have loaded all channels (pagination, archive folder, etc.)
+        // so we explicitly load each channel before scanning.
+        try {
+          await client.invoke({
+            _: "getChat",
+            chat_id: Number(channel.telegramId),
+          });
+        } catch (chatErr) {
+          accountLog.warn(
+            { err: chatErr, channelId: channel.id, title: channel.title, telegramId: channel.telegramId.toString() },
+            "TDLib does not know about this chat — it may not be accessible to this account. Skipping."
+          );
+          continue;
+        }
+
         // ── Check if channel is a forum ──
         const forum = await isChatForum(client, channel.telegramId);
         if (forum !== channel.isForum) {
@@ -969,7 +989,11 @@ async function processOneArchiveSet(
         totalFiles: totalSets,
       });
       previewData = await downloadPhotoThumbnail(client, matchedPhoto.fileId);
-      previewMsgId = matchedPhoto.id;
+      // Only set previewMsgId if we actually got the image data —
+      // otherwise the UI thinks there's a preview but the API returns 404
+      if (previewData) {
+        previewMsgId = matchedPhoto.id;
+      }
     }
 
     // ── Fallback: extract preview image from inside the archive ──
@@ -1008,6 +1032,12 @@ async function processOneArchiveSet(
     // Clean up any orphaned record (same hash but no dest upload) before creating
     await deleteOrphanedPackageByHash(contentHash);
 
+    // Auto-inherit source channel category as initial tag
+    const tags: string[] = [];
+    if (channel.category) {
+      tags.push(channel.category);
+    }
+
     await createPackageWithFiles({
       contentHash,
       fileName: archiveName,
@@ -1023,6 +1053,7 @@ async function processOneArchiveSet(
       partCount: uploadPaths.length,
       ingestionRunId,
       creator,
+      tags,
       previewData,
       previewMsgId,
       files: entries,

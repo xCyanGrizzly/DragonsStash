@@ -10,6 +10,7 @@ import {
   Paintbrush,
   Gem,
   FileBox,
+  Gift,
   Send,
   ClipboardList,
   Building2,
@@ -22,7 +23,7 @@ import { cn } from "@/lib/utils";
 import { APP_NAME, NAV_ITEMS } from "@/lib/constants";
 import { SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
-const icons = { LayoutDashboard, Cylinder, Droplets, Paintbrush, Gem, FileBox, Send, ClipboardList, Building2, MapPin, Settings, UserPlus };
+const icons = { LayoutDashboard, Cylinder, Droplets, Paintbrush, Gem, FileBox, Gift, Send, ClipboardList, Building2, MapPin, Settings, UserPlus };
 
 export function MobileSidebar() {
   const pathname = usePathname();
