@@ -231,11 +231,35 @@ export async function toggleChannelActive(id: string): Promise<ActionResult> {
   const existing = await prisma.telegramChannel.findUnique({ where: { id } });
   if (!existing) return { success: false, error: "Channel not found" };
 
+  const newActive = !existing.isActive;
+
   try {
     await prisma.telegramChannel.update({
       where: { id },
-      data: { isActive: !existing.isActive },
+      data: { isActive: newActive },
     });
+
+    // When enabling a SOURCE channel, auto-create READER links for all
+    // active authenticated accounts so the worker can scan it.
+    // Without this, toggling a channel active without going through the
+    // channel picker leaves it with no AccountChannelMap READER link.
+    if (newActive && existing.type === "SOURCE") {
+      const accounts = await prisma.telegramAccount.findMany({
+        where: { isActive: true, authState: "AUTHENTICATED" },
+        select: { id: true },
+      });
+
+      for (const account of accounts) {
+        try {
+          await prisma.accountChannelMap.create({
+            data: { accountId: account.id, channelId: id, role: "READER" },
+          });
+        } catch {
+          // Already linked — ignore unique constraint violation
+        }
+      }
+    }
+
     revalidatePath(REVALIDATE_PATH);
     return { success: true, data: undefined };
   } catch {
