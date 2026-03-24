@@ -52,6 +52,7 @@ interface PackageFilesDrawerProps {
   pkg: PackageRow | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  highlightTerm?: string;
 }
 
 function formatBytes(bytesStr: string): string {
@@ -79,6 +80,15 @@ const EXTENSION_COLORS: Record<string, string> = {
 function getExtBadgeClass(ext: string | null): string {
   if (!ext) return "bg-zinc-500/15 text-zinc-400 border-zinc-500/30";
   return EXTENSION_COLORS[ext.toLowerCase()] ?? "bg-zinc-500/15 text-zinc-400 border-zinc-500/30";
+}
+
+function fileMatchesHighlight(file: FileItem, term: string): boolean {
+  if (!term) return false;
+  const lower = term.toLowerCase();
+  return (
+    file.fileName.toLowerCase().includes(lower) ||
+    file.path.toLowerCase().includes(lower)
+  );
 }
 
 /**
@@ -120,11 +130,13 @@ function TreeNodeView({
   depth,
   search,
   defaultOpen,
+  highlightTerm,
 }: {
   node: TreeNode;
   depth: number;
   search: string;
   defaultOpen: boolean;
+  highlightTerm?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
 
@@ -137,10 +149,22 @@ function TreeNodeView({
     });
   }, [node.children]);
 
-  // If searching, force all open
+  const hasHighlightedDescendant = useMemo(() => {
+    if (!highlightTerm) return false;
+    function check(n: TreeNode): boolean {
+      if (n.file && fileMatchesHighlight(n.file, highlightTerm!)) return true;
+      for (const child of n.children.values()) {
+        if (check(child)) return true;
+      }
+      return false;
+    }
+    return check(node);
+  }, [node, highlightTerm]);
+
+  // If searching or has highlighted descendants, force all open
   useEffect(() => {
-    if (search) setOpen(true);
-  }, [search]);
+    if (search || hasHighlightedDescendant) setOpen(true);
+  }, [search, hasHighlightedDescendant]);
 
   if (node.isFolder && node.children.size > 0) {
     return (
@@ -177,6 +201,7 @@ function TreeNodeView({
               depth={depth + 1}
               search={search}
               defaultOpen={depth < 1} // Auto-expand first 2 levels
+              highlightTerm={highlightTerm}
             />
           ))}
       </div>
@@ -185,9 +210,15 @@ function TreeNodeView({
 
   // File node
   if (node.file) {
+    const isHighlighted = highlightTerm ? fileMatchesHighlight(node.file, highlightTerm) : false;
     return (
       <div
-        className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-muted/50 transition-colors"
+        className={cn(
+          "flex items-center gap-2 rounded-md px-1 py-1 transition-colors",
+          isHighlighted
+            ? "bg-amber-500/15 hover:bg-amber-500/20"
+            : "hover:bg-muted/50"
+        )}
         style={{ paddingLeft: `${Math.max(0, depth) * 16 + 4}px` }}
       >
         <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -223,7 +254,7 @@ function countFiles(node: TreeNode): number {
 
 const PAGE_SIZE = 100;
 
-export function PackageFilesDrawer({ pkg, open, onOpenChange }: PackageFilesDrawerProps) {
+export function PackageFilesDrawer({ pkg, open, onOpenChange, highlightTerm }: PackageFilesDrawerProps) {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -471,36 +502,45 @@ export function PackageFilesDrawer({ pkg, open, onOpenChange }: PackageFilesDraw
                       depth={0}
                       search={search}
                       defaultOpen={true}
+                      highlightTerm={highlightTerm}
                     />
                   ))}
               </>
             ) : (
               <>
                 {/* Flat list for archives without folders */}
-                {filtered.map((file) => (
-                  <div
-                    key={file.id}
-                    className="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-muted/50 transition-colors"
-                  >
-                    <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm truncate" title={file.path}>
-                        {file.fileName}
-                      </p>
+                {filtered.map((file) => {
+                  const isHighlighted = highlightTerm ? fileMatchesHighlight(file, highlightTerm) : false;
+                  return (
+                    <div
+                      key={file.id}
+                      className={cn(
+                        "flex items-center gap-3 rounded-md px-2 py-1.5 transition-colors",
+                        isHighlighted
+                          ? "bg-amber-500/15 hover:bg-amber-500/20"
+                          : "hover:bg-muted/50"
+                      )}
+                    >
+                      <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm truncate" title={file.path}>
+                          {file.fileName}
+                        </p>
+                      </div>
+                      {file.extension && (
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] shrink-0 ${getExtBadgeClass(file.extension)}`}
+                        >
+                          .{file.extension}
+                        </Badge>
+                      )}
+                      <span className="text-[11px] text-muted-foreground shrink-0 tabular-nums">
+                        {formatBytes(file.uncompressedSize)}
+                      </span>
                     </div>
-                    {file.extension && (
-                      <Badge
-                        variant="outline"
-                        className={`text-[10px] shrink-0 ${getExtBadgeClass(file.extension)}`}
-                      >
-                        .{file.extension}
-                      </Badge>
-                    )}
-                    <span className="text-[11px] text-muted-foreground shrink-0 tabular-nums">
-                      {formatBytes(file.uncompressedSize)}
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
               </>
             )}
 

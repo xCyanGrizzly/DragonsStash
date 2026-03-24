@@ -165,6 +165,7 @@ export function StlTable({
         onOpenChange={(open) => {
           if (!open) setViewPkg(null);
         }}
+        highlightTerm={searchTerm}
       />
     </div>
   );
