@@ -473,3 +473,53 @@ export async function resetPackageDestination(packageId: string) {
     data: { destChannelId: null, destMessageId: null },
   });
 }
+
+export async function upsertSkippedPackage(data: {
+  fileName: string;
+  fileSize: bigint;
+  reason: "SIZE_LIMIT" | "DOWNLOAD_FAILED" | "EXTRACT_FAILED" | "UPLOAD_FAILED";
+  errorMessage?: string;
+  sourceChannelId: string;
+  sourceMessageId: bigint;
+  sourceTopicId?: bigint | null;
+  isMultipart: boolean;
+  partCount: number;
+  accountId: string;
+}) {
+  return db.skippedPackage.upsert({
+    where: {
+      sourceChannelId_sourceMessageId: {
+        sourceChannelId: data.sourceChannelId,
+        sourceMessageId: data.sourceMessageId,
+      },
+    },
+    update: {
+      reason: data.reason,
+      errorMessage: data.errorMessage ?? null,
+      fileName: data.fileName,
+      fileSize: data.fileSize,
+      createdAt: new Date(),
+    },
+    create: {
+      fileName: data.fileName,
+      fileSize: data.fileSize,
+      reason: data.reason,
+      errorMessage: data.errorMessage ?? null,
+      sourceChannelId: data.sourceChannelId,
+      sourceMessageId: data.sourceMessageId,
+      sourceTopicId: data.sourceTopicId ?? null,
+      isMultipart: data.isMultipart,
+      partCount: data.partCount,
+      accountId: data.accountId,
+    },
+  });
+}
+
+export async function deleteSkippedPackage(
+  sourceChannelId: string,
+  sourceMessageId: bigint
+) {
+  return db.skippedPackage.deleteMany({
+    where: { sourceChannelId, sourceMessageId },
+  });
+}

@@ -26,6 +26,8 @@ import {
   getExistingChannelsByTelegramId,
   getAccountById,
   deleteOrphanedPackageByHash,
+  upsertSkippedPackage,
+  deleteSkippedPackage,
 } from "./db/queries.js";
 import type { ActivityUpdate } from "./db/queries.js";
 import { createTdlibClient, closeTdlibClient } from "./tdlib/client.js";
@@ -279,6 +281,7 @@ function createThrottledActivityUpdater(runId: string, minIntervalMs = 2000) {
 interface PipelineContext {
   client: Client;
   runId: string;
+  accountId: string;
   channelTitle: string;
   channel: TelegramChannel;
   destChannelTelegramId: bigint;
@@ -436,6 +439,7 @@ export async function runWorkerForAccount(
         const pipelineCtx: PipelineContext = {
           client,
           runId: activeRunId,
+          accountId: account.id,
           channelTitle: channel.title,
           channel,
           destChannelTelegramId: destChannel.telegramId,
@@ -729,6 +733,25 @@ async function processArchiveSets(
         { err: setErr, baseName: archiveSets[setIdx].baseName },
         "Archive set failed, watermark will not advance past this set"
       );
+      // Record the failure for visibility in the UI
+      try {
+        const archiveSet = archiveSets[setIdx];
+        const totalSize = archiveSet.parts.reduce((sum, p) => sum + p.fileSize, 0n);
+        await upsertSkippedPackage({
+          fileName: archiveSet.parts[0].fileName,
+          fileSize: totalSize,
+          reason: "DOWNLOAD_FAILED",
+          errorMessage: setErr instanceof Error ? setErr.message : String(setErr),
+          sourceChannelId: ctx.channel.id,
+          sourceMessageId: archiveSet.parts[0].id,
+          sourceTopicId: ctx.sourceTopicId,
+          isMultipart: archiveSet.isMultipart,
+          partCount: archiveSet.parts.length,
+          accountId: ctx.accountId,
+        });
+      } catch {
+        // Best-effort — don't fail the run if skip recording fails
+      }
     }
   }
 
@@ -797,6 +820,17 @@ async function processOneArchiveSet(
       currentFile: archiveName,
       currentFileNum: setIdx + 1,
       totalFiles: totalSets,
+    });
+    await upsertSkippedPackage({
+      fileName: archiveName,
+      fileSize: totalArchiveSize,
+      reason: "SIZE_LIMIT",
+      sourceChannelId: channel.id,
+      sourceMessageId: archiveSet.parts[0].id,
+      sourceTopicId: ctx.sourceTopicId,
+      isMultipart: archiveSet.isMultipart,
+      partCount: archiveSet.parts.length,
+      accountId: ctx.accountId,
     });
     return;
   }
@@ -1086,6 +1120,8 @@ async function processOneArchiveSet(
     });
 
     counters.zipsIngested++;
+    // Clean up any prior skip record for this archive
+    await deleteSkippedPackage(channel.id, archiveSet.parts[0].id);
 
     await updateRunActivity(runId, {
       currentActivity: `Ingested ${archiveName} (${entries.length} files indexed)`,
