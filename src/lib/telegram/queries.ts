@@ -57,6 +57,8 @@ export async function listPackages(options: {
     tags: pkg.tags,
     indexedAt: pkg.indexedAt.toISOString(),
     sourceChannel: pkg.sourceChannel,
+    matchedFileCount: 0,
+    matchedByContent: false,
   }));
 
   return {
@@ -171,19 +173,22 @@ export async function searchPackages(options: {
   const q = options.query;
 
   if (options.searchIn === "files" || options.searchIn === "both") {
-    // Search in package files, return parent packages
-    const fileMatches = await prisma.packageFile.findMany({
+    // Get per-package file match counts
+    const fileMatches = await prisma.packageFile.groupBy({
+      by: ["packageId"],
       where: {
         OR: [
           { fileName: { contains: q, mode: "insensitive" } },
           { path: { contains: q, mode: "insensitive" } },
         ],
       },
-      select: { packageId: true },
-      distinct: ["packageId"],
+      _count: { _all: true },
     });
 
-    const packageIds = fileMatches.map((f) => f.packageId);
+    const fileMatchMap = new Map(
+      fileMatches.map((m) => [m.packageId, m._count._all])
+    );
+    const fileMatchedIds = fileMatches.map((f) => f.packageId);
 
     const packageNameIds =
       options.searchIn === "both"
@@ -195,7 +200,7 @@ export async function searchPackages(options: {
           ).map((p) => p.id)
         : [];
 
-    const allIds = [...new Set([...packageIds, ...packageNameIds])];
+    const allIds = [...new Set([...fileMatchedIds, ...packageNameIds])];
 
     const [items, total] = await Promise.all([
       prisma.package.findMany({
@@ -234,6 +239,8 @@ export async function searchPackages(options: {
       tags: pkg.tags,
       indexedAt: pkg.indexedAt.toISOString(),
       sourceChannel: pkg.sourceChannel,
+      matchedFileCount: fileMatchMap.get(pkg.id) ?? 0,
+      matchedByContent: fileMatchMap.has(pkg.id),
     }));
 
     return {

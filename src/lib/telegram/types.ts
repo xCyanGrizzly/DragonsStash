@@ -14,6 +14,8 @@ export interface PackageListItem {
     id: string;
     title: string;
   };
+  matchedFileCount: number;
+  matchedByContent: boolean;
 }
 
 export interface PackageDetail extends PackageListItem {
