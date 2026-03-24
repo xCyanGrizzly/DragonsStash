@@ -201,7 +201,7 @@ export async function retrySkippedPackageAction(
     });
 
     if (mapping) {
-      const targetId = skipped.sourceMessageId - 1n;
+      const targetId = skipped.sourceMessageId - BigInt(1);
 
       // Only reset if the watermark is past this message
       if (mapping.lastProcessedMessageId && mapping.lastProcessedMessageId >= skipped.sourceMessageId) {
@@ -260,7 +260,7 @@ export async function retryAllSkippedPackagesAction(
     for (const item of skippedItems) {
       const key = `${item.accountId}:${item.sourceChannelId}`;
       const existing = channelResets.get(key);
-      const targetId = item.sourceMessageId - 1n;
+      const targetId = item.sourceMessageId - BigInt(1);
 
       if (!existing) {
         const topicResets = new Map<bigint, bigint>();

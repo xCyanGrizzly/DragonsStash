@@ -109,6 +109,8 @@ export async function getPackageById(
     partCount: pkg.partCount,
     indexedAt: pkg.indexedAt.toISOString(),
     sourceChannel: pkg.sourceChannel,
+    matchedFileCount: 0,
+    matchedByContent: false,
     destChannel,
     destMessageId: pkg.destMessageId?.toString() ?? null,
     sourceMessageId: pkg.sourceMessageId.toString(),
