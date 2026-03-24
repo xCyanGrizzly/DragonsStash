@@ -4,6 +4,7 @@ import type {
   PackageDetail,
   PackageFileItem,
   IngestionAccountStatus,
+  SkippedPackageItem,
 } from "./types";
 
 export async function listPackages(options: {
@@ -335,4 +336,53 @@ export async function getIngestionStatus(): Promise<IngestionAccountStatus[]> {
   }
 
   return statuses;
+}
+
+export async function listSkippedPackages(options: {
+  page: number;
+  limit: number;
+  reason?: "SIZE_LIMIT" | "DOWNLOAD_FAILED" | "EXTRACT_FAILED" | "UPLOAD_FAILED";
+}) {
+  const where: Record<string, unknown> = {};
+  if (options.reason) where.reason = options.reason;
+
+  const [items, total] = await Promise.all([
+    prisma.skippedPackage.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (options.page - 1) * options.limit,
+      take: options.limit,
+      include: {
+        sourceChannel: { select: { id: true, title: true } },
+      },
+    }),
+    prisma.skippedPackage.count({ where }),
+  ]);
+
+  const mapped: SkippedPackageItem[] = items.map((s) => ({
+    id: s.id,
+    fileName: s.fileName,
+    fileSize: s.fileSize.toString(),
+    reason: s.reason,
+    errorMessage: s.errorMessage,
+    sourceChannel: s.sourceChannel,
+    sourceMessageId: s.sourceMessageId.toString(),
+    isMultipart: s.isMultipart,
+    partCount: s.partCount,
+    createdAt: s.createdAt.toISOString(),
+  }));
+
+  return {
+    items: mapped,
+    pagination: {
+      page: options.page,
+      limit: options.limit,
+      total,
+      totalPages: Math.ceil(total / options.limit),
+    },
+  };
+}
+
+export async function countSkippedPackages(): Promise<number> {
+  return prisma.skippedPackage.count();
 }

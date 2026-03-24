@@ -42,6 +42,22 @@ export interface PackageFileItem {
   crc32: string | null;
 }
 
+export interface SkippedPackageItem {
+  id: string;
+  fileName: string;
+  fileSize: string;
+  reason: "SIZE_LIMIT" | "DOWNLOAD_FAILED" | "EXTRACT_FAILED" | "UPLOAD_FAILED";
+  errorMessage: string | null;
+  sourceChannel: {
+    id: string;
+    title: string;
+  };
+  sourceMessageId: string;
+  isMultipart: boolean;
+  partCount: number;
+  createdAt: string;
+}
+
 export interface PaginatedResponse<T> {
   items: T[];
   pagination: {
