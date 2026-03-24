@@ -29,6 +29,7 @@ interface StlTableProps {
   totalCount: number;
   ingestionStatus: IngestionAccountStatus[];
   availableTags: string[];
+  searchTerm: string;
 }
 
 export function StlTable({
@@ -37,6 +38,7 @@ export function StlTable({
   totalCount,
   ingestionStatus,
   availableTags,
+  searchTerm,
 }: StlTableProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -77,6 +79,7 @@ export function StlTable({
 
   const columns = getPackageColumns({
     onViewFiles: (pkg) => setViewPkg(pkg),
+    searchTerm,
     onSetCreator: (pkg) => {
       const value = prompt("Enter creator name:", pkg.creator ?? "");
       if (value === null) return;

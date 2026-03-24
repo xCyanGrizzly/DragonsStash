@@ -23,12 +23,15 @@ export interface PackageRow {
     id: string;
     title: string;
   };
+  matchedFileCount: number;
+  matchedByContent: boolean;
 }
 
 interface PackageColumnsProps {
   onViewFiles: (pkg: PackageRow) => void;
   onSetCreator: (pkg: PackageRow) => void;
   onSetTags: (pkg: PackageRow) => void;
+  searchTerm: string;
 }
 
 function formatBytes(bytesStr: string): string {
@@ -62,6 +65,7 @@ export function getPackageColumns({
   onViewFiles,
   onSetCreator,
   onSetTags,
+  searchTerm,
 }: PackageColumnsProps): ColumnDef<PackageRow, unknown>[] {
   return [
     {
@@ -76,12 +80,22 @@ export function getPackageColumns({
       accessorKey: "fileName",
       header: ({ column }) => <DataTableColumnHeader column={column} title="File Name" />,
       cell: ({ row }) => (
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="font-medium truncate max-w-[300px]">{row.original.fileName}</span>
-          {row.original.isMultipart && (
-            <Badge variant="outline" className="text-[10px] shrink-0">
-              Multi
-            </Badge>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-medium truncate max-w-[300px]">{row.original.fileName}</span>
+            {row.original.isMultipart && (
+              <Badge variant="outline" className="text-[10px] shrink-0">
+                Multi
+              </Badge>
+            )}
+          </div>
+          {searchTerm && row.original.matchedByContent && (
+            <button
+              className="text-[11px] text-amber-500 hover:text-amber-400 hover:underline cursor-pointer mt-0.5"
+              onClick={() => onViewFiles(row.original)}
+            >
+              {row.original.matchedFileCount.toLocaleString()} file match{row.original.matchedFileCount !== 1 ? "es" : ""}
+            </button>
           )}
         </div>
       ),

@@ -49,6 +49,7 @@ export default async function StlFilesPage({ searchParams }: Props) {
       totalCount={result.pagination.total}
       ingestionStatus={ingestionStatus}
       availableTags={availableTags}
+      searchTerm={search}
     />
   );
 }
