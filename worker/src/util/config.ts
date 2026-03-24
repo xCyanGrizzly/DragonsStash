@@ -3,7 +3,7 @@ export const config = {
   workerIntervalMinutes: parseInt(process.env.WORKER_INTERVAL_MINUTES ?? "60", 10),
   tempDir: process.env.WORKER_TEMP_DIR ?? "/tmp/zips",
   tdlibStateDir: process.env.TDLIB_STATE_DIR ?? "/data/tdlib",
-  maxZipSizeMB: parseInt(process.env.WORKER_MAX_ZIP_SIZE_MB ?? "4096", 10),
+  maxZipSizeMB: parseInt(process.env.WORKER_MAX_ZIP_SIZE_MB ?? "204800", 10),
   logLevel: (process.env.LOG_LEVEL ?? "info") as "debug" | "info" | "warn" | "error",
   telegramApiId: parseInt(process.env.TELEGRAM_API_ID ?? "0", 10),
   telegramApiHash: process.env.TELEGRAM_API_HASH ?? "",
