@@ -409,9 +409,10 @@ model TelegramAccount {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  channelMaps   AccountChannelMap[]
-  ingestionRuns IngestionRun[]
-  fetchRequests ChannelFetchRequest[]
+  channelMaps     AccountChannelMap[]
+  ingestionRuns   IngestionRun[]
+  fetchRequests   ChannelFetchRequest[]
+  skippedPackages SkippedPackage[]
 
   @@index([isActive])
   @@map("telegram_accounts")
@@ -428,8 +429,9 @@ model TelegramChannel {
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
 
-  accountMaps AccountChannelMap[]
-  packages    Package[]
+  accountMaps     AccountChannelMap[]
+  packages        Package[]
+  skippedPackages SkippedPackage[]
 
   @@index([type, isActive])
   @@index([category])
@@ -684,6 +686,39 @@ model ArchiveExtractRequest {
   @@index([packageId, filePath])
   @@index([status])
   @@map("archive_extract_requests")
+}
+
+// ───────────────────────────────────────
+// Skipped/Failed Archives
+// ───────────────────────────────────────
+
+enum SkipReason {
+  SIZE_LIMIT
+  DOWNLOAD_FAILED
+  EXTRACT_FAILED
+  UPLOAD_FAILED
+}
+
+model SkippedPackage {
+  id              String           @id @default(cuid())
+  fileName        String
+  fileSize        BigInt
+  reason          SkipReason
+  errorMessage    String?
+  sourceChannelId String
+  sourceChannel   TelegramChannel  @relation(fields: [sourceChannelId], references: [id], onDelete: Cascade)
+  sourceMessageId BigInt
+  sourceTopicId   BigInt?
+  isMultipart     Boolean          @default(false)
+  partCount       Int              @default(1)
+  accountId       String
+  account         TelegramAccount  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  createdAt       DateTime         @default(now())
+
+  @@unique([sourceChannelId, sourceMessageId])
+  @@index([reason])
+  @@index([accountId])
+  @@map("skipped_packages")
 }
 
 // ───────────────────────────────────────
