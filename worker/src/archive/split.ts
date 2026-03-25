@@ -6,8 +6,12 @@ import { childLogger } from "../util/logger.js";
 
 const log = childLogger("split");
 
-/** 2GB in bytes — Telegram's file size limit */
-const MAX_PART_SIZE = 2n * 1024n * 1024n * 1024n;
+/**
+ * 1950 MiB — safely under Telegram's 2GB upload limit.
+ * At exactly 2GiB, TDLib's internal 512KB chunking can exceed Telegram's
+ * 4000-part threshold, causing FILE_PARTS_INVALID errors.
+ */
+const MAX_PART_SIZE = 1950n * 1024n * 1024n;
 
 /**
  * Split a file into ≤2GB parts using byte-level splitting.

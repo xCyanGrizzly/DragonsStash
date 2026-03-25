@@ -93,11 +93,13 @@ async function sendAndWaitForUpload(
     let settled = false;
     let lastLoggedPercent = 0;
     let tempMsgId: number | null = null;
+    let uploadStarted = false;
+    let lastProgressTime = Date.now();
 
-    // Timeout: 15 minutes per GB, minimum 10 minutes
+    // Timeout: 20 minutes per GB, minimum 15 minutes
     const timeoutMs = Math.max(
-      10 * 60_000,
-      (fileSizeMB / 1024) * 15 * 60_000
+      15 * 60_000,
+      (fileSizeMB / 1024) * 20 * 60_000
     );
 
     const timer = setTimeout(() => {
@@ -112,12 +114,31 @@ async function sendAndWaitForUpload(
       }
     }, timeoutMs);
 
+    // Stall detection: no progress for 5 minutes after upload started → reject
+    const STALL_TIMEOUT_MS = 5 * 60_000;
+    const stallChecker = setInterval(() => {
+      if (settled || !uploadStarted) return;
+      const stallMs = Date.now() - lastProgressTime;
+      if (stallMs >= STALL_TIMEOUT_MS) {
+        settled = true;
+        cleanup();
+        reject(
+          new Error(
+            `Upload stalled for ${fileName} — no progress for ${Math.round(stallMs / 60_000)}min`
+          )
+        );
+      }
+    }, 30_000);
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleUpdate = (update: any) => {
       // Track upload progress via updateFile events
       if (update?._ === "updateFile") {
         const file = update.file;
         if (file?.remote?.is_uploading_active && file.expected_size > 0) {
+          uploadStarted = true;
+          lastProgressTime = Date.now();
+
           const uploaded = file.remote.uploaded_size ?? 0;
           const total = file.expected_size;
           const percent = Math.round((uploaded / total) * 100);
@@ -165,6 +186,7 @@ async function sendAndWaitForUpload(
 
     const cleanup = () => {
       clearTimeout(timer);
+      clearInterval(stallChecker);
       client.off("update", handleUpdate);
     };
 

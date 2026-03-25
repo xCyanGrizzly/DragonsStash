@@ -999,7 +999,7 @@ async function processOneArchiveSet(
       (sum, p) => sum + p.fileSize,
       0n
     );
-    const MAX_UPLOAD_SIZE = 2n * 1024n * 1024n * 1024n;
+    const MAX_UPLOAD_SIZE = 1950n * 1024n * 1024n; // Match split.ts MAX_PART_SIZE
     const hasOversizedPart = archiveSet.parts.some((p) => p.fileSize > MAX_UPLOAD_SIZE);
 
     if (hasOversizedPart) {

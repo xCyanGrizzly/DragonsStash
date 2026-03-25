@@ -353,11 +353,14 @@ export async function downloadFile(
   return new Promise<void>((resolve, reject) => {
     let lastLoggedPercent = 0;
     let settled = false;
+    let downloadStarted = false; // True once TDLib reports is_downloading_active
+    let lastProgressBytes = 0;
+    let lastProgressTime = Date.now();
 
-    // Timeout: 15 minutes per GB, minimum 10 minutes
+    // Timeout: 20 minutes per GB, minimum 15 minutes
     const timeoutMs = Math.max(
-      10 * 60_000,
-      (totalBytes / (1024 * 1024 * 1024)) * 15 * 60_000
+      15 * 60_000,
+      (totalBytes / (1024 * 1024 * 1024)) * 20 * 60_000
     );
     const timer = setTimeout(() => {
       if (!settled) {
@@ -371,6 +374,23 @@ export async function downloadFile(
       }
     }, timeoutMs);
 
+    // Stall detection: no progress for 5 minutes after download started → reject
+    const STALL_TIMEOUT_MS = 5 * 60_000;
+    const stallChecker = setInterval(() => {
+      if (settled || !downloadStarted) return;
+      const stallMs = Date.now() - lastProgressTime;
+      if (stallMs >= STALL_TIMEOUT_MS) {
+        settled = true;
+        cleanup();
+        reject(
+          new Error(
+            `Download stalled for ${fileName} — no progress for ${Math.round(stallMs / 60_000)}min ` +
+              `(${lastProgressBytes}/${totalBytes} bytes)`
+          )
+        );
+      }
+    }, 30_000);
+
     // Listen for file update events to track progress
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleUpdate = (update: any) => {
@@ -381,6 +401,17 @@ export async function downloadFile(
       const downloaded = file.local.downloaded_size;
       const percent =
         totalBytes > 0 ? Math.round((downloaded / totalBytes) * 100) : 0;
+
+      // Track whether the download has actually started
+      if (file.local.is_downloading_active) {
+        downloadStarted = true;
+      }
+
+      // Reset stall timer when bytes advance
+      if (downloaded > lastProgressBytes) {
+        lastProgressBytes = downloaded;
+        lastProgressTime = Date.now();
+      }
 
       // Log at every 10% increment
       if (percent >= lastLoggedPercent + 10) {
@@ -412,8 +443,11 @@ export async function downloadFile(
         }
       }
 
-      // Download stopped without completing (network error, cancelled, etc.)
+      // Download stopped without completing — only if it had actually started.
+      // TDLib may emit an initial updateFile with is_downloading_active=false
+      // before the download begins; ignoring that prevents false positives.
       if (
+        downloadStarted &&
         !file.local.is_downloading_active &&
         !file.local.is_downloading_completed
       ) {
@@ -432,6 +466,7 @@ export async function downloadFile(
 
     const cleanup = () => {
       clearTimeout(timer);
+      clearInterval(stallChecker);
       client.off("update", handleUpdate);
     };
 
