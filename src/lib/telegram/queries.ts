@@ -609,6 +609,9 @@ export async function createManualGroup(name: string, packageIds: string[]) {
     where: { id: { in: packageIds } },
     select: { sourceChannelId: true },
   });
+  if (pkgs.length === 0) {
+    throw new Error("No matching packages found");
+  }
   const channelIds = new Set(pkgs.map((p) => p.sourceChannelId));
   if (channelIds.size > 1) {
     throw new Error("Cannot group packages from different channels");

@@ -553,16 +553,27 @@ export async function createOrFindPackageGroup(input: {
 
   if (existing) return existing.id;
 
-  const group = await db.packageGroup.create({
-    data: {
-      mediaAlbumId: input.mediaAlbumId,
-      sourceChannelId: input.sourceChannelId,
-      name: input.name,
-      previewData: input.previewData ? new Uint8Array(input.previewData) : undefined,
-    },
-  });
-
-  return group.id;
+  try {
+    const group = await db.packageGroup.create({
+      data: {
+        mediaAlbumId: input.mediaAlbumId,
+        sourceChannelId: input.sourceChannelId,
+        name: input.name,
+        previewData: input.previewData ? new Uint8Array(input.previewData) : undefined,
+      },
+    });
+    return group.id;
+  } catch (err) {
+    // Handle race condition: another process created the group between our findFirst and create
+    if (err instanceof Error && err.message.includes("Unique constraint")) {
+      const raced = await db.packageGroup.findFirst({
+        where: { mediaAlbumId: input.mediaAlbumId, sourceChannelId: input.sourceChannelId },
+        select: { id: true },
+      });
+      if (raced) return raced.id;
+    }
+    throw err;
+  }
 }
 
 export async function linkPackagesToGroup(
