@@ -535,3 +535,42 @@ export async function deleteSkippedPackage(
     where: { sourceChannelId, sourceMessageId },
   });
 }
+
+export async function createOrFindPackageGroup(input: {
+  mediaAlbumId: string;
+  sourceChannelId: string;
+  name: string;
+  previewData?: Buffer | null;
+}): Promise<string> {
+  // findFirst + conditional create (Prisma doesn't support upsert on nullable compound unique)
+  const existing = await db.packageGroup.findFirst({
+    where: {
+      mediaAlbumId: input.mediaAlbumId,
+      sourceChannelId: input.sourceChannelId,
+    },
+    select: { id: true },
+  });
+
+  if (existing) return existing.id;
+
+  const group = await db.packageGroup.create({
+    data: {
+      mediaAlbumId: input.mediaAlbumId,
+      sourceChannelId: input.sourceChannelId,
+      name: input.name,
+      previewData: input.previewData ? new Uint8Array(input.previewData) : undefined,
+    },
+  });
+
+  return group.id;
+}
+
+export async function linkPackagesToGroup(
+  packageIds: string[],
+  groupId: string
+): Promise<void> {
+  await db.package.updateMany({
+    where: { id: { in: packageIds } },
+    data: { packageGroupId: groupId },
+  });
+}
