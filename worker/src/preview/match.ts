@@ -10,6 +10,7 @@ export interface TelegramPhoto {
   /** The smallest photo size available — used as thumbnail. */
   fileId: string;
   fileSize: number;
+  mediaAlbumId?: string;
 }
 
 export interface ArchiveRef {

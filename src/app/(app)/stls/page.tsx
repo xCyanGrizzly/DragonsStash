@@ -1,7 +1,8 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { listPackages, searchPackages, getIngestionStatus, getAllPackageTags, listSkippedPackages, countSkippedPackages } from "@/lib/telegram/queries";
+import { listDisplayItems, searchPackages, getIngestionStatus, getAllPackageTags, listSkippedPackages, countSkippedPackages } from "@/lib/telegram/queries";
 import { StlTable } from "./_components/stl-table";
+import type { DisplayItem, PackageListItem } from "@/lib/telegram/types";
 
 interface Props {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -31,7 +32,7 @@ export default async function StlFilesPage({ searchParams }: Props) {
           limit: perPage,
           searchIn: "both",
         })
-      : listPackages({
+      : listDisplayItems({
           page,
           limit: perPage,
           creator,
@@ -44,6 +45,11 @@ export default async function StlFilesPage({ searchParams }: Props) {
     countSkippedPackages(),
   ]);
 
+  // For search results, wrap as DisplayItem[]; for non-search, already DisplayItem[]
+  const displayItems: DisplayItem[] = search
+    ? (result as { items: PackageListItem[] }).items.map((item) => ({ type: "package" as const, data: item }))
+    : (result as { items: DisplayItem[] }).items;
+
   // Fetch skipped packages only if on that tab
   const skippedResult = tab === "skipped"
     ? await listSkippedPackages({ page, limit: perPage })
@@ -51,7 +57,7 @@ export default async function StlFilesPage({ searchParams }: Props) {
 
   return (
     <StlTable
-      data={result.items}
+      data={displayItems}
       pageCount={result.pagination.totalPages}
       totalCount={result.pagination.total}
       ingestionStatus={ingestionStatus}

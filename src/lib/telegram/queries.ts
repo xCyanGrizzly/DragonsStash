@@ -5,6 +5,8 @@ import type {
   PackageFileItem,
   IngestionAccountStatus,
   SkippedPackageItem,
+  DisplayItem,
+  PackageGroupRow,
 } from "./types";
 
 export async function listPackages(options: {
@@ -70,6 +72,177 @@ export async function listPackages(options: {
       total,
       totalPages: Math.ceil(total / options.limit),
     },
+  };
+}
+
+export async function listDisplayItems(options: {
+  page: number;
+  limit: number;
+  channelId?: string;
+  creator?: string;
+  tag?: string;
+  sortBy: "indexedAt" | "fileName" | "fileSize";
+  order: "asc" | "desc";
+}): Promise<{ items: DisplayItem[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
+  const { page, limit, channelId, creator, tag, sortBy, order } = options;
+
+  // Build WHERE clause fragments for raw SQL
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  let paramIdx = 1;
+
+  if (channelId) {
+    conditions.push(`p."sourceChannelId" = $${paramIdx++}`);
+    params.push(channelId);
+  }
+  if (creator) {
+    conditions.push(`p."creator" = $${paramIdx++}`);
+    params.push(creator);
+  }
+  if (tag) {
+    conditions.push(`$${paramIdx++} = ANY(p."tags")`);
+    params.push(tag);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const sortCol = sortBy === "fileName" ? `"fileName"` : sortBy === "fileSize" ? `"fileSize"` : `"indexedAt"`;
+  const sortDir = order === "asc" ? "ASC" : "DESC";
+
+  // Step 1: Count display items
+  const countResult = await prisma.$queryRawUnsafe<[{ count: bigint }]>(
+    `SELECT COUNT(*) AS count FROM (
+      SELECT DISTINCT COALESCE(p."packageGroupId", p."id") AS display_id
+      FROM packages p
+      ${whereClause}
+    ) AS display_items`,
+    ...params
+  );
+  const total = Number(countResult[0].count);
+
+  // Step 2: Get display item IDs for this page
+  const limitParam = paramIdx++;
+  const offsetParam = paramIdx++;
+  const displayRows = await prisma.$queryRawUnsafe<
+    { display_id: string; display_type: string }[]
+  >(
+    `SELECT
+      COALESCE(p."packageGroupId", p."id") AS display_id,
+      CASE WHEN p."packageGroupId" IS NOT NULL THEN 'group' ELSE 'package' END AS display_type,
+      MAX(p.${sortCol}) AS sort_value
+    FROM packages p
+    ${whereClause}
+    GROUP BY COALESCE(p."packageGroupId", p."id"),
+             CASE WHEN p."packageGroupId" IS NOT NULL THEN 'group' ELSE 'package' END
+    ORDER BY sort_value ${sortDir}
+    LIMIT $${limitParam} OFFSET $${offsetParam}`,
+    ...params, limit, (page - 1) * limit
+  );
+
+  // Step 3: Fetch full data
+  const groupIds = displayRows.filter((r) => r.display_type === "group").map((r) => r.display_id);
+  const packageIds = displayRows.filter((r) => r.display_type === "package").map((r) => r.display_id);
+
+  const standalonePackages = packageIds.length > 0
+    ? await prisma.package.findMany({
+        where: { id: { in: packageIds } },
+        select: {
+          id: true, fileName: true, fileSize: true, contentHash: true,
+          archiveType: true, fileCount: true, isMultipart: true,
+          indexedAt: true, creator: true, tags: true, previewData: true,
+          sourceChannel: { select: { id: true, title: true } },
+        },
+      })
+    : [];
+
+  const groups = groupIds.length > 0
+    ? await prisma.packageGroup.findMany({
+        where: { id: { in: groupIds } },
+        select: {
+          id: true, name: true, previewData: true,
+          sourceChannel: { select: { id: true, title: true } },
+          packages: {
+            select: {
+              id: true, fileName: true, fileSize: true, contentHash: true,
+              archiveType: true, fileCount: true, isMultipart: true,
+              indexedAt: true, creator: true, tags: true, previewData: true,
+              sourceChannel: { select: { id: true, title: true } },
+            },
+            orderBy: { indexedAt: "desc" },
+          },
+        },
+      })
+    : [];
+
+  // Build DisplayItem array in the original sort order
+  const packageMap = new Map(standalonePackages.map((p) => [p.id, p]));
+  const groupMap = new Map(groups.map((g) => [g.id, g]));
+
+  const items: DisplayItem[] = displayRows.map((row) => {
+    if (row.display_type === "package") {
+      const pkg = packageMap.get(row.display_id)!;
+      return {
+        type: "package" as const,
+        data: {
+          id: pkg.id,
+          fileName: pkg.fileName,
+          fileSize: pkg.fileSize.toString(),
+          contentHash: pkg.contentHash,
+          archiveType: pkg.archiveType,
+          fileCount: pkg.fileCount,
+          isMultipart: pkg.isMultipart,
+          hasPreview: pkg.previewData !== null,
+          creator: pkg.creator,
+          tags: pkg.tags,
+          indexedAt: pkg.indexedAt.toISOString(),
+          sourceChannel: pkg.sourceChannel,
+          matchedFileCount: 0,
+          matchedByContent: false,
+        },
+      };
+    } else {
+      const grp = groupMap.get(row.display_id)!;
+      const allTags = [...new Set(grp.packages.flatMap((p) => p.tags))];
+      const archiveTypes = [...new Set(grp.packages.map((p) => p.archiveType))] as PackageGroupRow["archiveTypes"];
+      return {
+        type: "group" as const,
+        data: {
+          id: grp.id,
+          name: grp.name,
+          hasPreview: grp.previewData !== null,
+          totalFileSize: grp.packages.reduce((sum, p) => sum + p.fileSize, BigInt(0)).toString(),
+          totalFileCount: grp.packages.reduce((sum, p) => sum + p.fileCount, 0),
+          packageCount: grp.packages.length,
+          combinedTags: allTags,
+          archiveTypes,
+          latestIndexedAt: grp.packages.length > 0
+            ? grp.packages[0].indexedAt.toISOString()
+            : new Date().toISOString(),
+          sourceChannel: grp.sourceChannel,
+          packages: grp.packages.map((pkg) => ({
+            id: pkg.id,
+            fileName: pkg.fileName,
+            fileSize: pkg.fileSize.toString(),
+            contentHash: pkg.contentHash,
+            archiveType: pkg.archiveType,
+            fileCount: pkg.fileCount,
+            isMultipart: pkg.isMultipart,
+            hasPreview: pkg.previewData !== null,
+            creator: pkg.creator,
+            tags: pkg.tags,
+            indexedAt: pkg.indexedAt.toISOString(),
+            sourceChannel: pkg.sourceChannel,
+            matchedFileCount: 0,
+            matchedByContent: false,
+          })),
+        },
+      };
+    }
+  });
+
+  return {
+    items,
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
   };
 }
 
@@ -203,7 +376,16 @@ export async function searchPackages(options: {
           ).map((p) => p.id)
         : [];
 
-    const allIds = [...new Set([...fileMatchedIds, ...packageNameIds])];
+    // Also match by group name
+    const groupNameMatches = await prisma.package.findMany({
+      where: {
+        packageGroup: { name: { contains: q, mode: "insensitive" } },
+      },
+      select: { id: true },
+    });
+    const groupMatchedIds = groupNameMatches.map((p) => p.id);
+
+    const allIds = [...new Set([...fileMatchedIds, ...packageNameIds, ...groupMatchedIds])];
 
     const [items, total] = await Promise.all([
       prisma.package.findMany({
@@ -387,4 +569,104 @@ export async function listSkippedPackages(options: {
 
 export async function countSkippedPackages(): Promise<number> {
   return prisma.skippedPackage.count();
+}
+
+export async function getPackageGroup(groupId: string) {
+  return prisma.packageGroup.findUnique({
+    where: { id: groupId },
+    select: {
+      id: true, name: true, previewData: true, mediaAlbumId: true,
+      sourceChannelId: true, createdAt: true,
+      sourceChannel: { select: { id: true, title: true } },
+      packages: {
+        select: {
+          id: true, fileName: true, fileSize: true, archiveType: true,
+          fileCount: true, creator: true, tags: true,
+        },
+        orderBy: { indexedAt: "desc" },
+      },
+    },
+  });
+}
+
+export async function updatePackageGroupName(groupId: string, name: string) {
+  return prisma.packageGroup.update({
+    where: { id: groupId },
+    data: { name: name.trim() },
+  });
+}
+
+export async function updatePackageGroupPreview(groupId: string, previewData: Buffer) {
+  return prisma.packageGroup.update({
+    where: { id: groupId },
+    data: { previewData: new Uint8Array(previewData) },
+  });
+}
+
+export async function createManualGroup(name: string, packageIds: string[]) {
+  // Verify all packages belong to the same channel
+  const pkgs = await prisma.package.findMany({
+    where: { id: { in: packageIds } },
+    select: { sourceChannelId: true },
+  });
+  if (pkgs.length === 0) {
+    throw new Error("No matching packages found");
+  }
+  const channelIds = new Set(pkgs.map((p) => p.sourceChannelId));
+  if (channelIds.size > 1) {
+    throw new Error("Cannot group packages from different channels");
+  }
+
+  const firstPkg = pkgs[0];
+  const group = await prisma.packageGroup.create({
+    data: {
+      name: name.trim(),
+      sourceChannelId: firstPkg.sourceChannelId,
+    },
+  });
+
+  await prisma.package.updateMany({
+    where: { id: { in: packageIds } },
+    data: { packageGroupId: group.id },
+  });
+
+  // Clean up empty groups left behind
+  await prisma.packageGroup.deleteMany({
+    where: { packages: { none: {} }, id: { not: group.id } },
+  });
+
+  return group;
+}
+
+export async function addPackagesToGroup(packageIds: string[], groupId: string) {
+  await prisma.package.updateMany({
+    where: { id: { in: packageIds } },
+    data: { packageGroupId: groupId },
+  });
+  await prisma.packageGroup.deleteMany({
+    where: { packages: { none: {} } },
+  });
+}
+
+export async function removePackageFromGroup(packageId: string) {
+  const pkg = await prisma.package.findUniqueOrThrow({
+    where: { id: packageId },
+    select: { packageGroupId: true },
+  });
+  if (!pkg.packageGroupId) return;
+  await prisma.package.update({
+    where: { id: packageId },
+    data: { packageGroupId: null },
+  });
+  await prisma.packageGroup.deleteMany({
+    where: { id: pkg.packageGroupId, packages: { none: {} } },
+  });
+}
+
+export async function dissolveGroup(groupId: string) {
+  await prisma.package.updateMany({
+    where: { packageGroupId: groupId },
+    data: { packageGroupId: null },
+  });
+  await prisma.packageGroup.delete({ where: { id: groupId } });
 }

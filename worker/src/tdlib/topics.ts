@@ -201,6 +201,7 @@ export async function getTopicMessages(
       messages?: {
         id: number;
         date: number;
+        media_album_id?: string;
         content: {
           _: string;
           document?: {
@@ -248,6 +249,7 @@ export async function getTopicMessages(
           fileId: String(doc.document.id),
           fileSize: BigInt(doc.document.size),
           date: new Date(msg.date * 1000),
+          mediaAlbumId: msg.media_album_id && msg.media_album_id !== "0" ? msg.media_album_id : undefined,
         });
         continue;
       }
@@ -263,6 +265,7 @@ export async function getTopicMessages(
           caption,
           fileId: String(smallest.photo.id),
           fileSize: smallest.photo.size || smallest.photo.expected_size,
+          mediaAlbumId: msg.media_album_id && msg.media_album_id !== "0" ? msg.media_album_id : undefined,
         });
       }
     }

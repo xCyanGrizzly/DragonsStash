@@ -47,6 +47,7 @@ import { readRarContents } from "./archive/rar-reader.js";
 import { read7zContents } from "./archive/sevenz-reader.js";
 import { byteLevelSplit, concatenateFiles } from "./archive/split.js";
 import { uploadToChannel } from "./upload/channel.js";
+import { processAlbumGroups, type IndexedPackageRef } from "./grouping.js";
 import type { TelegramAccount, TelegramChannel } from "@prisma/client";
 import type { Client } from "tdl";
 
@@ -722,10 +723,11 @@ async function processArchiveSets(
 
   // Track the highest message ID that was successfully processed
   let maxProcessedId: bigint | null = null;
+  const indexedPackageRefs: IndexedPackageRef[] = [];
 
   for (let setIdx = 0; setIdx < archiveSets.length; setIdx++) {
     try {
-      await processOneArchiveSet(
+      const packageId = await processOneArchiveSet(
         ctx,
         archiveSets[setIdx],
         setIdx,
@@ -733,6 +735,15 @@ async function processArchiveSets(
         previewMatches,
         ingestionRunId
       );
+
+      if (packageId) {
+        const firstPart = archiveSets[setIdx].parts[0];
+        indexedPackageRefs.push({
+          packageId,
+          sourceMessageId: firstPart.id,
+          mediaAlbumId: firstPart.mediaAlbumId,
+        });
+      }
 
       // Set completed (ingested or confirmed duplicate) — advance watermark
       const setMaxId = archiveSets[setIdx].parts.reduce(
@@ -771,6 +782,16 @@ async function processArchiveSets(
     }
   }
 
+  // Post-processing: group packages by Telegram album ID
+  if (indexedPackageRefs.length > 0) {
+    await processAlbumGroups(
+      ctx.client,
+      channel.id,
+      indexedPackageRefs,
+      scanResult.photos
+    );
+  }
+
   return maxProcessedId;
 }
 
@@ -784,7 +805,7 @@ async function processOneArchiveSet(
   totalSets: number,
   previewMatches: Map<string, { id: bigint; fileId: string }>,
   ingestionRunId: string
-): Promise<void> {
+): Promise<string | null> {
   const {
     client, runId, channelTitle, channel,
     destChannelTelegramId, destChannelId,
@@ -814,7 +835,7 @@ async function processOneArchiveSet(
       totalFiles: totalSets,
       zipsDuplicate: counters.zipsDuplicate,
     });
-    return;
+    return null;
   }
 
   // ── Size guard: skip archives that exceed WORKER_MAX_ZIP_SIZE_MB ──
@@ -848,7 +869,7 @@ async function processOneArchiveSet(
       partCount: archiveSet.parts.length,
       accountId: ctx.accountId,
     });
-    return;
+    return null;
   }
 
   const tempPaths: string[] = [];
@@ -954,7 +975,7 @@ async function processOneArchiveSet(
         totalFiles: totalSets,
         zipsDuplicate: counters.zipsDuplicate,
       });
-      return;
+      return null;
     }
 
     // ── Reading metadata ──
@@ -1127,7 +1148,7 @@ async function processOneArchiveSet(
       tags.push(channel.category);
     }
 
-    await createPackageWithFiles({
+    const pkg = await createPackageWithFiles({
       contentHash,
       fileName: archiveName,
       fileSize: totalSize,
@@ -1166,6 +1187,8 @@ async function processOneArchiveSet(
       { fileName: archiveName, contentHash, fileCount: entries.length, creator },
       "Archive ingested"
     );
+
+    return pkg.id;
   } finally {
     // ALWAYS delete temp files and the set directory
     await deleteFiles([...tempPaths, ...splitPaths]);

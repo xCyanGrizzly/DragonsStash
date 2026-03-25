@@ -1,6 +1,6 @@
 "use client";
 
-import { type Table as TanStackTable, flexRender } from "@tanstack/react-table";
+import { type Table as TanStackTable, type Row, flexRender } from "@tanstack/react-table";
 import {
   Table,
   TableBody,
@@ -10,13 +10,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { EmptyState } from "./empty-state";
+import { cn } from "@/lib/utils";
 
 interface DataTableProps<TData> {
   table: TanStackTable<TData>;
   emptyMessage?: string;
+  rowClassName?: (row: Row<TData>) => string;
 }
 
-export function DataTable<TData>({ table, emptyMessage }: DataTableProps<TData>) {
+export function DataTable<TData>({ table, emptyMessage, rowClassName }: DataTableProps<TData>) {
   return (
     <div className="rounded-md border border-border">
       <Table>
@@ -36,7 +38,10 @@ export function DataTable<TData>({ table, emptyMessage }: DataTableProps<TData>)
         <TableBody>
           {table.getRowModel().rows?.length ? (
             table.getRowModel().rows.map((row) => (
-              <TableRow key={row.id} className="h-10 border-border hover:bg-muted/50">
+              <TableRow
+                key={row.id}
+                className={cn("h-10 border-border hover:bg-muted/50", rowClassName?.(row))}
+              >
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id} className="py-1.5 text-sm">
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}

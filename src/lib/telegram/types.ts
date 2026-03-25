@@ -68,6 +68,24 @@ export interface PaginatedResponse<T> {
   };
 }
 
+export interface PackageGroupRow {
+  id: string;
+  name: string;
+  hasPreview: boolean;
+  totalFileSize: string;
+  totalFileCount: number;
+  packageCount: number;
+  combinedTags: string[];
+  archiveTypes: ("ZIP" | "RAR" | "SEVEN_Z" | "DOCUMENT")[];
+  latestIndexedAt: string;
+  sourceChannel: { id: string; title: string };
+  packages: PackageListItem[];
+}
+
+export type DisplayItem =
+  | { type: "package"; data: PackageListItem }
+  | { type: "group"; data: PackageGroupRow };
+
 export interface IngestionAccountStatus {
   id: string;
   displayName: string | null;

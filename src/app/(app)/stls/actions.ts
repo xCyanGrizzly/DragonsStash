@@ -4,6 +4,13 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { ActionResult } from "@/types/api.types";
 import { revalidatePath } from "next/cache";
+import {
+  updatePackageGroupName,
+  updatePackageGroupPreview,
+  createManualGroup,
+  removePackageFromGroup,
+  dissolveGroup,
+} from "@/lib/telegram/queries";
 
 const ALLOWED_IMAGE_TYPES = [
   "image/jpeg",
@@ -320,5 +327,188 @@ export async function retryAllSkippedPackagesAction(
     return { success: true, data: undefined };
   } catch {
     return { success: false, error: "Failed to retry skipped packages" };
+  }
+}
+
+export async function renameGroupAction(
+  groupId: string,
+  name: string
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { success: false, error: "Unauthorized" };
+
+  if (!name.trim()) {
+    return { success: false, error: "Group name cannot be empty" };
+  }
+
+  try {
+    await updatePackageGroupName(groupId, name);
+    revalidatePath("/stls");
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to rename group" };
+  }
+}
+
+export async function dissolveGroupAction(
+  groupId: string
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { success: false, error: "Unauthorized" };
+
+  try {
+    await dissolveGroup(groupId);
+    revalidatePath("/stls");
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to dissolve group" };
+  }
+}
+
+export async function createGroupAction(
+  name: string,
+  packageIds: string[]
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { success: false, error: "Unauthorized" };
+
+  if (!name.trim()) {
+    return { success: false, error: "Group name cannot be empty" };
+  }
+  if (packageIds.length < 2) {
+    return { success: false, error: "At least 2 packages are required to create a group" };
+  }
+
+  try {
+    await createManualGroup(name, packageIds);
+    revalidatePath("/stls");
+    return { success: true, data: undefined };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to create group";
+    return { success: false, error: message };
+  }
+}
+
+export async function removeFromGroupAction(
+  packageId: string
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { success: false, error: "Unauthorized" };
+
+  try {
+    await removePackageFromGroup(packageId);
+    revalidatePath("/stls");
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to remove package from group" };
+  }
+}
+
+export async function updateGroupPreviewAction(
+  groupId: string,
+  formData: FormData
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { success: false, error: "Unauthorized" };
+
+  const file = formData.get("file");
+  if (!(file instanceof File)) {
+    return { success: false, error: "No file provided" };
+  }
+
+  if (!ALLOWED_IMAGE_TYPES.includes(file.type as (typeof ALLOWED_IMAGE_TYPES)[number])) {
+    return { success: false, error: "Only JPG, PNG, and WebP images are accepted" };
+  }
+
+  if (file.size > MAX_IMAGE_SIZE) {
+    return { success: false, error: "Image must be smaller than 2 MB" };
+  }
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    await updatePackageGroupPreview(groupId, buffer);
+    revalidatePath("/stls");
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to upload group preview image" };
+  }
+}
+
+export async function sendAllInGroupAction(
+  groupId: string
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { success: false, error: "Unauthorized" };
+
+  try {
+    const telegramLink = await prisma.telegramLink.findUnique({
+      where: { userId: session.user.id },
+    });
+
+    if (!telegramLink) {
+      return { success: false, error: "No linked Telegram account. Link one in Settings." };
+    }
+
+    const group = await prisma.packageGroup.findUnique({
+      where: { id: groupId },
+      select: {
+        packages: {
+          select: { id: true, destChannelId: true, destMessageId: true, fileName: true },
+        },
+      },
+    });
+
+    if (!group) {
+      return { success: false, error: "Group not found" };
+    }
+
+    const sendablePackages = group.packages.filter(
+      (p) => p.destChannelId && p.destMessageId
+    );
+
+    if (sendablePackages.length === 0) {
+      return { success: false, error: "No packages in this group have been uploaded to a destination channel" };
+    }
+
+    let queued = 0;
+    for (const pkg of sendablePackages) {
+      // Only create if no existing PENDING/SENDING request for this package+link combo
+      const existing = await prisma.botSendRequest.findFirst({
+        where: {
+          packageId: pkg.id,
+          telegramLinkId: telegramLink.id,
+          status: { in: ["PENDING", "SENDING"] },
+        },
+      });
+
+      if (!existing) {
+        const sendRequest = await prisma.botSendRequest.create({
+          data: {
+            packageId: pkg.id,
+            telegramLinkId: telegramLink.id,
+            requestedByUserId: session.user.id,
+            status: "PENDING",
+          },
+        });
+
+        // Notify the bot via pg_notify
+        try {
+          await prisma.$queryRawUnsafe(
+            `SELECT pg_notify('bot_send', $1)`,
+            sendRequest.id
+          );
+        } catch {
+          // Best-effort — the bot also polls periodically
+        }
+
+        queued++;
+      }
+    }
+
+    revalidatePath("/stls");
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to send group packages" };
   }
 }
