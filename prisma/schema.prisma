@@ -432,6 +432,7 @@ model TelegramChannel {
   accountMaps     AccountChannelMap[]
   packages        Package[]
   skippedPackages SkippedPackage[]
+  packageGroups   PackageGroup[]
 
   @@index([type, isActive])
   @@index([category])
@@ -474,10 +475,12 @@ model Package {
   tags            String[]    @default([])
   previewData     Bytes?      // JPEG thumbnail from nearby Telegram photo (stored as raw bytes)
   previewMsgId    BigInt?     // Telegram message ID of the matched photo
+  packageGroupId  String?
   indexedAt        DateTime   @default(now())
   createdAt       DateTime    @default(now())
 
   sourceChannel   TelegramChannel      @relation(fields: [sourceChannelId], references: [id])
+  packageGroup    PackageGroup?        @relation(fields: [packageGroupId], references: [id], onDelete: SetNull)
   files           PackageFile[]
   ingestionRun    IngestionRun?        @relation(fields: [ingestionRunId], references: [id])
   ingestionRunId  String?
@@ -491,6 +494,7 @@ model Package {
   @@index([indexedAt])
   @@index([archiveType])
   @@index([creator])
+  @@index([packageGroupId])
   @@map("packages")
 }
 
@@ -510,6 +514,23 @@ model PackageFile {
   @@index([extension])
   @@index([fileName])
   @@map("package_files")
+}
+
+model PackageGroup {
+  id              String           @id @default(cuid())
+  name            String
+  mediaAlbumId    String?
+  sourceChannelId String
+  previewData     Bytes?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  packages        Package[]
+  sourceChannel   TelegramChannel  @relation(fields: [sourceChannelId], references: [id], onDelete: Cascade)
+
+  @@unique([mediaAlbumId, sourceChannelId])
+  @@index([sourceChannelId])
+  @@map("package_groups")
 }
 
 model IngestionRun {
