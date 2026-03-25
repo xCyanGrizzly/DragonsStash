@@ -63,6 +63,18 @@ export async function packageExistsByHash(contentHash: string) {
 }
 
 /**
+ * Find an already-uploaded package by content hash.
+ * Used to detect orphaned uploads — files that reached Telegram
+ * but whose package record was created from a previous successful run.
+ */
+export async function getUploadedPackageByHash(contentHash: string) {
+  return db.package.findFirst({
+    where: { contentHash, destMessageId: { not: null }, destChannelId: { not: null } },
+    select: { destChannelId: true, destMessageId: true },
+  });
+}
+
+/**
  * Check if a package already exists for a given source message ID
  * AND was successfully uploaded to the destination (destMessageId is set).
  * Used as an early skip before downloading.

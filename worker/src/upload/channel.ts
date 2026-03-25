@@ -94,10 +94,10 @@ async function sendAndWaitForUpload(
     let lastLoggedPercent = 0;
     let tempMsgId: number | null = null;
 
-    // Timeout: 10 minutes per GB, minimum 10 minutes
+    // Timeout: 15 minutes per GB, minimum 10 minutes
     const timeoutMs = Math.max(
       10 * 60_000,
-      (fileSizeMB / 1024) * 10 * 60_000
+      (fileSizeMB / 1024) * 15 * 60_000
     );
 
     const timer = setTimeout(() => {

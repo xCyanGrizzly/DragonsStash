@@ -354,10 +354,10 @@ export async function downloadFile(
     let lastLoggedPercent = 0;
     let settled = false;
 
-    // Timeout: 10 minutes per GB, minimum 5 minutes
+    // Timeout: 15 minutes per GB, minimum 10 minutes
     const timeoutMs = Math.max(
-      5 * 60_000,
-      (totalBytes / (1024 * 1024 * 1024)) * 10 * 60_000
+      10 * 60_000,
+      (totalBytes / (1024 * 1024 * 1024)) * 15 * 60_000
     );
     const timer = setTimeout(() => {
       if (!settled) {

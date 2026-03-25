@@ -26,6 +26,7 @@ import {
   getExistingChannelsByTelegramId,
   getAccountById,
   deleteOrphanedPackageByHash,
+  getUploadedPackageByHash,
   upsertSkippedPackage,
   deleteSkippedPackage,
 } from "./db/queries.js";
@@ -644,6 +645,20 @@ export async function runWorkerForAccount(
 }
 
 /**
+ * Infer the SkipReason from an error message so the UI shows the correct badge.
+ */
+function inferSkipReason(errMsg: string): "DOWNLOAD_FAILED" | "UPLOAD_FAILED" | "EXTRACT_FAILED" {
+  const lower = errMsg.toLowerCase();
+  if (lower.includes("upload") || lower.includes("too many requests") || lower.includes("retry after") || lower.includes("send")) {
+    return "UPLOAD_FAILED";
+  }
+  if (lower.includes("extract") || lower.includes("metadata") || lower.includes("central directory") || lower.includes("archive")) {
+    return "EXTRACT_FAILED";
+  }
+  return "DOWNLOAD_FAILED";
+}
+
+/**
  * Process a scan result through the archive pipeline:
  * group → download → hash → dedup → metadata → split → upload → preview → index.
  *
@@ -737,11 +752,12 @@ async function processArchiveSets(
       try {
         const archiveSet = archiveSets[setIdx];
         const totalSize = archiveSet.parts.reduce((sum, p) => sum + p.fileSize, 0n);
+        const errMsg = setErr instanceof Error ? setErr.message : String(setErr);
         await upsertSkippedPackage({
           fileName: archiveSet.parts[0].fileName,
           fileSize: totalSize,
-          reason: "DOWNLOAD_FAILED",
-          errorMessage: setErr instanceof Error ? setErr.message : String(setErr),
+          reason: inferSkipReason(errMsg),
+          errorMessage: errMsg,
           sourceChannelId: ctx.channel.id,
           sourceMessageId: archiveSet.parts[0].id,
           sourceTopicId: ctx.sourceTopicId,
@@ -1017,23 +1033,36 @@ async function processOneArchiveSet(
     }
 
     // ── Uploading ──
-    const uploadLabel = uploadPaths.length > 1
-      ? ` (${uploadPaths.length} parts)`
-      : "";
-    await updateRunActivity(runId, {
-      currentActivity: `Uploading ${archiveName} to archive channel${uploadLabel}`,
-      currentStep: "uploading",
-      currentChannel: channelTitle,
-      currentFile: archiveName,
-      currentFileNum: setIdx + 1,
-      totalFiles: totalSets,
-    });
+    // Check if a prior run already uploaded this file (orphaned upload scenario:
+    // file reached Telegram but DB write failed or worker crashed before indexing)
+    const existingUpload = await getUploadedPackageByHash(contentHash);
+    let destResult: { messageId: bigint };
 
-    const destResult = await uploadToChannel(
-      client,
-      destChannelTelegramId,
-      uploadPaths
-    );
+    if (existingUpload && existingUpload.destMessageId) {
+      accountLog.info(
+        { fileName: archiveName, destMessageId: Number(existingUpload.destMessageId) },
+        "Reusing existing upload (file already on destination channel)"
+      );
+      destResult = { messageId: existingUpload.destMessageId };
+    } else {
+      const uploadLabel = uploadPaths.length > 1
+        ? ` (${uploadPaths.length} parts)`
+        : "";
+      await updateRunActivity(runId, {
+        currentActivity: `Uploading ${archiveName} to archive channel${uploadLabel}`,
+        currentStep: "uploading",
+        currentChannel: channelTitle,
+        currentFile: archiveName,
+        currentFileNum: setIdx + 1,
+        totalFiles: totalSets,
+      });
+
+      destResult = await uploadToChannel(
+        client,
+        destChannelTelegramId,
+        uploadPaths
+      );
+    }
 
     // ── Preview thumbnail ──
     let previewData: Buffer | null = null;
