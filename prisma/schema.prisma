@@ -469,6 +469,7 @@ model Package {
   sourceTopicId   BigInt?
   destChannelId   String?
   destMessageId   BigInt?
+  destMessageIds  BigInt[]    @default([])
   isMultipart     Boolean     @default(false)
   partCount       Int         @default(1)
   fileCount       Int         @default(0)

@@ -70,7 +70,7 @@ export async function packageExistsByHash(contentHash: string) {
 export async function getUploadedPackageByHash(contentHash: string) {
   return db.package.findFirst({
     where: { contentHash, destMessageId: { not: null }, destChannelId: { not: null } },
-    select: { destChannelId: true, destMessageId: true },
+    select: { destChannelId: true, destMessageId: true, destMessageIds: true },
   });
 }
 
@@ -111,6 +111,7 @@ export interface CreatePackageInput {
   sourceTopicId?: bigint | null;
   destChannelId?: string;
   destMessageId?: bigint;
+  destMessageIds?: bigint[];
   isMultipart: boolean;
   partCount: number;
   ingestionRunId: string;
@@ -140,6 +141,7 @@ export async function createPackageWithFiles(input: CreatePackageInput) {
       sourceTopicId: input.sourceTopicId ?? undefined,
       destChannelId: input.destChannelId,
       destMessageId: input.destMessageId,
+      destMessageIds: input.destMessageIds ?? (input.destMessageId ? [input.destMessageId] : []),
       isMultipart: input.isMultipart,
       partCount: input.partCount,
       fileCount: input.files.length,

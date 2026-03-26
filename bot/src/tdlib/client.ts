@@ -122,6 +122,25 @@ export async function copyMessageToUser(
 }
 
 /**
+ * Send multiple document messages from a channel to a user's DM.
+ * Used for multi-part archives where each part is a separate Telegram message.
+ * Sends parts sequentially with a small delay to avoid rate limits.
+ */
+export async function copyMultipleMessagesToUser(
+  fromChatId: bigint,
+  messageIds: bigint[],
+  toUserId: bigint
+): Promise<void> {
+  for (let i = 0; i < messageIds.length; i++) {
+    await copyMessageToUser(fromChatId, messageIds[i], toUserId);
+    // Small delay between parts to avoid rate limits
+    if (i < messageIds.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+}
+
+/**
  * Send a message and wait for Telegram to confirm delivery.
  * Returns when updateMessageSendSucceeded fires for the temp message.
  * Throws if updateMessageSendFailed fires or timeout is reached.

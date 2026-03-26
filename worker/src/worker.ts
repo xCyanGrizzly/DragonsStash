@@ -1057,14 +1057,19 @@ async function processOneArchiveSet(
     // Check if a prior run already uploaded this file (orphaned upload scenario:
     // file reached Telegram but DB write failed or worker crashed before indexing)
     const existingUpload = await getUploadedPackageByHash(contentHash);
-    let destResult: { messageId: bigint };
+    let destResult: { messageId: bigint; messageIds: bigint[] };
 
     if (existingUpload && existingUpload.destMessageId) {
       accountLog.info(
         { fileName: archiveName, destMessageId: Number(existingUpload.destMessageId) },
         "Reusing existing upload (file already on destination channel)"
       );
-      destResult = { messageId: existingUpload.destMessageId };
+      destResult = {
+        messageId: existingUpload.destMessageId,
+        messageIds: existingUpload.destMessageIds?.length
+          ? (existingUpload.destMessageIds as bigint[])
+          : [existingUpload.destMessageId],
+      };
     } else {
       const uploadLabel = uploadPaths.length > 1
         ? ` (${uploadPaths.length} parts)`
@@ -1158,6 +1163,7 @@ async function processOneArchiveSet(
       sourceTopicId,
       destChannelId,
       destMessageId: destResult.messageId,
+      destMessageIds: destResult.messageIds,
       isMultipart:
         archiveSet.parts.length > 1 || uploadPaths.length > 1,
       partCount: uploadPaths.length,

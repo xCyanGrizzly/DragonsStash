@@ -7,7 +7,8 @@ import { toast } from "sonner";
 import { useDataTable } from "@/hooks/use-data-table";
 import { getKickstarterColumns, type KickstarterRow } from "./kickstarter-columns";
 import { KickstarterModal } from "./kickstarter-modal";
-import { deleteKickstarter } from "../actions";
+import { PackageLinkerDialog } from "./package-linker-dialog";
+import { deleteKickstarter, sendAllKickstarterPackages } from "../actions";
 import { DataTable } from "@/components/shared/data-table";
 import { DataTablePagination } from "@/components/shared/data-table-pagination";
 import { DataTableViewOptions } from "@/components/shared/data-table-view-options";
@@ -50,6 +51,7 @@ export function KickstarterTable({
   const [modalOpen, setModalOpen] = useState(false);
   const [editKickstarter, setEditKickstarter] = useState<KickstarterRow | undefined>();
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [linkTarget, setLinkTarget] = useState<KickstarterRow | null>(null);
 
   const [searchValue, setSearchValue] = useState(searchParams.get("search") ?? "");
 
@@ -88,6 +90,17 @@ export function KickstarterTable({
       setModalOpen(true);
     },
     onDelete: (id) => setDeleteId(id),
+    onLinkPackages: (kickstarter) => setLinkTarget(kickstarter),
+    onSendAll: (kickstarter) => {
+      startTransition(async () => {
+        const result = await sendAllKickstarterPackages(kickstarter.id);
+        if (result.success) {
+          toast.success(`Queued ${result.data!.queued} package(s) for delivery`);
+        } else {
+          toast.error(result.error);
+        }
+      });
+    },
   });
 
   const { table } = useDataTable({ data, columns, pageCount });
@@ -188,6 +201,15 @@ export function KickstarterTable({
         onConfirm={handleDelete}
         isLoading={isPending}
       />
+
+      {linkTarget && (
+        <PackageLinkerDialog
+          open={!!linkTarget}
+          onOpenChange={(open) => !open && setLinkTarget(null)}
+          kickstarterId={linkTarget.id}
+          kickstarterName={linkTarget.name}
+        />
+      )}
     </div>
   );
 }

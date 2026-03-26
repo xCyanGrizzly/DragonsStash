@@ -2,12 +2,15 @@ import type { Client } from "tdl";
 import { readFile, rename, copyFile, unlink, stat } from "fs/promises";
 import { config } from "../util/config.js";
 import { childLogger } from "../util/logger.js";
-import { withFloodWait } from "../util/retry.js";
+import { withFloodWait, extractFloodWaitSeconds } from "../util/retry.js";
 import { isArchiveAttachment } from "../archive/detect.js";
 import type { TelegramMessage } from "../archive/multipart.js";
 import type { TelegramPhoto } from "../preview/match.js";
 
 const log = childLogger("download");
+
+/** Maximum retry attempts for stalled/failed downloads */
+const MAX_DOWNLOAD_RETRIES = 3;
 
 /** Maximum number of pages to scan per channel/topic to prevent infinite loops */
 export const MAX_SCAN_PAGES = 5000;
@@ -353,6 +356,75 @@ export async function downloadFile(
     isComplete: false,
   });
 
+  for (let attempt = 0; attempt <= MAX_DOWNLOAD_RETRIES; attempt++) {
+    try {
+      return await downloadFileAttempt(client, numericId, fileId, destPath, totalBytes, fileName, onProgress);
+    } catch (err) {
+      const isLastAttempt = attempt >= MAX_DOWNLOAD_RETRIES;
+
+      // Rate limit from Telegram
+      const waitSeconds = extractFloodWaitSeconds(err);
+      if (waitSeconds !== null && !isLastAttempt) {
+        const jitter = 1000 + Math.random() * 4000;
+        const waitMs = waitSeconds * 1000 + jitter;
+        log.warn(
+          { fileName, attempt: attempt + 1, maxRetries: MAX_DOWNLOAD_RETRIES, waitSeconds },
+          `Download rate-limited — sleeping ${waitSeconds}s before retry`
+        );
+        await cancelDownload(client, numericId);
+        await sleep(waitMs);
+        continue;
+      }
+
+      // Stall, timeout, or unexpected stop — cancel and retry
+      const errMsg = err instanceof Error ? err.message : "";
+      if (
+        (errMsg.includes("stalled") || errMsg.includes("timed out") || errMsg.includes("stopped unexpectedly")) &&
+        !isLastAttempt
+      ) {
+        log.warn(
+          { fileName, attempt: attempt + 1, maxRetries: MAX_DOWNLOAD_RETRIES },
+          "Download failed — cancelling and retrying"
+        );
+        await cancelDownload(client, numericId);
+        await sleep(5_000);
+        continue;
+      }
+
+      throw err;
+    }
+  }
+  throw new Error(`Download failed after ${MAX_DOWNLOAD_RETRIES} retries for ${fileName}`);
+}
+
+/**
+ * Cancel an active TDLib download so it can be retried cleanly.
+ */
+async function cancelDownload(client: Client, fileId: number): Promise<void> {
+  try {
+    await client.invoke({
+      _: "cancelDownloadFile",
+      file_id: fileId,
+      only_if_pending: false,
+    });
+    log.debug({ fileId }, "Cancelled TDLib download for retry");
+  } catch {
+    // Best-effort
+  }
+}
+
+/**
+ * Single download attempt with progress tracking, stall detection, and verification.
+ */
+async function downloadFileAttempt(
+  client: Client,
+  numericId: number,
+  fileId: string,
+  destPath: string,
+  totalBytes: number,
+  fileName: string,
+  onProgress?: ProgressCallback
+): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     let lastLoggedPercent = 0;
     let settled = false;

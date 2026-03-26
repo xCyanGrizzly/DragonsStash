@@ -95,3 +95,34 @@ export async function getKickstarterHosts() {
     include: { _count: { select: { kickstarters: true } } },
   });
 }
+
+export async function searchPackagesForLinking(query: string, limit = 20) {
+  if (!query || query.length < 2) return [];
+
+  return prisma.package.findMany({
+    where: {
+      OR: [
+        { fileName: { contains: query, mode: "insensitive" } },
+        { creator: { contains: query, mode: "insensitive" } },
+      ],
+    },
+    orderBy: { indexedAt: "desc" },
+    take: limit,
+    select: {
+      id: true,
+      fileName: true,
+      fileSize: true,
+      archiveType: true,
+      creator: true,
+      fileCount: true,
+    },
+  });
+}
+
+export async function getLinkedPackageIds(kickstarterId: string): Promise<string[]> {
+  const links = await prisma.kickstarterPackage.findMany({
+    where: { kickstarterId },
+    select: { packageId: true },
+  });
+  return links.map((l) => l.packageId);
+}
