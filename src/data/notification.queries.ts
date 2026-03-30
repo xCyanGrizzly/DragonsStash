@@ -35,3 +35,11 @@ export async function markAllNotificationsRead() {
     data: { isRead: true },
   });
 }
+
+export async function dismissNotification(id: string) {
+  return prisma.systemNotification.delete({ where: { id } });
+}
+
+export async function clearAllNotifications() {
+  return prisma.systemNotification.deleteMany({});
+}

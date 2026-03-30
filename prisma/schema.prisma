@@ -39,9 +39,10 @@ model User {
   settings     UserSettings?
   telegramLink TelegramLink?
   kickstarters Kickstarter[]
-  inviteCodes  InviteCode[]   @relation("InviteCreator")
-  usedInvite   InviteCode?    @relation("InviteUser", fields: [usedInviteId], references: [id], onDelete: SetNull)
-  usedInviteId String?
+  inviteCodes    InviteCode[]   @relation("InviteCreator")
+  usedInvite     InviteCode?    @relation("InviteUser", fields: [usedInviteId], references: [id], onDelete: SetNull)
+  usedInviteId   String?
+  manualUploads  ManualUpload[]
 }
 
 model Account {
@@ -864,4 +865,41 @@ model GroupingRule {
 
   @@index([sourceChannelId])
   @@map("grouping_rules")
+}
+
+enum ManualUploadStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model ManualUpload {
+  id              String             @id @default(cuid())
+  status          ManualUploadStatus @default(PENDING)
+  groupName       String?            // Group name if multiple files
+  userId          String
+  errorMessage    String?
+  createdAt       DateTime           @default(now())
+  completedAt     DateTime?
+
+  files           ManualUploadFile[]
+  user            User               @relation(fields: [userId], references: [id])
+
+  @@index([status])
+  @@map("manual_uploads")
+}
+
+model ManualUploadFile {
+  id              String       @id @default(cuid())
+  uploadId        String
+  fileName        String
+  filePath        String       // Path on shared volume
+  fileSize        BigInt
+  packageId       String?      // Set after processing
+
+  upload          ManualUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@index([uploadId])
+  @@map("manual_upload_files")
 }

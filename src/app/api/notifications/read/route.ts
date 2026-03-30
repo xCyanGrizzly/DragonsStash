@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import {
   markNotificationRead,
   markAllNotificationsRead,
+  dismissNotification,
+  clearAllNotifications,
 } from "@/data/notification.queries";
 
 export const dynamic = "force-dynamic";
@@ -15,8 +17,13 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const id = body.id as string | undefined;
+  const action = (body.action as string) ?? "read";
 
-  if (id) {
+  if (action === "dismiss" && id) {
+    await dismissNotification(id);
+  } else if (action === "clear") {
+    await clearAllNotifications();
+  } else if (id) {
     await markNotificationRead(id);
   } else {
     await markAllNotificationsRead();

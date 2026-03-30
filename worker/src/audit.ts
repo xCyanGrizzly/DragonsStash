@@ -38,7 +38,9 @@ export async function runIntegrityAudit(): Promise<{ checked: number; issues: nu
 
   for (const pkg of multipartPackages) {
     const actualParts = pkg.destMessageIds.length;
-    if (actualParts > 0 && actualParts !== pkg.partCount) {
+    // Only flag when we have >1 stored IDs but count doesn't match.
+    // Packages with exactly 1 ID are legacy (backfilled from single destMessageId) — not actionable.
+    if (actualParts > 1 && actualParts !== pkg.partCount) {
       issues++;
 
       // Check if we already have a notification for this

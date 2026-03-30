@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Bell, AlertTriangle, AlertCircle, Info, CheckCircle2 } from "lucide-react";
+import { Bell, AlertTriangle, AlertCircle, Info, CheckCircle2, X, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -94,6 +94,34 @@ export function NotificationBell() {
     }
   }
 
+  async function handleDismiss(id: string) {
+    try {
+      await fetch("/api/notifications/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action: "dismiss" }),
+      });
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
+      setUnreadCount((c) => Math.max(0, c - 1));
+    } catch {
+      // Ignore
+    }
+  }
+
+  async function handleClearAll() {
+    try {
+      await fetch("/api/notifications/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear" }),
+      });
+      setNotifications([]);
+      setUnreadCount(0);
+    } catch {
+      // Ignore
+    }
+  }
+
   async function handleRepair(notificationId: string) {
     try {
       const res = await fetch("/api/notifications/repair", {
@@ -141,16 +169,29 @@ export function NotificationBell() {
       <PopoverContent className="w-96 p-0" align="end">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h3 className="text-sm font-semibold">Notifications</h3>
-          {unreadCount > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={handleMarkAllRead}
-            >
-              Mark all read
-            </Button>
-          )}
+          <div className="flex items-center gap-1">
+            {unreadCount > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={handleMarkAllRead}
+              >
+                Mark all read
+              </Button>
+            )}
+            {notifications.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs text-muted-foreground"
+                onClick={handleClearAll}
+              >
+                <Trash2 className="h-3 w-3 mr-1" />
+                Clear
+              </Button>
+            )}
+          </div>
         </div>
         <ScrollArea className="max-h-[400px]">
           {notifications.length === 0 ? (
@@ -187,6 +228,13 @@ export function NotificationBell() {
                         {!n.isRead && (
                           <span className="h-2 w-2 rounded-full bg-primary shrink-0" />
                         )}
+                        <button
+                          className="ml-auto shrink-0 p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                          onClick={(e) => { e.stopPropagation(); handleDismiss(n.id); }}
+                          title="Dismiss"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
                       </div>
                       <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
                         {n.message}

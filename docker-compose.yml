@@ -28,6 +28,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+    volumes:
+      - manual_uploads:/data/uploads
     restart: unless-stopped
     deploy:
       resources:
@@ -54,6 +56,7 @@ services:
     volumes:
       - tdlib_state:/data/tdlib
       - tmp_zips:/tmp/zips
+      - manual_uploads:/data/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -121,6 +124,7 @@ volumes:
   tdlib_state:
   tdlib_bot_state:
   tmp_zips:
+  manual_uploads:
 
 networks:
   frontend:

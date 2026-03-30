@@ -3,7 +3,8 @@
 import { useState, useCallback, useTransition, useMemo, useRef } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Search, Layers } from "lucide-react";
+import { Search, Layers, Upload } from "lucide-react";
+import { UploadDialog } from "./upload-dialog";
 import { useDataTable } from "@/hooks/use-data-table";
 import {
   getPackageColumns,
@@ -105,6 +106,9 @@ export function StlTable({
 
   // Group merge state
   const [mergeSourceId, setMergeSourceId] = useState<string | null>(null);
+
+  // Upload dialog state
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   const toggleGroup = useCallback((groupId: string) => {
     setExpandedGroups((prev) => {
@@ -497,6 +501,10 @@ export function StlTable({
               </Select>
             )}
             <DataTableViewOptions table={table} />
+            <Button variant="outline" size="sm" className="h-9" onClick={() => setUploadOpen(true)}>
+              <Upload className="mr-2 h-4 w-4" />
+              Upload Files
+            </Button>
             {selectedPackages.size >= 2 && (
               <Button
                 variant="outline"
@@ -586,6 +594,8 @@ export function StlTable({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} />
 
       {/* Hidden file input for group preview upload (Task 12) */}
       <input
