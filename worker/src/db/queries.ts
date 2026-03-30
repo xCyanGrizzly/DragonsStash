@@ -119,6 +119,8 @@ export interface CreatePackageInput {
   tags?: string[];
   previewData?: Buffer | null;
   previewMsgId?: bigint | null;
+  sourceCaption?: string | null;
+  replyToMessageId?: bigint | null;
   files: {
     path: string;
     fileName: string;
@@ -150,6 +152,8 @@ export async function createPackageWithFiles(input: CreatePackageInput) {
       tags: input.tags && input.tags.length > 0 ? input.tags : undefined,
       previewData: input.previewData ? new Uint8Array(input.previewData) : undefined,
       previewMsgId: input.previewMsgId ?? undefined,
+      sourceCaption: input.sourceCaption ?? undefined,
+      replyToMessageId: input.replyToMessageId ?? undefined,
       files: {
         create: input.files,
       },
@@ -613,7 +617,7 @@ export async function createAutoGroup(input: {
   sourceChannelId: string;
   name: string;
   packageIds: string[];
-  groupingSource: "AUTO_TIME" | "AUTO_PATTERN" | "AUTO_ZIP" | "AUTO_CAPTION";
+  groupingSource: "AUTO_TIME" | "AUTO_PATTERN" | "AUTO_ZIP" | "AUTO_CAPTION" | "AUTO_REPLY";
 }): Promise<string> {
   const group = await db.packageGroup.create({
     data: {

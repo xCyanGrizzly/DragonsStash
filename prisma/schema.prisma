@@ -474,6 +474,8 @@ model Package {
   partCount       Int         @default(1)
   fileCount       Int         @default(0)
   tags            String[]    @default([])
+  sourceCaption   String?     // Caption text from source Telegram message
+  replyToMessageId BigInt?    // reply_to_message_id from source message (for reply chain grouping)
   previewData     Bytes?      // JPEG thumbnail from nearby Telegram photo (stored as raw bytes)
   previewMsgId    BigInt?     // Telegram message ID of the matched photo
   packageGroupId  String?

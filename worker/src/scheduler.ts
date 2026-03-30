@@ -3,6 +3,7 @@ import { childLogger } from "./util/logger.js";
 import { withTdlibMutex } from "./util/mutex.js";
 import { getActiveAccounts, getPendingAccounts } from "./db/queries.js";
 import { runWorkerForAccount, authenticateAccount } from "./worker.js";
+import { runIntegrityAudit } from "./audit.js";
 
 const log = childLogger("scheduler");
 
@@ -87,6 +88,16 @@ async function runCycle(): Promise<void> {
       { elapsed: Math.round((Date.now() - cycleStart) / 1000) },
       "Ingestion cycle complete"
     );
+
+    // Run integrity audit after all accounts are processed
+    try {
+      const auditResult = await runIntegrityAudit();
+      if (auditResult.issues > 0) {
+        log.info({ ...auditResult }, "Integrity audit found issues");
+      }
+    } catch (auditErr) {
+      log.warn({ err: auditErr }, "Integrity audit failed");
+    }
   } catch (err) {
     log.error({ err }, "Ingestion cycle failed");
   } finally {

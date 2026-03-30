@@ -736,3 +736,13 @@ export async function dissolveGroup(groupId: string) {
   });
   await prisma.packageGroup.delete({ where: { id: groupId } });
 }
+
+export async function mergeGroups(targetGroupId: string, sourceGroupId: string) {
+  // Move all packages from source group to target group
+  await prisma.package.updateMany({
+    where: { packageGroupId: sourceGroupId },
+    data: { packageGroupId: targetGroupId },
+  });
+  // Delete the now-empty source group
+  await prisma.packageGroup.delete({ where: { id: sourceGroupId } });
+}

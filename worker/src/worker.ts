@@ -47,7 +47,7 @@ import { readRarContents } from "./archive/rar-reader.js";
 import { read7zContents } from "./archive/sevenz-reader.js";
 import { byteLevelSplit, concatenateFiles } from "./archive/split.js";
 import { uploadToChannel } from "./upload/channel.js";
-import { processAlbumGroups, processTimeWindowGroups, processPatternGroups, processCreatorGroups, type IndexedPackageRef } from "./grouping.js";
+import { processAlbumGroups, processTimeWindowGroups, processPatternGroups, processCreatorGroups, processZipPathGroups, processReplyChainGroups, processCaptionGroups, type IndexedPackageRef } from "./grouping.js";
 import { db } from "./db/client.js";
 import type { TelegramAccount, TelegramChannel } from "@prisma/client";
 import type { Client } from "tdl";
@@ -816,6 +816,15 @@ async function processArchiveSets(
 
     // Creator-based grouping (3+ files from same creator)
     await processCreatorGroups(channel.id, indexedPackageRefs);
+
+    // ZIP path prefix grouping (shared root folder inside archives)
+    await processZipPathGroups(channel.id, indexedPackageRefs);
+
+    // Reply chain grouping (messages replying to same root)
+    await processReplyChainGroups(channel.id, indexedPackageRefs);
+
+    // Caption fuzzy match grouping
+    await processCaptionGroups(channel.id, indexedPackageRefs);
   }
 
   return maxProcessedId;
@@ -1235,6 +1244,8 @@ async function processOneArchiveSet(
       tags,
       previewData,
       previewMsgId,
+      sourceCaption: archiveSet.parts[0].caption ?? null,
+      replyToMessageId: archiveSet.parts[0].replyToMessageId ?? null,
       files: entries,
     });
 

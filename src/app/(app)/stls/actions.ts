@@ -10,6 +10,7 @@ import {
   createManualGroup,
   removePackageFromGroup,
   dissolveGroup,
+  mergeGroups,
 } from "@/lib/telegram/queries";
 
 const ALLOWED_IMAGE_TYPES = [
@@ -432,6 +433,26 @@ export async function updateGroupPreviewAction(
     return { success: true, data: undefined };
   } catch {
     return { success: false, error: "Failed to upload group preview image" };
+  }
+}
+
+export async function mergeGroupsAction(
+  targetGroupId: string,
+  sourceGroupId: string
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { success: false, error: "Unauthorized" };
+
+  if (targetGroupId === sourceGroupId) {
+    return { success: false, error: "Cannot merge a group with itself" };
+  }
+
+  try {
+    await mergeGroups(targetGroupId, sourceGroupId);
+    revalidatePath("/stls");
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to merge groups" };
   }
 }
 

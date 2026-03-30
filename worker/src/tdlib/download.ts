@@ -39,6 +39,7 @@ interface TdMessage {
   id: number;
   date: number;
   media_album_id?: string;
+  reply_to_message_id?: number;
   content: {
     _: string;
     document?: {
@@ -216,6 +217,8 @@ export async function getChannelMessages(
             fileSize: BigInt(doc.document.size),
             date: new Date(msg.date * 1000),
             mediaAlbumId: msg.media_album_id && msg.media_album_id !== "0" ? msg.media_album_id : undefined,
+            replyToMessageId: msg.reply_to_message_id ? BigInt(msg.reply_to_message_id) : undefined,
+            caption: msg.content?.caption?.text || undefined,
           });
           continue;
         }

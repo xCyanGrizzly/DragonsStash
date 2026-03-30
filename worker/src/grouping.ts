@@ -289,6 +289,243 @@ export async function processCreatorGroups(
 }
 
 /**
+ * Group ungrouped packages that share the same root folder inside their archives.
+ * E.g., if two packages both contain files under "ProjectX/", they're likely related.
+ * Only considers packages with 3+ files (to avoid false positives from flat archives).
+ */
+export async function processZipPathGroups(
+  sourceChannelId: string,
+  indexedPackages: IndexedPackageRef[]
+): Promise<void> {
+  // Find ungrouped packages that have indexed files
+  const ungrouped = await db.package.findMany({
+    where: {
+      id: { in: indexedPackages.map((p) => p.packageId) },
+      packageGroupId: null,
+      fileCount: { gte: 3 },
+    },
+    select: {
+      id: true,
+      fileName: true,
+      files: {
+        select: { path: true },
+        take: 50,
+      },
+    },
+  });
+
+  if (ungrouped.length < 2) return;
+
+  // Extract the dominant root folder for each package
+  const packageRoots = new Map<string, { id: string; fileName: string }[]>();
+
+  for (const pkg of ungrouped) {
+    const root = extractRootFolder(pkg.files.map((f) => f.path));
+    if (!root) continue;
+
+    const key = root.toLowerCase();
+    const group = packageRoots.get(key) ?? [];
+    group.push({ id: pkg.id, fileName: pkg.fileName });
+    packageRoots.set(key, group);
+  }
+
+  // Create groups for roots shared by 2+ packages
+  for (const [root, members] of packageRoots) {
+    if (members.length < 2) continue;
+
+    try {
+      const groupId = await createAutoGroup({
+        sourceChannelId,
+        name: root,
+        packageIds: members.map((m) => m.id),
+        groupingSource: "AUTO_ZIP",
+      });
+
+      log.info(
+        { groupId, rootFolder: root, memberCount: members.length },
+        "Created ZIP path prefix group"
+      );
+    } catch (err) {
+      log.warn({ err, rootFolder: root }, "Failed to create ZIP path group");
+    }
+  }
+}
+
+/**
+ * Group ungrouped packages that reply to the same root message.
+ * If message B and C both reply to message A, they're grouped together.
+ */
+export async function processReplyChainGroups(
+  sourceChannelId: string,
+  indexedPackages: IndexedPackageRef[]
+): Promise<void> {
+  const ungrouped = await db.package.findMany({
+    where: {
+      id: { in: indexedPackages.map((p) => p.packageId) },
+      packageGroupId: null,
+      replyToMessageId: { not: null },
+    },
+    select: {
+      id: true,
+      fileName: true,
+      replyToMessageId: true,
+    },
+  });
+
+  if (ungrouped.length < 2) return;
+
+  // Group by replyToMessageId
+  const replyMap = new Map<string, typeof ungrouped>();
+  for (const pkg of ungrouped) {
+    if (!pkg.replyToMessageId) continue;
+    const key = pkg.replyToMessageId.toString();
+    const group = replyMap.get(key) ?? [];
+    group.push(pkg);
+    replyMap.set(key, group);
+  }
+
+  for (const [replyId, members] of replyMap) {
+    if (members.length < 2) continue;
+
+    const name = findCommonPrefix(members.map((m) => m.fileName)) || members[0].fileName;
+
+    try {
+      const groupId = await createAutoGroup({
+        sourceChannelId,
+        name,
+        packageIds: members.map((m) => m.id),
+        groupingSource: "AUTO_REPLY" as const,
+      });
+
+      log.info(
+        { groupId, replyToMessageId: replyId, memberCount: members.length },
+        "Created reply-chain group"
+      );
+    } catch (err) {
+      log.warn({ err, replyToMessageId: replyId }, "Failed to create reply-chain group");
+    }
+  }
+}
+
+/**
+ * Group ungrouped packages with similar captions from the same channel.
+ * Uses normalized caption comparison — two captions match if they share
+ * the same significant words (ignoring common words and file extensions).
+ */
+export async function processCaptionGroups(
+  sourceChannelId: string,
+  indexedPackages: IndexedPackageRef[]
+): Promise<void> {
+  const ungrouped = await db.package.findMany({
+    where: {
+      id: { in: indexedPackages.map((p) => p.packageId) },
+      packageGroupId: null,
+      sourceCaption: { not: null },
+    },
+    select: {
+      id: true,
+      fileName: true,
+      sourceCaption: true,
+    },
+  });
+
+  if (ungrouped.length < 2) return;
+
+  // Group by normalized caption key
+  const captionMap = new Map<string, typeof ungrouped>();
+  for (const pkg of ungrouped) {
+    if (!pkg.sourceCaption) continue;
+    const key = normalizeCaptionKey(pkg.sourceCaption);
+    if (!key) continue;
+    const group = captionMap.get(key) ?? [];
+    group.push(pkg);
+    captionMap.set(key, group);
+  }
+
+  for (const [, members] of captionMap) {
+    if (members.length < 2) continue;
+
+    const name = members[0].sourceCaption!.slice(0, 80);
+
+    try {
+      const groupId = await createAutoGroup({
+        sourceChannelId,
+        name,
+        packageIds: members.map((m) => m.id),
+        groupingSource: "AUTO_CAPTION" as const,
+      });
+
+      log.info(
+        { groupId, memberCount: members.length },
+        "Created caption-match group"
+      );
+    } catch (err) {
+      log.warn({ err }, "Failed to create caption group");
+    }
+  }
+}
+
+/**
+ * Normalize a caption for grouping: lowercase, strip extensions and numbers,
+ * extract significant words (3+ chars), sort, and join.
+ * Two captions with the same key are considered a match.
+ */
+function normalizeCaptionKey(caption: string): string | null {
+  const stripped = caption
+    .toLowerCase()
+    .replace(/\.(zip|rar|7z|stl|pdf|obj|gcode)(\.\d+)?/gi, "")
+    .replace(/[^a-z0-9\s]/g, " ");
+
+  const words = stripped
+    .split(/\s+/)
+    .filter((w) => w.length >= 3)
+    .filter((w) => !["the", "and", "for", "with", "from", "part", "file", "files"].includes(w));
+
+  if (words.length < 2) return null;
+
+  return words.sort().join(" ");
+}
+
+/**
+ * Extract the dominant root folder from a list of archive file paths.
+ * Returns the first path segment that appears in >50% of files.
+ * Returns null for flat archives or archives with no common root.
+ */
+function extractRootFolder(paths: string[]): string | null {
+  if (paths.length === 0) return null;
+
+  // Count first path segments
+  const segmentCounts = new Map<string, number>();
+  for (const p of paths) {
+    // Normalize separators and get first segment
+    const normalized = p.replace(/\\/g, "/");
+    const firstSlash = normalized.indexOf("/");
+    if (firstSlash <= 0) continue; // Skip root-level files
+    const segment = normalized.slice(0, firstSlash);
+    // Skip common noise folders
+    if (segment === "__MACOSX" || segment === ".DS_Store" || segment === "Thumbs.db") continue;
+    segmentCounts.set(segment, (segmentCounts.get(segment) ?? 0) + 1);
+  }
+
+  if (segmentCounts.size === 0) return null;
+
+  // Find the most common segment
+  let maxSegment = "";
+  let maxCount = 0;
+  for (const [seg, count] of segmentCounts) {
+    if (count > maxCount) {
+      maxSegment = seg;
+      maxCount = count;
+    }
+  }
+
+  // Must appear in >50% of files and be at least 3 chars
+  if (maxCount < paths.length * 0.5 || maxSegment.length < 3) return null;
+
+  return maxSegment;
+}
+
+/**
  * Find the longest common prefix among a list of filenames,
  * trimming trailing separators and partial words.
  */

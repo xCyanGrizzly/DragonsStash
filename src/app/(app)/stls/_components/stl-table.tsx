@@ -49,6 +49,7 @@ import {
   removeFromGroupAction,
   sendAllInGroupAction,
   updateGroupPreviewAction,
+  mergeGroupsAction,
 } from "../actions";
 
 interface StlTableProps {
@@ -101,6 +102,9 @@ export function StlTable({
   // Group preview upload ref
   const previewInputRef = useRef<HTMLInputElement>(null);
   const [uploadGroupId, setUploadGroupId] = useState<string | null>(null);
+
+  // Group merge state
+  const [mergeSourceId, setMergeSourceId] = useState<string | null>(null);
 
   const toggleGroup = useCallback((groupId: string) => {
     setExpandedGroups((prev) => {
@@ -340,6 +344,35 @@ export function StlTable({
     [uploadGroupId, router]
   );
 
+  const handleStartMerge = useCallback((groupId: string) => {
+    setMergeSourceId((prev) => {
+      if (prev === groupId) {
+        toast.info("Merge cancelled");
+        return null;
+      }
+      toast.info("Merge source selected — click the merge-here button on the target group");
+      return groupId;
+    });
+  }, []);
+
+  const handleMergeGroups = useCallback(
+    (targetGroupId: string) => {
+      if (!mergeSourceId) return;
+      const sourceId = mergeSourceId;
+      startTransition(async () => {
+        const result = await mergeGroupsAction(targetGroupId, sourceId);
+        if (result.success) {
+          toast.success("Groups merged successfully");
+          setMergeSourceId(null);
+          router.refresh();
+        } else {
+          toast.error(result.error);
+        }
+      });
+    },
+    [mergeSourceId, router]
+  );
+
   const columns = getPackageColumns({
     onViewFiles: (pkg) => setViewPkg(pkg),
     searchTerm,
@@ -381,6 +414,9 @@ export function StlTable({
     onGroupPreviewUpload: handleGroupPreviewUpload,
     selectedPackages,
     onToggleSelect: toggleSelect,
+    mergeSourceId,
+    onStartMerge: handleStartMerge,
+    onCompleteMerge: handleMergeGroups,
   });
 
   const { table } = useDataTable({ data: tableRows, columns, pageCount });
