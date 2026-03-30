@@ -7,6 +7,9 @@ export const config = {
   logLevel: (process.env.LOG_LEVEL ?? "info") as "debug" | "info" | "warn" | "error",
   telegramApiId: parseInt(process.env.TELEGRAM_API_ID ?? "0", 10),
   telegramApiHash: process.env.TELEGRAM_API_HASH ?? "",
+  /** Maximum file part size for Telegram upload (in MiB). Default 1950 (under 2GB non-Premium limit).
+   *  Set to 3900 for Premium accounts (under 4GB limit). */
+  maxPartSizeMB: parseInt(process.env.MAX_PART_SIZE_MB ?? "1950", 10),
   /** Maximum jitter added to scheduler interval (in minutes) */
   jitterMinutes: 5,
   /** Maximum time span for multipart archive parts (in hours). 0 = no limit. */
