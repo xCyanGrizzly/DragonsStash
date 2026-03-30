@@ -429,10 +429,13 @@ model TelegramChannel {
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
 
+  autoGroupEnabled Boolean     @default(true)
+
   accountMaps     AccountChannelMap[]
   packages        Package[]
   skippedPackages SkippedPackage[]
   packageGroups   PackageGroup[]
+  groupingRules   GroupingRule[]
 
   @@index([type, isActive])
   @@index([category])
@@ -846,4 +849,19 @@ model SystemNotification {
   @@index([isRead, createdAt])
   @@index([type])
   @@map("system_notifications")
+}
+
+model GroupingRule {
+  id              String          @id @default(cuid())
+  sourceChannelId String
+  pattern         String          // Regex or keyword pattern learned from manual grouping
+  signalType      GroupingSource  // Which grouping signal this rule applies to
+  confidence      Float           @default(1.0)
+  createdAt       DateTime        @default(now())
+  createdByGroupId String?        // The manual group that spawned this rule
+
+  sourceChannel   TelegramChannel @relation(fields: [sourceChannelId], references: [id], onDelete: Cascade)
+
+  @@index([sourceChannelId])
+  @@map("grouping_rules")
 }

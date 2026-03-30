@@ -47,7 +47,7 @@ import { readRarContents } from "./archive/rar-reader.js";
 import { read7zContents } from "./archive/sevenz-reader.js";
 import { byteLevelSplit, concatenateFiles } from "./archive/split.js";
 import { uploadToChannel } from "./upload/channel.js";
-import { processAlbumGroups, processTimeWindowGroups, processPatternGroups, processCreatorGroups, processZipPathGroups, processReplyChainGroups, processCaptionGroups, type IndexedPackageRef } from "./grouping.js";
+import { processAlbumGroups, processRuleBasedGroups, processTimeWindowGroups, processPatternGroups, processCreatorGroups, processZipPathGroups, processReplyChainGroups, processCaptionGroups, detectGroupingConflicts, type IndexedPackageRef } from "./grouping.js";
 import { db } from "./db/client.js";
 import type { TelegramAccount, TelegramChannel } from "@prisma/client";
 import type { Client } from "tdl";
@@ -808,23 +808,37 @@ async function processArchiveSets(
       scanResult.photos
     );
 
-    // Time-window grouping for remaining ungrouped packages
-    await processTimeWindowGroups(channel.id, indexedPackageRefs);
+    // Auto-grouping passes (gated by per-channel flag)
+    const channelRecord = await db.telegramChannel.findUnique({
+      where: { id: channel.id },
+      select: { autoGroupEnabled: true },
+    });
 
-    // Pattern-based grouping (date patterns, project slugs)
-    await processPatternGroups(channel.id, indexedPackageRefs);
+    if (channelRecord?.autoGroupEnabled !== false) {
+      // Learned rule-based grouping (from manual overrides)
+      await processRuleBasedGroups(channel.id, indexedPackageRefs);
 
-    // Creator-based grouping (3+ files from same creator)
-    await processCreatorGroups(channel.id, indexedPackageRefs);
+      // Time-window grouping for remaining ungrouped packages
+      await processTimeWindowGroups(channel.id, indexedPackageRefs);
 
-    // ZIP path prefix grouping (shared root folder inside archives)
-    await processZipPathGroups(channel.id, indexedPackageRefs);
+      // Pattern-based grouping (date patterns, project slugs)
+      await processPatternGroups(channel.id, indexedPackageRefs);
 
-    // Reply chain grouping (messages replying to same root)
-    await processReplyChainGroups(channel.id, indexedPackageRefs);
+      // Creator-based grouping (3+ files from same creator)
+      await processCreatorGroups(channel.id, indexedPackageRefs);
 
-    // Caption fuzzy match grouping
-    await processCaptionGroups(channel.id, indexedPackageRefs);
+      // ZIP path prefix grouping (shared root folder inside archives)
+      await processZipPathGroups(channel.id, indexedPackageRefs);
+
+      // Reply chain grouping (messages replying to same root)
+      await processReplyChainGroups(channel.id, indexedPackageRefs);
+
+      // Caption fuzzy match grouping
+      await processCaptionGroups(channel.id, indexedPackageRefs);
+    }
+
+    // Check for potential grouping conflicts
+    await detectGroupingConflicts(channel.id, indexedPackageRefs);
   }
 
   return maxProcessedId;
@@ -1160,6 +1174,34 @@ async function processOneArchiveSet(
         destChannelTelegramId,
         uploadPaths
       );
+    }
+
+    // ── Post-upload integrity check ──
+    // Verify the files on disk still match before we index
+    if (uploadPaths.length > 0 && !existingUpload) {
+      try {
+        const postUploadHash = await hashParts(uploadPaths);
+        if (splitPaths.length > 0) {
+          // Split files — hash should match the split hash (already verified above)
+          // No additional check needed since we verified split hash = original hash
+        } else if (postUploadHash !== contentHash) {
+          accountLog.error(
+            { fileName: archiveName, originalHash: contentHash, postUploadHash },
+            "Hash changed between hashing and upload — possible disk corruption"
+          );
+          await db.systemNotification.create({
+            data: {
+              type: "HASH_MISMATCH",
+              severity: "ERROR",
+              title: `Post-upload hash mismatch: ${archiveName}`,
+              message: `Hash changed between download and upload. Original: ${contentHash.slice(0, 16)}…, post-upload: ${postUploadHash.slice(0, 16)}…`,
+              context: { fileName: archiveName, originalHash: contentHash, postUploadHash, sourceChannelId: channel.id },
+            },
+          });
+        }
+      } catch {
+        // Best-effort — don't fail the ingestion
+      }
     }
 
     // ── Preview thumbnail ──

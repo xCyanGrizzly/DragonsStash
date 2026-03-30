@@ -80,6 +80,69 @@ export async function processAlbumGroups(
 }
 
 /**
+ * Apply learned GroupingRules from manual overrides.
+ * For each rule, find ungrouped packages whose fileName contains the pattern.
+ */
+export async function processRuleBasedGroups(
+  sourceChannelId: string,
+  indexedPackages: IndexedPackageRef[]
+): Promise<void> {
+  const rules = await db.groupingRule.findMany({
+    where: { sourceChannelId },
+    orderBy: { confidence: "desc" },
+  });
+
+  if (rules.length === 0) return;
+
+  const ungrouped = await db.package.findMany({
+    where: {
+      id: { in: indexedPackages.map((p) => p.packageId) },
+      packageGroupId: null,
+    },
+    select: { id: true, fileName: true, creator: true },
+  });
+
+  if (ungrouped.length < 2) return;
+
+  for (const rule of rules) {
+    const matches = ungrouped.filter((pkg) => {
+      const lower = rule.pattern.toLowerCase();
+      return pkg.fileName.toLowerCase().includes(lower) ||
+        (pkg.creator && pkg.creator.toLowerCase().includes(lower));
+    });
+
+    if (matches.length < 2) continue;
+
+    // Check if any are already grouped (by a previous rule in this loop)
+    const stillUngrouped = await db.package.findMany({
+      where: {
+        id: { in: matches.map((m) => m.id) },
+        packageGroupId: null,
+      },
+      select: { id: true },
+    });
+
+    if (stillUngrouped.length < 2) continue;
+
+    try {
+      const groupId = await createAutoGroup({
+        sourceChannelId,
+        name: rule.pattern,
+        packageIds: stillUngrouped.map((m) => m.id),
+        groupingSource: "MANUAL",
+      });
+
+      log.info(
+        { groupId, ruleId: rule.id, pattern: rule.pattern, memberCount: stillUngrouped.length },
+        "Applied learned grouping rule"
+      );
+    } catch (err) {
+      log.warn({ err, ruleId: rule.id }, "Failed to apply grouping rule");
+    }
+  }
+}
+
+/**
  * After album grouping, cluster remaining ungrouped packages from the same channel
  * that were posted within a configurable time window.
  * Only groups packages that were just indexed in this scan cycle (the `indexedPackages` list).
@@ -523,6 +586,64 @@ function extractRootFolder(paths: string[]): string | null {
   if (maxCount < paths.length * 0.5 || maxSegment.length < 3) return null;
 
   return maxSegment;
+}
+
+/**
+ * Detect packages that could have been grouped differently.
+ * Checks if any grouped package's filename matches a GroupingRule
+ * that would place it in a different group.
+ */
+export async function detectGroupingConflicts(
+  sourceChannelId: string,
+  indexedPackages: IndexedPackageRef[]
+): Promise<void> {
+  const rules = await db.groupingRule.findMany({
+    where: { sourceChannelId },
+  });
+  if (rules.length === 0) return;
+
+  const grouped = await db.package.findMany({
+    where: {
+      id: { in: indexedPackages.map((p) => p.packageId) },
+      packageGroupId: { not: null },
+    },
+    select: {
+      id: true,
+      fileName: true,
+      packageGroupId: true,
+      packageGroup: { select: { name: true, groupingSource: true } },
+    },
+  });
+
+  for (const pkg of grouped) {
+    for (const rule of rules) {
+      if (pkg.fileName.toLowerCase().includes(rule.pattern.toLowerCase())) {
+        // Check if the rule's source group is different from current group
+        if (rule.createdByGroupId && rule.createdByGroupId !== pkg.packageGroupId) {
+          try {
+            await db.systemNotification.create({
+              data: {
+                type: "GROUPING_CONFLICT",
+                severity: "INFO",
+                title: `Potential grouping conflict: ${pkg.fileName}`,
+                message: `Grouped by ${pkg.packageGroup?.groupingSource ?? "unknown"} into "${pkg.packageGroup?.name}", but also matches rule "${rule.pattern}" from a different manual group`,
+                context: {
+                  packageId: pkg.id,
+                  fileName: pkg.fileName,
+                  currentGroupId: pkg.packageGroupId,
+                  matchedRuleId: rule.id,
+                  matchedPattern: rule.pattern,
+                },
+              },
+            });
+          } catch {
+            // Best-effort
+          }
+          break; // One notification per package
+        }
+      }
+    }
+  }
 }
 
 /**

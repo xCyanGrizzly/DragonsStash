@@ -617,7 +617,7 @@ export async function createAutoGroup(input: {
   sourceChannelId: string;
   name: string;
   packageIds: string[];
-  groupingSource: "AUTO_TIME" | "AUTO_PATTERN" | "AUTO_ZIP" | "AUTO_CAPTION" | "AUTO_REPLY";
+  groupingSource: "ALBUM" | "MANUAL" | "AUTO_TIME" | "AUTO_PATTERN" | "AUTO_ZIP" | "AUTO_CAPTION" | "AUTO_REPLY";
 }): Promise<string> {
   const group = await db.packageGroup.create({
     data: {

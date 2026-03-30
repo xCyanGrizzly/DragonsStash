@@ -10,6 +10,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { toast } from "sonner";
 
 interface Notification {
   id: string;
@@ -93,6 +94,22 @@ export function NotificationBell() {
     }
   }
 
+  async function handleRepair(notificationId: string) {
+    try {
+      const res = await fetch("/api/notifications/repair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notificationId }),
+      });
+      if (res.ok) {
+        toast.success("Repair scheduled — package will be re-processed on next cycle");
+        fetchNotifications();
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
   function formatTime(iso: string): string {
     const d = new Date(iso);
     const now = new Date();
@@ -147,12 +164,19 @@ export function NotificationBell() {
                 const Icon = severityIcon[n.severity] ?? Info;
                 const color = severityColor[n.severity] ?? "text-muted-foreground";
                 return (
-                  <button
+                  <div
                     key={n.id}
                     className={`flex w-full gap-3 px-4 py-3 text-left hover:bg-muted/50 transition-colors ${
                       !n.isRead ? "bg-muted/20" : ""
                     }`}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => !n.isRead && handleMarkRead(n.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        if (!n.isRead) handleMarkRead(n.id);
+                      }
+                    }}
                   >
                     <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${color}`} />
                     <div className="flex-1 min-w-0">
@@ -170,8 +194,21 @@ export function NotificationBell() {
                       <p className="text-[10px] text-muted-foreground mt-1">
                         {formatTime(n.createdAt)}
                       </p>
+                      {(n.type === "MISSING_PART" || n.type === "HASH_MISMATCH") && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 px-2 text-xs mt-1"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRepair(n.id);
+                          }}
+                        >
+                          Repair
+                        </Button>
+                      )}
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>

@@ -53,7 +53,52 @@ export async function createTelegramLink(
 // ── Package search ──
 
 export async function searchPackages(query: string, limit = 10) {
-  const packages = await db.package.findMany({
+  // Try full-text search first
+  if (query.length >= 3) {
+    const tsQuery = query
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.length >= 2)
+      .map((w) => w.replace(/[^a-zA-Z0-9]/g, ""))
+      .filter(Boolean)
+      .join(" & ");
+
+    if (tsQuery) {
+      try {
+        const ftsResults = await db.$queryRawUnsafe<{ id: string }[]>(
+          `SELECT id FROM packages
+           WHERE "searchVector" @@ to_tsquery('english', $1)
+           ORDER BY ts_rank("searchVector", to_tsquery('english', $1)) DESC
+           LIMIT $2`,
+          tsQuery,
+          limit
+        );
+
+        if (ftsResults.length > 0) {
+          return db.package.findMany({
+            where: { id: { in: ftsResults.map((r) => r.id) } },
+            orderBy: { indexedAt: "desc" },
+            select: {
+              id: true,
+              fileName: true,
+              fileSize: true,
+              archiveType: true,
+              fileCount: true,
+              creator: true,
+              indexedAt: true,
+              destChannelId: true,
+              destMessageId: true,
+            },
+          });
+        }
+      } catch {
+        // FTS failed — fall back to ILIKE
+      }
+    }
+  }
+
+  // Fallback: ILIKE search
+  return db.package.findMany({
     where: {
       OR: [
         { fileName: { contains: query, mode: "insensitive" } },
@@ -74,7 +119,44 @@ export async function searchPackages(query: string, limit = 10) {
       destMessageId: true,
     },
   });
-  return packages;
+}
+
+// ── Group queries ──
+
+export async function getGroupById(groupId: string) {
+  return db.packageGroup.findUnique({
+    where: { id: groupId },
+    include: {
+      packages: {
+        orderBy: { indexedAt: "desc" },
+        select: {
+          id: true,
+          fileName: true,
+          fileSize: true,
+          archiveType: true,
+          fileCount: true,
+          creator: true,
+          destChannelId: true,
+          destMessageId: true,
+        },
+      },
+    },
+  });
+}
+
+export async function searchGroups(query: string, limit = 5) {
+  return db.packageGroup.findMany({
+    where: {
+      name: { contains: query, mode: "insensitive" },
+    },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    select: {
+      id: true,
+      name: true,
+      _count: { select: { packages: true } },
+    },
+  });
 }
 
 export async function getLatestPackages(limit = 5) {

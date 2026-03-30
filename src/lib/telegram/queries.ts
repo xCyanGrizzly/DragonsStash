@@ -340,6 +340,30 @@ export async function listPackageFiles(options: {
   };
 }
 
+async function fullTextSearchPackageIds(query: string, limit: number): Promise<string[]> {
+  // Convert user query to tsquery — handle multi-word by joining with &
+  const tsQuery = query
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length >= 2)
+    .map((w) => w.replace(/[^a-zA-Z0-9]/g, ""))
+    .filter(Boolean)
+    .join(" & ");
+
+  if (!tsQuery) return [];
+
+  const results = await prisma.$queryRawUnsafe<{ id: string }[]>(
+    `SELECT id FROM packages
+     WHERE "searchVector" @@ to_tsquery('english', $1)
+     ORDER BY ts_rank("searchVector", to_tsquery('english', $1)) DESC
+     LIMIT $2`,
+    tsQuery,
+    limit
+  );
+
+  return results.map((r) => r.id);
+}
+
 export async function searchPackages(options: {
   query: string;
   page: number;
@@ -366,14 +390,26 @@ export async function searchPackages(options: {
     );
     const fileMatchedIds = fileMatches.map((f) => f.packageId);
 
+    // Try full-text search first (better ranking, handles word stemming)
+    let ftsPackageNameIds: string[] = [];
+    if (options.searchIn === "both" && q.length >= 3) {
+      try {
+        ftsPackageNameIds = await fullTextSearchPackageIds(q, 200);
+      } catch {
+        // FTS failed — fall back to ILIKE below
+      }
+    }
+
     const packageNameIds =
       options.searchIn === "both"
-        ? (
-            await prisma.package.findMany({
-              where: { fileName: { contains: q, mode: "insensitive" } },
-              select: { id: true },
-            })
-          ).map((p) => p.id)
+        ? ftsPackageNameIds.length > 0
+          ? ftsPackageNameIds
+          : (
+              await prisma.package.findMany({
+                where: { fileName: { contains: q, mode: "insensitive" } },
+                select: { id: true },
+              })
+            ).map((p) => p.id)
         : [];
 
     // Also match by group name
@@ -695,6 +731,53 @@ export async function createManualGroup(name: string, packageIds: string[]) {
     where: { id: { in: packageIds } },
     data: { packageGroupId: group.id },
   });
+
+  // Learn a grouping rule from the manual override
+  try {
+    const linkedPkgs = await prisma.package.findMany({
+      where: { id: { in: packageIds } },
+      select: { fileName: true, creator: true },
+    });
+
+    // Extract the common filename pattern
+    const fileNames = linkedPkgs.map((p) => p.fileName);
+    let pattern = "";
+    if (fileNames.length > 1) {
+      // Find longest common prefix
+      let prefix = fileNames[0];
+      for (let i = 1; i < fileNames.length; i++) {
+        while (!fileNames[i].startsWith(prefix)) {
+          prefix = prefix.slice(0, -1);
+          if (!prefix) break;
+        }
+      }
+      const trimmed = prefix.replace(/[\s\-_.(]+$/, "");
+      if (trimmed.length >= 4) {
+        pattern = trimmed;
+      }
+    }
+
+    // Fall back to shared creator
+    if (!pattern) {
+      const creators = [...new Set(linkedPkgs.map((p) => p.creator).filter(Boolean))];
+      if (creators.length === 1 && creators[0]) {
+        pattern = creators[0];
+      }
+    }
+
+    if (pattern) {
+      await prisma.groupingRule.create({
+        data: {
+          sourceChannelId: firstPkg.sourceChannelId,
+          pattern,
+          signalType: "MANUAL",
+          createdByGroupId: group.id,
+        },
+      });
+    }
+  } catch {
+    // Best-effort — don't fail the group creation if rule learning fails
+  }
 
   // Clean up empty groups left behind
   await prisma.packageGroup.deleteMany({

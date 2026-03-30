@@ -10,7 +10,10 @@ import {
   getSubscriptions,
   addSubscription,
   removeSubscription,
+  getGroupById,
+  searchGroups,
 } from "./db/queries.js";
+import { db } from "./db/client.js";
 import { sendTextMessage, sendPhotoMessage } from "./tdlib/client.js";
 
 const log = childLogger("commands");
@@ -78,6 +81,12 @@ export async function handleMessage(msg: IncomingMessage): Promise<void> {
       case "/status":
         await handleStatus(chatId, userId);
         break;
+      case "/group":
+        await handleGroup(chatId, args);
+        break;
+      case "/sendgroup":
+        await handleSendGroup(chatId, userId, args);
+        break;
       default:
         await sendTextMessage(
           chatId,
@@ -117,6 +126,8 @@ async function handleStart(
     `/search &lt;query&gt; — Search packages`,
     `/latest [n] — Show latest packages`,
     `/package &lt;id&gt; — Package details`,
+    `/group &lt;id or name&gt; — View group info and package list`,
+    `/sendgroup &lt;id&gt; — Send all packages in a group to yourself`,
     `/link &lt;code&gt; — Link your Telegram to your web account`,
     `/subscribe &lt;keyword&gt; — Get notified for new packages`,
     `/subscriptions — View your subscriptions`,
@@ -136,6 +147,8 @@ async function handleHelp(chatId: bigint): Promise<void> {
     `/search &lt;query&gt; — Search by filename or creator`,
     `/latest [n] — Show n most recent packages (default: 5)`,
     `/package &lt;id&gt; — View package details and file list`,
+    `/group &lt;id or name&gt; — View group info and package list`,
+    `/sendgroup &lt;id&gt; — Send all packages in a group to yourself`,
     ``,
     `🔗 <b>Account Linking</b>`,
     `/link &lt;code&gt; — Link Telegram to your web account`,
@@ -430,6 +443,168 @@ async function handleStatus(chatId: bigint, userId: bigint): Promise<void> {
       "textParseModeHTML"
     );
   }
+}
+
+async function handleGroup(chatId: bigint, query: string): Promise<void> {
+  if (!query) {
+    await sendTextMessage(
+      chatId,
+      "Usage: /group &lt;id or name&gt;\n\nProvide a group ID (starts with 'c') or a name to search.",
+      "textParseModeHTML"
+    );
+    return;
+  }
+
+  const trimmed = query.trim();
+
+  // If it looks like a cuid (starts with 'c', ~25 chars), look up by ID directly
+  if (/^c[a-z0-9]{20,}$/i.test(trimmed)) {
+    const group = await getGroupById(trimmed);
+    if (!group) {
+      await sendTextMessage(chatId, "Group not found.", "textParseModeHTML");
+      return;
+    }
+
+    const packageLines = group.packages.slice(0, 20).map((pkg, i) => {
+      const size = formatSize(pkg.fileSize);
+      return `  ${i + 1}. <b>${escapeHtml(pkg.fileName)}</b> (${size}, ${pkg.fileCount} files) — <code>${pkg.id}</code>`;
+    });
+    const more = group.packages.length > 20
+      ? `\n  ... and ${group.packages.length - 20} more`
+      : "";
+
+    const response = [
+      `📦 <b>Group: ${escapeHtml(group.name)}</b>`,
+      ``,
+      `Packages: ${group.packages.length}`,
+      `ID: <code>${group.id}</code>`,
+      ``,
+      `<b>Contents:</b>`,
+      ...packageLines,
+      more,
+      ``,
+      `Use /sendgroup ${group.id} to receive all packages.`,
+    ]
+      .filter((l) => l !== "")
+      .join("\n");
+
+    await sendTextMessage(chatId, response, "textParseModeHTML");
+    return;
+  }
+
+  // Otherwise search by name
+  const groups = await searchGroups(trimmed, 5);
+
+  if (groups.length === 0) {
+    await sendTextMessage(
+      chatId,
+      `No groups found matching "<b>${escapeHtml(trimmed)}</b>".`,
+      "textParseModeHTML"
+    );
+    return;
+  }
+
+  const lines = groups.map(
+    (g, i) =>
+      `${i + 1}. <b>${escapeHtml(g.name)}</b> — ${g._count.packages} package(s)\n   ID: <code>${g.id}</code>`
+  );
+
+  const response = [
+    `🔍 <b>Groups matching "${escapeHtml(trimmed)}":</b>`,
+    ``,
+    ...lines,
+    ``,
+    `Use /group &lt;id&gt; for full details.`,
+  ].join("\n");
+
+  await sendTextMessage(chatId, response, "textParseModeHTML");
+}
+
+async function handleSendGroup(
+  chatId: bigint,
+  userId: bigint,
+  args: string
+): Promise<void> {
+  if (!args) {
+    await sendTextMessage(
+      chatId,
+      "Usage: /sendgroup &lt;group-id&gt;",
+      "textParseModeHTML"
+    );
+    return;
+  }
+
+  const groupId = args.trim();
+  const group = await getGroupById(groupId);
+
+  if (!group) {
+    await sendTextMessage(chatId, "Group not found.", "textParseModeHTML");
+    return;
+  }
+
+  // Require account linking
+  const link = await findLinkByTelegramUserId(userId);
+  if (!link) {
+    await sendTextMessage(
+      chatId,
+      "You must link your account before receiving packages.\nUse /link &lt;code&gt; to connect.",
+      "textParseModeHTML"
+    );
+    return;
+  }
+
+  // Only send packages that have been uploaded to the destination channel
+  const sendable = group.packages.filter(
+    (pkg) => pkg.destChannelId && pkg.destMessageId
+  );
+
+  if (sendable.length === 0) {
+    await sendTextMessage(
+      chatId,
+      `No packages in group "<b>${escapeHtml(group.name)}</b>" are ready to send yet.`,
+      "textParseModeHTML"
+    );
+    return;
+  }
+
+  // Create a BotSendRequest for each sendable package
+  const requests = await Promise.all(
+    sendable.map((pkg) =>
+      db.botSendRequest.create({
+        data: {
+          packageId: pkg.id,
+          telegramLinkId: link.id,
+          requestedByUserId: link.userId,
+          status: "PENDING",
+        },
+      })
+    )
+  );
+
+  // Fire pg_notify for each request so the send listener picks them up
+  for (const req of requests) {
+    await db.$queryRawUnsafe(
+      `SELECT pg_notify('bot_send', $1)`,
+      req.id
+    ).catch(() => {
+      // Best-effort — the bot also processes PENDING requests on its send queue
+    });
+  }
+
+  await sendTextMessage(
+    chatId,
+    [
+      `✅ <b>Queued ${requests.length} package(s) from "${escapeHtml(group.name)}"</b>`,
+      ``,
+      `You'll receive each archive shortly. Use /package &lt;id&gt; to check individual packages.`,
+    ].join("\n"),
+    "textParseModeHTML"
+  );
+
+  log.info(
+    { groupId, packageCount: requests.length, userId: userId.toString() },
+    "Group send queued"
+  );
 }
 
 function escapeHtml(text: string): string {
