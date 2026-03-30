@@ -26,5 +26,5 @@ CREATE TABLE "manual_upload_files" (
 CREATE INDEX "manual_uploads_status_idx" ON "manual_uploads"("status");
 CREATE INDEX "manual_upload_files_uploadId_idx" ON "manual_upload_files"("uploadId");
 
-ALTER TABLE "manual_uploads" ADD CONSTRAINT "manual_uploads_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "manual_uploads" ADD CONSTRAINT "manual_uploads_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE "manual_upload_files" ADD CONSTRAINT "manual_upload_files_uploadId_fkey" FOREIGN KEY ("uploadId") REFERENCES "manual_uploads"("id") ON DELETE CASCADE ON UPDATE CASCADE;
