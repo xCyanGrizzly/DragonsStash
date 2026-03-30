@@ -608,3 +608,25 @@ export async function createTimeWindowGroup(input: {
 
   return group.id;
 }
+
+export async function createAutoGroup(input: {
+  sourceChannelId: string;
+  name: string;
+  packageIds: string[];
+  groupingSource: "AUTO_TIME" | "AUTO_PATTERN" | "AUTO_ZIP" | "AUTO_CAPTION";
+}): Promise<string> {
+  const group = await db.packageGroup.create({
+    data: {
+      sourceChannelId: input.sourceChannelId,
+      name: input.name,
+      groupingSource: input.groupingSource,
+    },
+  });
+
+  await db.package.updateMany({
+    where: { id: { in: input.packageIds } },
+    data: { packageGroupId: group.id },
+  });
+
+  return group.id;
+}

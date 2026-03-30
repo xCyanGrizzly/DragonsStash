@@ -47,7 +47,7 @@ import { readRarContents } from "./archive/rar-reader.js";
 import { read7zContents } from "./archive/sevenz-reader.js";
 import { byteLevelSplit, concatenateFiles } from "./archive/split.js";
 import { uploadToChannel } from "./upload/channel.js";
-import { processAlbumGroups, processTimeWindowGroups, type IndexedPackageRef } from "./grouping.js";
+import { processAlbumGroups, processTimeWindowGroups, processPatternGroups, processCreatorGroups, type IndexedPackageRef } from "./grouping.js";
 import { db } from "./db/client.js";
 import type { TelegramAccount, TelegramChannel } from "@prisma/client";
 import type { Client } from "tdl";
@@ -777,6 +777,22 @@ async function processArchiveSets(
           partCount: archiveSet.parts.length,
           accountId: ctx.accountId,
         });
+        // Also create a persistent notification
+        await db.systemNotification.create({
+          data: {
+            type: inferSkipReason(errMsg) === "UPLOAD_FAILED" ? "UPLOAD_FAILED" : "DOWNLOAD_FAILED",
+            severity: "WARNING",
+            title: `Failed to process ${archiveSet.parts[0].fileName}`,
+            message: errMsg,
+            context: {
+              fileName: archiveSet.parts[0].fileName,
+              sourceChannelId: ctx.channel.id,
+              sourceMessageId: Number(archiveSet.parts[0].id),
+              channelTitle: ctx.channelTitle,
+              reason: inferSkipReason(errMsg),
+            },
+          },
+        });
       } catch {
         // Best-effort — don't fail the run if skip recording fails
       }
@@ -794,6 +810,12 @@ async function processArchiveSets(
 
     // Time-window grouping for remaining ungrouped packages
     await processTimeWindowGroups(channel.id, indexedPackageRefs);
+
+    // Pattern-based grouping (date patterns, project slugs)
+    await processPatternGroups(channel.id, indexedPackageRefs);
+
+    // Creator-based grouping (3+ files from same creator)
+    await processCreatorGroups(channel.id, indexedPackageRefs);
   }
 
   return maxProcessedId;

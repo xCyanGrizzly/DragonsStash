@@ -1,7 +1,7 @@
 import type { Client } from "tdl";
 import type { TelegramPhoto } from "./preview/match.js";
 import { downloadPhotoThumbnail } from "./tdlib/download.js";
-import { createOrFindPackageGroup, linkPackagesToGroup, createTimeWindowGroup } from "./db/queries.js";
+import { createOrFindPackageGroup, linkPackagesToGroup, createTimeWindowGroup, createAutoGroup } from "./db/queries.js";
 import { config } from "./util/config.js";
 import { childLogger } from "./util/logger.js";
 import { db } from "./db/client.js";
@@ -146,6 +146,144 @@ export async function processTimeWindowGroups(
       );
     } catch (err) {
       log.warn({ err, clusterSize: cluster.length }, "Failed to create time-window group");
+    }
+  }
+}
+
+/**
+ * Group ungrouped packages that share a date pattern (YYYY-MM, YYYY_MM, etc.)
+ * or project slug extracted from their filenames.
+ */
+export async function processPatternGroups(
+  sourceChannelId: string,
+  indexedPackages: IndexedPackageRef[]
+): Promise<void> {
+  const ungrouped = await db.package.findMany({
+    where: {
+      id: { in: indexedPackages.map((p) => p.packageId) },
+      packageGroupId: null,
+    },
+    select: { id: true, fileName: true },
+  });
+
+  if (ungrouped.length < 2) return;
+
+  // Group by extracted pattern
+  const patternMap = new Map<string, typeof ungrouped>();
+  for (const pkg of ungrouped) {
+    const pattern = extractPattern(pkg.fileName);
+    if (!pattern) continue;
+    const group = patternMap.get(pattern) ?? [];
+    group.push(pkg);
+    patternMap.set(pattern, group);
+  }
+
+  for (const [pattern, members] of patternMap) {
+    if (members.length < 2) continue;
+
+    try {
+      const groupId = await createAutoGroup({
+        sourceChannelId,
+        name: pattern,
+        packageIds: members.map((m) => m.id),
+        groupingSource: "AUTO_PATTERN",
+      });
+
+      log.info(
+        { groupId, pattern, memberCount: members.length },
+        "Created pattern-based group"
+      );
+    } catch (err) {
+      log.warn({ err, pattern }, "Failed to create pattern group");
+    }
+  }
+}
+
+/**
+ * Extract a grouping pattern from a filename.
+ * Matches: YYYY-MM, YYYY_MM, "Month Year", or a project prefix before common separators.
+ * Returns null if no usable pattern found.
+ */
+function extractPattern(fileName: string): string | null {
+  // Strip extension for matching
+  const name = fileName.replace(/\.(zip|rar|7z|pdf|stl)(\.\d+)?$/i, "");
+
+  // Match YYYY-MM or YYYY_MM patterns
+  const dateMatch = name.match(/(\d{4})[\-_](\d{2})/);
+  if (dateMatch) {
+    return `${dateMatch[1]}-${dateMatch[2]}`;
+  }
+
+  // Match "Month Year" patterns (e.g., "January 2025", "Jan 2025")
+  const months = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
+  const monthYearMatch = name.match(new RegExp(`(${months})\\s*(\\d{4})`, "i"));
+  if (monthYearMatch) {
+    const monthStr = monthYearMatch[1].toLowerCase().slice(0, 3);
+    const monthNum = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"].indexOf(monthStr) + 1;
+    if (monthNum > 0) {
+      return `${monthYearMatch[2]}-${String(monthNum).padStart(2, "0")}`;
+    }
+  }
+
+  // Match project prefix: text before " - ", " – ", or "(". Must be at least 5 chars.
+  const prefixMatch = name.match(/^(.{5,}?)(?:\s*[\-–]\s|\s*\()/);
+  if (prefixMatch) {
+    return prefixMatch[1].trim();
+  }
+
+  return null;
+}
+
+/**
+ * Group ungrouped packages that share the same creator within a channel.
+ * Only groups if there are 3+ packages from the same creator (to avoid
+ * over-grouping when a creator only has a couple files).
+ */
+export async function processCreatorGroups(
+  sourceChannelId: string,
+  indexedPackages: IndexedPackageRef[]
+): Promise<void> {
+  const ungrouped = await db.package.findMany({
+    where: {
+      id: { in: indexedPackages.map((p) => p.packageId) },
+      packageGroupId: null,
+      creator: { not: null },
+    },
+    select: { id: true, fileName: true, creator: true },
+  });
+
+  if (ungrouped.length < 3) return;
+
+  // Group by creator
+  const creatorMap = new Map<string, typeof ungrouped>();
+  for (const pkg of ungrouped) {
+    if (!pkg.creator) continue;
+    const key = pkg.creator.toLowerCase();
+    const group = creatorMap.get(key) ?? [];
+    group.push(pkg);
+    creatorMap.set(key, group);
+  }
+
+  for (const [, members] of creatorMap) {
+    if (members.length < 3) continue;
+
+    const creatorName = members[0].creator!;
+    const name = findCommonPrefix(members.map((m) => m.fileName)) || creatorName;
+
+    try {
+      const groupId = await createAutoGroup({
+        sourceChannelId,
+        name,
+        packageIds: members.map((m) => m.id),
+        groupingSource: "AUTO_PATTERN",
+      });
+
+      log.info(
+        { groupId, creator: creatorName, memberCount: members.length },
+        "Created creator-based group"
+      );
+    } catch (err) {
+      log.warn({ err, creator: creatorName }, "Failed to create creator group");
     }
   }
 }
