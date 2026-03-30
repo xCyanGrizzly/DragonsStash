@@ -47,7 +47,8 @@ import { readRarContents } from "./archive/rar-reader.js";
 import { read7zContents } from "./archive/sevenz-reader.js";
 import { byteLevelSplit, concatenateFiles } from "./archive/split.js";
 import { uploadToChannel } from "./upload/channel.js";
-import { processAlbumGroups, type IndexedPackageRef } from "./grouping.js";
+import { processAlbumGroups, processTimeWindowGroups, type IndexedPackageRef } from "./grouping.js";
+import { db } from "./db/client.js";
 import type { TelegramAccount, TelegramChannel } from "@prisma/client";
 import type { Client } from "tdl";
 
@@ -790,6 +791,9 @@ async function processArchiveSets(
       indexedPackageRefs,
       scanResult.photos
     );
+
+    // Time-window grouping for remaining ungrouped packages
+    await processTimeWindowGroups(channel.id, indexedPackageRefs);
   }
 
   return maxProcessedId;
@@ -1051,6 +1055,43 @@ async function processOneArchiveSet(
       });
       splitPaths = await byteLevelSplit(tempPaths[0]);
       uploadPaths = splitPaths;
+    }
+
+    // ── Hash verification after split ──
+    // If we split/repacked, verify the split parts hash matches the original
+    if (splitPaths.length > 0) {
+      const splitHash = await hashParts(splitPaths);
+      if (splitHash !== contentHash) {
+        accountLog.error(
+          { fileName: archiveName, originalHash: contentHash, splitHash, parts: splitPaths.length },
+          "Hash mismatch after split — file may be corrupted"
+        );
+        // Record notification for visibility
+        try {
+          await db.systemNotification.create({
+            data: {
+              type: "HASH_MISMATCH",
+              severity: "ERROR",
+              title: `Hash mismatch after splitting ${archiveName}`,
+              message: `Expected ${contentHash.slice(0, 16)}… but got ${splitHash.slice(0, 16)}… after splitting into ${splitPaths.length} parts`,
+              context: {
+                fileName: archiveName,
+                originalHash: contentHash,
+                splitHash,
+                partCount: splitPaths.length,
+                sourceChannelId: channel.id,
+              },
+            },
+          });
+        } catch {
+          // Best-effort notification
+        }
+        throw new Error(`Hash mismatch after split for ${archiveName}: expected ${contentHash}, got ${splitHash}`);
+      }
+      accountLog.debug(
+        { fileName: archiveName, hash: contentHash.slice(0, 16), parts: splitPaths.length },
+        "Split hash verified — matches original"
+      );
     }
 
     // ── Uploading ──

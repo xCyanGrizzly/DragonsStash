@@ -587,3 +587,24 @@ export async function linkPackagesToGroup(
     data: { packageGroupId: groupId },
   });
 }
+
+export async function createTimeWindowGroup(input: {
+  sourceChannelId: string;
+  name: string;
+  packageIds: string[];
+}): Promise<string> {
+  const group = await db.packageGroup.create({
+    data: {
+      sourceChannelId: input.sourceChannelId,
+      name: input.name,
+      groupingSource: "AUTO_TIME",
+    },
+  });
+
+  await db.package.updateMany({
+    where: { id: { in: input.packageIds } },
+    data: { packageGroupId: group.id },
+  });
+
+  return group.id;
+}

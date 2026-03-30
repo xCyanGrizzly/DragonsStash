@@ -10,6 +10,8 @@ export const config = {
   /** Maximum file part size for Telegram upload (in MiB). Default 1950 (under 2GB non-Premium limit).
    *  Set to 3900 for Premium accounts (under 4GB limit). */
   maxPartSizeMB: parseInt(process.env.MAX_PART_SIZE_MB ?? "1950", 10),
+  /** Time window for auto-grouping ungrouped packages from the same channel (minutes). 0 = disabled. */
+  autoGroupTimeWindowMinutes: parseInt(process.env.AUTO_GROUP_TIME_WINDOW_MINUTES ?? "5", 10),
   /** Maximum jitter added to scheduler interval (in minutes) */
   jitterMinutes: 5,
   /** Maximum time span for multipart archive parts (in hours). 0 = no limit. */

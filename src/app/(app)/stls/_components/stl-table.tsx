@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import type { DisplayItem, IngestionAccountStatus } from "@/lib/telegram/types";
+import type { DisplayItem, IngestionAccountStatus, PackageListItem } from "@/lib/telegram/types";
 import type { SkippedRow } from "./skipped-columns";
 import {
   updatePackageCreator,
@@ -61,6 +61,9 @@ interface StlTableProps {
   skippedData: SkippedRow[];
   skippedPageCount: number;
   skippedTotalCount: number;
+  ungroupedData: PackageListItem[];
+  ungroupedPageCount: number;
+  ungroupedTotalCount: number;
 }
 
 export function StlTable({
@@ -73,6 +76,9 @@ export function StlTable({
   skippedData,
   skippedPageCount,
   skippedTotalCount,
+  ungroupedData,
+  ungroupedPageCount,
+  ungroupedTotalCount,
 }: StlTableProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -379,6 +385,23 @@ export function StlTable({
 
   const { table } = useDataTable({ data: tableRows, columns, pageCount });
 
+  const ungroupedRows: StlTableRow[] = useMemo(
+    () =>
+      ungroupedData.map((pkg) => ({
+        ...pkg,
+        _rowType: "package" as const,
+        _groupId: null,
+        _isGroupMember: false,
+      })),
+    [ungroupedData]
+  );
+
+  const { table: ungroupedTable } = useDataTable({
+    data: ungroupedRows,
+    columns,
+    pageCount: ungroupedPageCount,
+  });
+
   const activeTag = searchParams.get("tag") ?? "";
 
   return (
@@ -398,6 +421,14 @@ export function StlTable({
             {skippedTotalCount > 0 && (
               <Badge variant="secondary" className="text-[10px] ml-1">
                 {skippedTotalCount}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="ungrouped" className="gap-1.5">
+            Ungrouped
+            {ungroupedTotalCount > 0 && (
+              <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                {ungroupedTotalCount}
               </Badge>
             )}
           </TabsTrigger>
@@ -471,6 +502,11 @@ export function StlTable({
             pageCount={skippedPageCount}
             totalCount={skippedTotalCount}
           />
+        </TabsContent>
+
+        <TabsContent value="ungrouped" className="space-y-4">
+          <DataTable table={ungroupedTable} emptyMessage="All packages are grouped!" />
+          <DataTablePagination table={ungroupedTable} totalCount={ungroupedTotalCount} />
         </TabsContent>
       </Tabs>
 

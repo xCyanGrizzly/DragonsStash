@@ -1,7 +1,8 @@
 import type { Client } from "tdl";
 import type { TelegramPhoto } from "./preview/match.js";
 import { downloadPhotoThumbnail } from "./tdlib/download.js";
-import { createOrFindPackageGroup, linkPackagesToGroup } from "./db/queries.js";
+import { createOrFindPackageGroup, linkPackagesToGroup, createTimeWindowGroup } from "./db/queries.js";
+import { config } from "./util/config.js";
 import { childLogger } from "./util/logger.js";
 import { db } from "./db/client.js";
 
@@ -76,4 +77,96 @@ export async function processAlbumGroups(
       log.warn({ albumId, err }, "Failed to create album group — packages still indexed individually");
     }
   }
+}
+
+/**
+ * After album grouping, cluster remaining ungrouped packages from the same channel
+ * that were posted within a configurable time window.
+ * Only groups packages that were just indexed in this scan cycle (the `indexedPackages` list).
+ */
+export async function processTimeWindowGroups(
+  sourceChannelId: string,
+  indexedPackages: IndexedPackageRef[]
+): Promise<void> {
+  if (config.autoGroupTimeWindowMinutes <= 0) return;
+
+  // Find which of the just-indexed packages are still ungrouped
+  const ungrouped = await db.package.findMany({
+    where: {
+      id: { in: indexedPackages.map((p) => p.packageId) },
+      packageGroupId: null,
+    },
+    orderBy: { sourceMessageId: "asc" },
+    select: {
+      id: true,
+      fileName: true,
+      sourceMessageId: true,
+      indexedAt: true,
+    },
+  });
+
+  if (ungrouped.length < 2) return;
+
+  const windowMs = config.autoGroupTimeWindowMinutes * 60 * 1000;
+
+  // Cluster by time proximity: walk through sorted list, start new cluster when gap > window
+  const clusters: typeof ungrouped[] = [];
+  let current: typeof ungrouped = [ungrouped[0]];
+
+  for (let i = 1; i < ungrouped.length; i++) {
+    const prev = current[current.length - 1];
+    const gap = Math.abs(ungrouped[i].indexedAt.getTime() - prev.indexedAt.getTime());
+
+    if (gap <= windowMs) {
+      current.push(ungrouped[i]);
+    } else {
+      clusters.push(current);
+      current = [ungrouped[i]];
+    }
+  }
+  clusters.push(current);
+
+  // Create groups for clusters with 2+ packages
+  for (const cluster of clusters) {
+    if (cluster.length < 2) continue;
+
+    // Derive group name from common filename prefix
+    const name = findCommonPrefix(cluster.map((p) => p.fileName)) || cluster[0].fileName;
+
+    try {
+      const groupId = await createTimeWindowGroup({
+        sourceChannelId,
+        name,
+        packageIds: cluster.map((p) => p.id),
+      });
+
+      log.info(
+        { groupId, name, memberCount: cluster.length },
+        "Created time-window group"
+      );
+    } catch (err) {
+      log.warn({ err, clusterSize: cluster.length }, "Failed to create time-window group");
+    }
+  }
+}
+
+/**
+ * Find the longest common prefix among a list of filenames,
+ * trimming trailing separators and partial words.
+ */
+function findCommonPrefix(names: string[]): string {
+  if (names.length === 0) return "";
+  if (names.length === 1) return names[0];
+
+  let prefix = names[0];
+  for (let i = 1; i < names.length; i++) {
+    while (!names[i].startsWith(prefix)) {
+      prefix = prefix.slice(0, -1);
+      if (prefix.length === 0) return "";
+    }
+  }
+
+  // Trim trailing separators and partial words
+  const trimmed = prefix.replace(/[\s\-_.(]+$/, "");
+  return trimmed.length >= 3 ? trimmed : "";
 }

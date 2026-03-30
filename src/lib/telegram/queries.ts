@@ -571,6 +571,72 @@ export async function countSkippedPackages(): Promise<number> {
   return prisma.skippedPackage.count();
 }
 
+export async function listUngroupedPackages(options: {
+  page: number;
+  limit: number;
+}) {
+  const { page, limit } = options;
+  const skip = (page - 1) * limit;
+
+  const where = { packageGroupId: null, destMessageId: { not: null } };
+
+  const [items, total] = await Promise.all([
+    prisma.package.findMany({
+      where,
+      orderBy: { indexedAt: "desc" },
+      skip,
+      take: limit,
+      select: {
+        id: true,
+        fileName: true,
+        fileSize: true,
+        archiveType: true,
+        creator: true,
+        fileCount: true,
+        isMultipart: true,
+        partCount: true,
+        tags: true,
+        indexedAt: true,
+        previewData: true,
+        sourceChannel: { select: { id: true, title: true } },
+      },
+    }),
+    prisma.package.count({ where }),
+  ]);
+
+  return {
+    items: items.map((p) => ({
+      id: p.id,
+      fileName: p.fileName,
+      fileSize: p.fileSize.toString(),
+      contentHash: "",
+      archiveType: p.archiveType,
+      creator: p.creator,
+      fileCount: p.fileCount,
+      isMultipart: p.isMultipart,
+      partCount: p.partCount,
+      tags: p.tags,
+      indexedAt: p.indexedAt.toISOString(),
+      hasPreview: !!p.previewData,
+      sourceChannel: p.sourceChannel,
+      matchedFileCount: 0,
+      matchedByContent: false,
+    })),
+    pagination: {
+      total,
+      totalPages: Math.ceil(total / limit),
+      page,
+      limit,
+    },
+  };
+}
+
+export async function countUngroupedPackages(): Promise<number> {
+  return prisma.package.count({
+    where: { packageGroupId: null, destMessageId: { not: null } },
+  });
+}
+
 export async function getPackageGroup(groupId: string) {
   return prisma.packageGroup.findUnique({
     where: { id: groupId },
