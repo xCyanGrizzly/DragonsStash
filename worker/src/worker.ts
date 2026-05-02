@@ -1042,11 +1042,16 @@ async function processOneArchiveSet(
       return null;
     }
 
+    let entries: { path: string; fileName: string; extension: string | null; compressedSize: bigint; uncompressedSize: bigint; crc32: string | null }[] = [];
+    let creator: string | null = null;
+    const tags: string[] = [];
+    let stub: { id: string } | null = null;
+
+    try {
     // Re-check after acquiring lock: another worker may have finished between
     // the first check above and this point.
     const existsAfterLock = await packageExistsByHash(contentHash);
     if (existsAfterLock) {
-      await releaseHashLock(contentHash);
       counters.zipsDuplicate++;
       accountLog.debug(
         { fileName: archiveName, hash: contentHash.slice(0, 16) },
@@ -1065,7 +1070,6 @@ async function processOneArchiveSet(
       totalFiles: totalSets,
     });
 
-    let entries: { path: string; fileName: string; extension: string | null; compressedSize: bigint; uncompressedSize: bigint; crc32: string | null }[] = [];
     try {
       if (archiveSet.type === "ZIP") {
         entries = await readZipCentralDirectory(tempPaths);
@@ -1167,12 +1171,6 @@ async function processOneArchiveSet(
       );
     }
 
-    // Hoist creator/tags so they're visible after try block for logging
-    let creator: string | null = null;
-    const tags: string[] = [];
-
-    let stub: { id: string } | null = null;
-    try {
       // ── Uploading ──
       // Check if a prior run already uploaded this file (orphaned upload scenario:
       // file reached Telegram but DB write failed or worker crashed before indexing)
