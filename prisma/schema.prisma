@@ -406,6 +406,7 @@ model TelegramAccount {
   isActive    Boolean   @default(true)
   authState   AuthState @default(PENDING)
   authCode    String?
+  isPremium   Boolean   @default(false)
   lastSeenAt  DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt

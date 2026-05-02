@@ -308,6 +308,16 @@ export async function updateAccountAuthState(
   });
 }
 
+export async function updateAccountPremiumStatus(
+  accountId: string,
+  isPremium: boolean
+): Promise<void> {
+  await db.telegramAccount.update({
+    where: { id: accountId },
+    data: { isPremium },
+  });
+}
+
 export async function getAccountAuthCode(accountId: string) {
   const account = await db.telegramAccount.findUnique({
     where: { id: accountId },
