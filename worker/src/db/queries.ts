@@ -70,7 +70,7 @@ export async function packageExistsByHash(contentHash: string) {
 export async function getUploadedPackageByHash(contentHash: string) {
   return db.package.findFirst({
     where: { contentHash, destMessageId: { not: null }, destChannelId: { not: null } },
-    select: { destChannelId: true, destMessageId: true },
+    select: { destChannelId: true, destMessageId: true, destMessageIds: true },
   });
 }
 
@@ -111,6 +111,7 @@ export interface CreatePackageInput {
   sourceTopicId?: bigint | null;
   destChannelId?: string;
   destMessageId?: bigint;
+  destMessageIds?: bigint[];
   isMultipart: boolean;
   partCount: number;
   ingestionRunId: string;
@@ -118,6 +119,8 @@ export interface CreatePackageInput {
   tags?: string[];
   previewData?: Buffer | null;
   previewMsgId?: bigint | null;
+  sourceCaption?: string | null;
+  replyToMessageId?: bigint | null;
   files: {
     path: string;
     fileName: string;
@@ -140,6 +143,7 @@ export async function createPackageWithFiles(input: CreatePackageInput) {
       sourceTopicId: input.sourceTopicId ?? undefined,
       destChannelId: input.destChannelId,
       destMessageId: input.destMessageId,
+      destMessageIds: input.destMessageIds ?? (input.destMessageId ? [input.destMessageId] : []),
       isMultipart: input.isMultipart,
       partCount: input.partCount,
       fileCount: input.files.length,
@@ -148,6 +152,8 @@ export async function createPackageWithFiles(input: CreatePackageInput) {
       tags: input.tags && input.tags.length > 0 ? input.tags : undefined,
       previewData: input.previewData ? new Uint8Array(input.previewData) : undefined,
       previewMsgId: input.previewMsgId ?? undefined,
+      sourceCaption: input.sourceCaption ?? undefined,
+      replyToMessageId: input.replyToMessageId ?? undefined,
       files: {
         create: input.files,
       },
@@ -584,4 +590,47 @@ export async function linkPackagesToGroup(
     where: { id: { in: packageIds } },
     data: { packageGroupId: groupId },
   });
+}
+
+export async function createTimeWindowGroup(input: {
+  sourceChannelId: string;
+  name: string;
+  packageIds: string[];
+}): Promise<string> {
+  const group = await db.packageGroup.create({
+    data: {
+      sourceChannelId: input.sourceChannelId,
+      name: input.name,
+      groupingSource: "AUTO_TIME",
+    },
+  });
+
+  await db.package.updateMany({
+    where: { id: { in: input.packageIds } },
+    data: { packageGroupId: group.id },
+  });
+
+  return group.id;
+}
+
+export async function createAutoGroup(input: {
+  sourceChannelId: string;
+  name: string;
+  packageIds: string[];
+  groupingSource: "ALBUM" | "MANUAL" | "AUTO_TIME" | "AUTO_PATTERN" | "AUTO_ZIP" | "AUTO_CAPTION" | "AUTO_REPLY";
+}): Promise<string> {
+  const group = await db.packageGroup.create({
+    data: {
+      sourceChannelId: input.sourceChannelId,
+      name: input.name,
+      groupingSource: input.groupingSource,
+    },
+  });
+
+  await db.package.updateMany({
+    where: { id: { in: input.packageIds } },
+    data: { packageGroupId: group.id },
+  });
+
+  return group.id;
 }

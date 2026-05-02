@@ -146,3 +146,83 @@ export async function linkPackages(
     return { success: false, error: "Failed to link packages" };
   }
 }
+
+export async function sendAllKickstarterPackages(
+  kickstarterId: string
+): Promise<ActionResult<{ queued: number }>> {
+  const session = await auth();
+  if (!session?.user?.id) return { success: false, error: "Unauthorized" };
+
+  try {
+    const telegramLink = await prisma.telegramLink.findUnique({
+      where: { userId: session.user.id },
+    });
+
+    if (!telegramLink) {
+      return { success: false, error: "No linked Telegram account. Link one in Settings." };
+    }
+
+    const kickstarter = await prisma.kickstarter.findFirst({
+      where: { id: kickstarterId, userId: session.user.id },
+      select: {
+        packages: {
+          select: {
+            package: {
+              select: { id: true, destChannelId: true, destMessageId: true, fileName: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!kickstarter) {
+      return { success: false, error: "Kickstarter not found" };
+    }
+
+    const sendablePackages = kickstarter.packages
+      .map((lnk) => lnk.package)
+      .filter((p) => p.destChannelId && p.destMessageId);
+
+    if (sendablePackages.length === 0) {
+      return { success: false, error: "No linked packages are available for sending" };
+    }
+
+    let queued = 0;
+    for (const pkg of sendablePackages) {
+      const existing = await prisma.botSendRequest.findFirst({
+        where: {
+          packageId: pkg.id,
+          telegramLinkId: telegramLink.id,
+          status: { in: ["PENDING", "SENDING"] },
+        },
+      });
+
+      if (!existing) {
+        const sendRequest = await prisma.botSendRequest.create({
+          data: {
+            packageId: pkg.id,
+            telegramLinkId: telegramLink.id,
+            requestedByUserId: session.user.id,
+            status: "PENDING",
+          },
+        });
+
+        try {
+          await prisma.$queryRawUnsafe(
+            `SELECT pg_notify('bot_send', $1)`,
+            sendRequest.id
+          );
+        } catch {
+          // Best-effort
+        }
+
+        queued++;
+      }
+    }
+
+    revalidatePath(REVALIDATE_PATH);
+    return { success: true, data: { queued } };
+  } catch {
+    return { success: false, error: "Failed to send packages" };
+  }
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { type ColumnDef } from "@tanstack/react-table";
-import { MoreHorizontal, Pencil, Trash2, ExternalLink } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2, ExternalLink, Link2, Send } from "lucide-react";
 import { DataTableColumnHeader } from "@/components/shared/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,8 @@ export interface KickstarterRow {
 interface KickstarterColumnsProps {
   onEdit: (kickstarter: KickstarterRow) => void;
   onDelete: (id: string) => void;
+  onLinkPackages: (kickstarter: KickstarterRow) => void;
+  onSendAll: (kickstarter: KickstarterRow) => void;
 }
 
 const deliveryConfig: Record<string, { label: string; className: string }> = {
@@ -63,6 +65,8 @@ const paymentConfig: Record<string, { label: string; className: string }> = {
 export function getKickstarterColumns({
   onEdit,
   onDelete,
+  onLinkPackages,
+  onSendAll,
 }: KickstarterColumnsProps): ColumnDef<KickstarterRow, unknown>[] {
   return [
     {
@@ -170,6 +174,16 @@ export function getKickstarterColumns({
               <Pencil className="mr-2 h-3.5 w-3.5" />
               Edit
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onLinkPackages(row.original)}>
+              <Link2 className="mr-2 h-3.5 w-3.5" />
+              Link Packages
+            </DropdownMenuItem>
+            {row.original._count.packages > 0 && (
+              <DropdownMenuItem onClick={() => onSendAll(row.original)}>
+                <Send className="mr-2 h-3.5 w-3.5" />
+                Send All ({row.original._count.packages})
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() => onDelete(row.original.id)}

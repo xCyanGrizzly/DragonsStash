@@ -291,14 +291,73 @@ export async function setChannelCategory(
   if (!admin.success) return admin;
 
   try {
+    const existing = await prisma.telegramChannel.findUnique({
+      where: { id },
+      select: { category: true },
+    });
+    if (!existing) return { success: false, error: "Channel not found" };
+
+    const oldCategory = existing.category;
+    const newCategory = category?.trim() || null;
+
     await prisma.telegramChannel.update({
       where: { id },
-      data: { category: category?.trim() || null },
+      data: { category: newCategory },
     });
+
+    // Retroactively re-tag packages from this channel when category changes
+    if (oldCategory !== newCategory && newCategory) {
+      await retagChannelPackages(id, oldCategory, newCategory);
+    }
+
     revalidatePath("/telegram");
     return { success: true, data: undefined };
   } catch {
     return { success: false, error: "Failed to update category" };
+  }
+}
+
+export async function retagChannelPackages(
+  channelId: string,
+  oldCategory: string | null,
+  newCategory: string
+): Promise<ActionResult<{ updated: number }>> {
+  const session = await auth();
+  if (!session?.user?.id) return { success: false, error: "Unauthorized" };
+
+  try {
+    // Find packages from this channel that have the old category tag (or no category tag)
+    const packages = await prisma.package.findMany({
+      where: { sourceChannelId: channelId },
+      select: { id: true, tags: true },
+    });
+
+    let updated = 0;
+    for (const pkg of packages) {
+      const tags = [...pkg.tags];
+      // Remove old category tag if present
+      if (oldCategory) {
+        const idx = tags.indexOf(oldCategory);
+        if (idx !== -1) tags.splice(idx, 1);
+      }
+      // Add new category tag if not already present
+      if (!tags.includes(newCategory)) {
+        tags.push(newCategory);
+      }
+      // Only update if tags actually changed
+      if (JSON.stringify(tags) !== JSON.stringify(pkg.tags)) {
+        await prisma.package.update({
+          where: { id: pkg.id },
+          data: { tags },
+        });
+        updated++;
+      }
+    }
+
+    revalidatePath("/stls");
+    return { success: true, data: { updated } };
+  } catch {
+    return { success: false, error: "Failed to re-tag packages" };
   }
 }
 

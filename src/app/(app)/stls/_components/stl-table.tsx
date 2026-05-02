@@ -3,7 +3,8 @@
 import { useState, useCallback, useTransition, useMemo, useRef } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Search, Layers } from "lucide-react";
+import { Search, Layers, Upload } from "lucide-react";
+import { UploadDialog } from "./upload-dialog";
 import { useDataTable } from "@/hooks/use-data-table";
 import {
   getPackageColumns,
@@ -38,7 +39,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import type { DisplayItem, IngestionAccountStatus } from "@/lib/telegram/types";
+import type { DisplayItem, IngestionAccountStatus, PackageListItem } from "@/lib/telegram/types";
 import type { SkippedRow } from "./skipped-columns";
 import {
   updatePackageCreator,
@@ -49,6 +50,7 @@ import {
   removeFromGroupAction,
   sendAllInGroupAction,
   updateGroupPreviewAction,
+  mergeGroupsAction,
 } from "../actions";
 
 interface StlTableProps {
@@ -61,6 +63,9 @@ interface StlTableProps {
   skippedData: SkippedRow[];
   skippedPageCount: number;
   skippedTotalCount: number;
+  ungroupedData: PackageListItem[];
+  ungroupedPageCount: number;
+  ungroupedTotalCount: number;
 }
 
 export function StlTable({
@@ -73,6 +78,9 @@ export function StlTable({
   skippedData,
   skippedPageCount,
   skippedTotalCount,
+  ungroupedData,
+  ungroupedPageCount,
+  ungroupedTotalCount,
 }: StlTableProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -95,6 +103,12 @@ export function StlTable({
   // Group preview upload ref
   const previewInputRef = useRef<HTMLInputElement>(null);
   const [uploadGroupId, setUploadGroupId] = useState<string | null>(null);
+
+  // Group merge state
+  const [mergeSourceId, setMergeSourceId] = useState<string | null>(null);
+
+  // Upload dialog state
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   const toggleGroup = useCallback((groupId: string) => {
     setExpandedGroups((prev) => {
@@ -334,6 +348,35 @@ export function StlTable({
     [uploadGroupId, router]
   );
 
+  const handleStartMerge = useCallback((groupId: string) => {
+    setMergeSourceId((prev) => {
+      if (prev === groupId) {
+        toast.info("Merge cancelled");
+        return null;
+      }
+      toast.info("Merge source selected — click the merge-here button on the target group");
+      return groupId;
+    });
+  }, []);
+
+  const handleMergeGroups = useCallback(
+    (targetGroupId: string) => {
+      if (!mergeSourceId) return;
+      const sourceId = mergeSourceId;
+      startTransition(async () => {
+        const result = await mergeGroupsAction(targetGroupId, sourceId);
+        if (result.success) {
+          toast.success("Groups merged successfully");
+          setMergeSourceId(null);
+          router.refresh();
+        } else {
+          toast.error(result.error);
+        }
+      });
+    },
+    [mergeSourceId, router]
+  );
+
   const columns = getPackageColumns({
     onViewFiles: (pkg) => setViewPkg(pkg),
     searchTerm,
@@ -375,9 +418,29 @@ export function StlTable({
     onGroupPreviewUpload: handleGroupPreviewUpload,
     selectedPackages,
     onToggleSelect: toggleSelect,
+    mergeSourceId,
+    onStartMerge: handleStartMerge,
+    onCompleteMerge: handleMergeGroups,
   });
 
   const { table } = useDataTable({ data: tableRows, columns, pageCount });
+
+  const ungroupedRows: StlTableRow[] = useMemo(
+    () =>
+      ungroupedData.map((pkg) => ({
+        ...pkg,
+        _rowType: "package" as const,
+        _groupId: null,
+        _isGroupMember: false,
+      })),
+    [ungroupedData]
+  );
+
+  const { table: ungroupedTable } = useDataTable({
+    data: ungroupedRows,
+    columns,
+    pageCount: ungroupedPageCount,
+  });
 
   const activeTag = searchParams.get("tag") ?? "";
 
@@ -398,6 +461,14 @@ export function StlTable({
             {skippedTotalCount > 0 && (
               <Badge variant="secondary" className="text-[10px] ml-1">
                 {skippedTotalCount}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="ungrouped" className="gap-1.5">
+            Ungrouped
+            {ungroupedTotalCount > 0 && (
+              <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                {ungroupedTotalCount}
               </Badge>
             )}
           </TabsTrigger>
@@ -430,6 +501,10 @@ export function StlTable({
               </Select>
             )}
             <DataTableViewOptions table={table} />
+            <Button variant="outline" size="sm" className="h-9" onClick={() => setUploadOpen(true)}>
+              <Upload className="mr-2 h-4 w-4" />
+              Upload Files
+            </Button>
             {selectedPackages.size >= 2 && (
               <Button
                 variant="outline"
@@ -471,6 +546,11 @@ export function StlTable({
             pageCount={skippedPageCount}
             totalCount={skippedTotalCount}
           />
+        </TabsContent>
+
+        <TabsContent value="ungrouped" className="space-y-4">
+          <DataTable table={ungroupedTable} emptyMessage="All packages are grouped!" />
+          <DataTablePagination table={ungroupedTable} totalCount={ungroupedTotalCount} />
         </TabsContent>
       </Tabs>
 
@@ -514,6 +594,8 @@ export function StlTable({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} />
 
       {/* Hidden file input for group preview upload (Task 12) */}
       <input

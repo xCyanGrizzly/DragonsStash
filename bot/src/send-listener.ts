@@ -7,7 +7,7 @@ import {
   findMatchingSubscriptions,
   getGlobalDestinationChannel,
 } from "./db/queries.js";
-import { copyMessageToUser, sendTextMessage, sendPhotoMessage } from "./tdlib/client.js";
+import { copyMessageToUser, copyMultipleMessagesToUser, sendTextMessage, sendPhotoMessage } from "./tdlib/client.js";
 import { sleep } from "./util/flood-wait.js";
 
 const log = childLogger("send-listener");
@@ -154,11 +154,25 @@ async function processSendRequest(requestId: string): Promise<void> {
     }
 
     // Forward the actual archive file(s) from destination channel
-    await copyMessageToUser(
-      destChannel.telegramId,
-      pkg.destMessageId,
-      targetUserId
-    );
+    const messageIds = pkg.destMessageIds as bigint[] | undefined;
+    if (messageIds && messageIds.length > 1) {
+      log.info(
+        { requestId, parts: messageIds.length },
+        "Sending multi-part archive"
+      );
+      await copyMultipleMessagesToUser(
+        destChannel.telegramId,
+        messageIds,
+        targetUserId
+      );
+    } else {
+      // Single part or legacy (no destMessageIds populated)
+      await copyMessageToUser(
+        destChannel.telegramId,
+        pkg.destMessageId,
+        targetUserId
+      );
+    }
 
     await updateSendRequest(requestId, "SENT");
     log.info({ requestId }, "Send request completed successfully");

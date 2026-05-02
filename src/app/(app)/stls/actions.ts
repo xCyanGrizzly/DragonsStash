@@ -10,6 +10,7 @@ import {
   createManualGroup,
   removePackageFromGroup,
   dissolveGroup,
+  mergeGroups,
 } from "@/lib/telegram/queries";
 
 const ALLOWED_IMAGE_TYPES = [
@@ -182,6 +183,62 @@ export async function setPreviewFromExtract(
     return { success: true, data: undefined };
   } catch {
     return { success: false, error: "Failed to set preview from archive image" };
+  }
+}
+
+export async function repairPackageAction(
+  packageId: string
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { success: false, error: "Unauthorized" };
+
+  try {
+    const pkg = await prisma.package.findUnique({
+      where: { id: packageId },
+      select: {
+        id: true,
+        fileName: true,
+        sourceChannelId: true,
+        sourceMessageId: true,
+        destChannelId: true,
+        destMessageId: true,
+      },
+    });
+
+    if (!pkg) return { success: false, error: "Package not found" };
+
+    // Clear the destination info so the worker re-processes it
+    await prisma.package.update({
+      where: { id: packageId },
+      data: {
+        destMessageId: null,
+        destMessageIds: [],
+        destChannelId: null,
+      },
+    });
+
+    // Reset the channel watermark to before this message so worker picks it up
+    await prisma.accountChannelMap.updateMany({
+      where: {
+        channelId: pkg.sourceChannelId,
+        lastProcessedMessageId: { gte: pkg.sourceMessageId },
+      },
+      data: { lastProcessedMessageId: pkg.sourceMessageId - BigInt(1) },
+    });
+
+    // Mark related notifications as read
+    await prisma.systemNotification.updateMany({
+      where: {
+        context: { path: ["packageId"], equals: packageId },
+        isRead: false,
+      },
+      data: { isRead: true },
+    });
+
+    revalidatePath("/stls");
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to schedule repair" };
   }
 }
 
@@ -432,6 +489,26 @@ export async function updateGroupPreviewAction(
     return { success: true, data: undefined };
   } catch {
     return { success: false, error: "Failed to upload group preview image" };
+  }
+}
+
+export async function mergeGroupsAction(
+  targetGroupId: string,
+  sourceGroupId: string
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { success: false, error: "Unauthorized" };
+
+  if (targetGroupId === sourceGroupId) {
+    return { success: false, error: "Cannot merge a group with itself" };
+  }
+
+  try {
+    await mergeGroups(targetGroupId, sourceGroupId);
+    revalidatePath("/stls");
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to merge groups" };
   }
 }
 

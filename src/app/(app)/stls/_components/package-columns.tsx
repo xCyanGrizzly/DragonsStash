@@ -1,7 +1,7 @@
 "use client";
 
 import { type ColumnDef } from "@tanstack/react-table";
-import { FileArchive, Eye, ChevronRight, Layers, Ungroup, Send, ImagePlus } from "lucide-react";
+import { FileArchive, Eye, ChevronRight, Layers, Ungroup, Send, ImagePlus, GitMerge } from "lucide-react";
 import { DataTableColumnHeader } from "@/components/shared/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -69,6 +69,9 @@ interface PackageColumnsProps {
   onGroupPreviewUpload: (groupId: string) => void;
   selectedPackages: Set<string>;
   onToggleSelect: (packageId: string) => void;
+  mergeSourceId: string | null;
+  onStartMerge: (groupId: string) => void;
+  onCompleteMerge: (targetGroupId: string) => void;
 }
 
 export function formatBytes(bytesStr: string): string {
@@ -148,6 +151,9 @@ export function getPackageColumns({
   onGroupPreviewUpload,
   selectedPackages,
   onToggleSelect,
+  mergeSourceId,
+  onStartMerge,
+  onCompleteMerge,
 }: PackageColumnsProps): ColumnDef<StlTableRow, unknown>[] {
   return [
     {
@@ -392,6 +398,8 @@ export function getPackageColumns({
       cell: ({ row }) => {
         const data = row.original;
         if (isGroupRow(data)) {
+          const isMergeSource = mergeSourceId === data.id;
+          const canMergeHere = mergeSourceId !== null && mergeSourceId !== data.id;
           return (
             <div className="flex items-center gap-0.5">
               <Button
@@ -403,6 +411,26 @@ export function getPackageColumns({
               >
                 <Send className="h-4 w-4" />
               </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={`h-8 w-8 ${isMergeSource ? "text-amber-500 bg-amber-500/10 hover:bg-amber-500/20" : ""}`}
+                onClick={() => onStartMerge(data.id)}
+                title={isMergeSource ? "Cancel merge (this group is the merge source)" : "Start merge — mark this group as merge source"}
+              >
+                <GitMerge className="h-4 w-4" />
+              </Button>
+              {canMergeHere && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-primary bg-primary/10 hover:bg-primary/20"
+                  onClick={() => onCompleteMerge(data.id)}
+                  title="Merge source group into this group"
+                >
+                  <Layers className="h-4 w-4" />
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"

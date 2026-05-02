@@ -5,6 +5,7 @@ import { withTdlibMutex } from "./util/mutex.js";
 import { processFetchRequest } from "./worker.js";
 import { processExtractRequest } from "./extract-listener.js";
 import { rebuildPackageDatabase } from "./rebuild.js";
+import { processManualUpload } from "./manual-upload.js";
 import { generateInviteLink, createSupergroup, searchPublicChat } from "./tdlib/chats.js";
 import { createTdlibClient, closeTdlibClient } from "./tdlib/client.js";
 import { triggerImmediateCycle } from "./scheduler.js";
@@ -55,6 +56,7 @@ async function connectListener(): Promise<void> {
     await pgClient.query("LISTEN join_channel");
     await pgClient.query("LISTEN archive_extract");
     await pgClient.query("LISTEN rebuild_packages");
+    await pgClient.query("LISTEN manual_upload");
 
     pgClient.on("notification", (msg) => {
       if (msg.channel === "channel_fetch" && msg.payload) {
@@ -71,6 +73,8 @@ async function connectListener(): Promise<void> {
         handleArchiveExtract(msg.payload);
       } else if (msg.channel === "rebuild_packages" && msg.payload) {
         handleRebuildPackages(msg.payload);
+      } else if (msg.channel === "manual_upload" && msg.payload) {
+        handleManualUpload(msg.payload);
       }
     });
 
@@ -96,7 +100,7 @@ async function connectListener(): Promise<void> {
       }
     });
 
-    log.info("Fetch listener started (channel_fetch, generate_invite, create_destination, ingestion_trigger, join_channel, archive_extract, rebuild_packages)");
+    log.info("Fetch listener started (channel_fetch, generate_invite, create_destination, ingestion_trigger, join_channel, archive_extract, rebuild_packages, manual_upload)");
   } catch (err) {
     log.error({ err }, "Failed to start fetch listener — retrying");
     scheduleReconnect();
@@ -510,4 +514,12 @@ function handleRebuildPackages(requestId: string): void {
       log.error({ err, requestId }, "Failed to rebuild package database");
     }
   });
+}
+
+// ── Manual upload handler ──
+
+function handleManualUpload(uploadId: string): void {
+  fetchQueue = fetchQueue
+    .then(() => processManualUpload(uploadId))
+    .catch((err) => log.error({ err, uploadId }, "Manual upload processing failed"));
 }

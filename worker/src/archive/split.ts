@@ -3,15 +3,19 @@ import { stat } from "fs/promises";
 import path from "path";
 import { pipeline } from "stream/promises";
 import { childLogger } from "../util/logger.js";
+import { config } from "../util/config.js";
 
 const log = childLogger("split");
 
 /**
- * 1950 MiB — safely under Telegram's 2GB upload limit.
- * At exactly 2GiB, TDLib's internal 512KB chunking can exceed Telegram's
+ * Maximum part size for Telegram upload. Configurable via MAX_PART_SIZE_MB env var.
+ * Default: 1950 MiB (safely under 2GB non-Premium limit).
+ * Premium: set to 3900 MiB (safely under 4GB Premium limit).
+ *
+ * At exactly 2/4 GiB, TDLib's internal 512KB chunking can exceed Telegram's
  * 4000-part threshold, causing FILE_PARTS_INVALID errors.
  */
-const MAX_PART_SIZE = 1950n * 1024n * 1024n;
+const MAX_PART_SIZE = BigInt(config.maxPartSizeMB) * 1024n * 1024n;
 
 /**
  * Split a file into ≤2GB parts using byte-level splitting.

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { UserMenu } from "./user-menu";
 import { MobileSidebar } from "./mobile-sidebar";
+import { NotificationBell } from "./notification-bell";
 
 const routeTitles: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -38,7 +39,8 @@ export function Header() {
 
       <h1 className="text-lg font-semibold">{title}</h1>
 
-      <div className="ml-auto">
+      <div className="ml-auto flex items-center gap-1">
+        <NotificationBell />
         <UserMenu />
       </div>
     </header>

@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { listDisplayItems, searchPackages, getIngestionStatus, getAllPackageTags, listSkippedPackages, countSkippedPackages } from "@/lib/telegram/queries";
+import { listDisplayItems, searchPackages, getIngestionStatus, getAllPackageTags, listSkippedPackages, countSkippedPackages, listUngroupedPackages, countUngroupedPackages } from "@/lib/telegram/queries";
 import { StlTable } from "./_components/stl-table";
 import type { DisplayItem, PackageListItem } from "@/lib/telegram/types";
 
@@ -24,7 +24,7 @@ export default async function StlFilesPage({ searchParams }: Props) {
   const tab = (params.tab as string) ?? "packages";
 
   // Fetch packages, ingestion status, tags, and skipped count in parallel
-  const [result, ingestionStatus, availableTags, skippedCount] = await Promise.all([
+  const [result, ingestionStatus, availableTags, skippedCount, ungroupedCount] = await Promise.all([
     search
       ? searchPackages({
           query: search,
@@ -43,6 +43,7 @@ export default async function StlFilesPage({ searchParams }: Props) {
     getIngestionStatus(),
     getAllPackageTags(),
     countSkippedPackages(),
+    countUngroupedPackages(),
   ]);
 
   // For search results, wrap as DisplayItem[]; for non-search, already DisplayItem[]
@@ -53,6 +54,11 @@ export default async function StlFilesPage({ searchParams }: Props) {
   // Fetch skipped packages only if on that tab
   const skippedResult = tab === "skipped"
     ? await listSkippedPackages({ page, limit: perPage })
+    : null;
+
+  // Fetch ungrouped packages only if on that tab
+  const ungroupedResult = tab === "ungrouped"
+    ? await listUngroupedPackages({ page, limit: perPage })
     : null;
 
   return (
@@ -66,6 +72,9 @@ export default async function StlFilesPage({ searchParams }: Props) {
       skippedData={skippedResult?.items ?? []}
       skippedPageCount={skippedResult?.pagination.totalPages ?? 0}
       skippedTotalCount={skippedCount}
+      ungroupedData={ungroupedResult?.items ?? []}
+      ungroupedPageCount={ungroupedResult?.pagination.totalPages ?? 0}
+      ungroupedTotalCount={ungroupedCount}
     />
   );
 }

@@ -11,6 +11,8 @@ export interface TelegramMessage {
   fileSize: bigint;
   date: Date;
   mediaAlbumId?: string;
+  replyToMessageId?: bigint;  // NEW
+  caption?: string;            // NEW
 }
 
 export interface ArchiveSet {

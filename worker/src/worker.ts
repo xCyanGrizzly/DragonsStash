@@ -47,7 +47,8 @@ import { readRarContents } from "./archive/rar-reader.js";
 import { read7zContents } from "./archive/sevenz-reader.js";
 import { byteLevelSplit, concatenateFiles } from "./archive/split.js";
 import { uploadToChannel } from "./upload/channel.js";
-import { processAlbumGroups, type IndexedPackageRef } from "./grouping.js";
+import { processAlbumGroups, processRuleBasedGroups, processTimeWindowGroups, processPatternGroups, processCreatorGroups, processZipPathGroups, processReplyChainGroups, processCaptionGroups, detectGroupingConflicts, type IndexedPackageRef } from "./grouping.js";
+import { db } from "./db/client.js";
 import type { TelegramAccount, TelegramChannel } from "@prisma/client";
 import type { Client } from "tdl";
 
@@ -776,6 +777,22 @@ async function processArchiveSets(
           partCount: archiveSet.parts.length,
           accountId: ctx.accountId,
         });
+        // Also create a persistent notification
+        await db.systemNotification.create({
+          data: {
+            type: inferSkipReason(errMsg) === "UPLOAD_FAILED" ? "UPLOAD_FAILED" : "DOWNLOAD_FAILED",
+            severity: "WARNING",
+            title: `Failed to process ${archiveSet.parts[0].fileName}`,
+            message: errMsg,
+            context: {
+              fileName: archiveSet.parts[0].fileName,
+              sourceChannelId: ctx.channel.id,
+              sourceMessageId: Number(archiveSet.parts[0].id),
+              channelTitle: ctx.channelTitle,
+              reason: inferSkipReason(errMsg),
+            },
+          },
+        });
       } catch {
         // Best-effort — don't fail the run if skip recording fails
       }
@@ -790,6 +807,38 @@ async function processArchiveSets(
       indexedPackageRefs,
       scanResult.photos
     );
+
+    // Auto-grouping passes (gated by per-channel flag)
+    const channelRecord = await db.telegramChannel.findUnique({
+      where: { id: channel.id },
+      select: { autoGroupEnabled: true },
+    });
+
+    if (channelRecord?.autoGroupEnabled !== false) {
+      // Learned rule-based grouping (from manual overrides)
+      await processRuleBasedGroups(channel.id, indexedPackageRefs);
+
+      // Time-window grouping for remaining ungrouped packages
+      await processTimeWindowGroups(channel.id, indexedPackageRefs);
+
+      // Pattern-based grouping (date patterns, project slugs)
+      await processPatternGroups(channel.id, indexedPackageRefs);
+
+      // Creator-based grouping (3+ files from same creator)
+      await processCreatorGroups(channel.id, indexedPackageRefs);
+
+      // ZIP path prefix grouping (shared root folder inside archives)
+      await processZipPathGroups(channel.id, indexedPackageRefs);
+
+      // Reply chain grouping (messages replying to same root)
+      await processReplyChainGroups(channel.id, indexedPackageRefs);
+
+      // Caption fuzzy match grouping
+      await processCaptionGroups(channel.id, indexedPackageRefs);
+    }
+
+    // Check for potential grouping conflicts
+    await detectGroupingConflicts(channel.id, indexedPackageRefs);
   }
 
   return maxProcessedId;
@@ -1020,7 +1069,7 @@ async function processOneArchiveSet(
       (sum, p) => sum + p.fileSize,
       0n
     );
-    const MAX_UPLOAD_SIZE = 1950n * 1024n * 1024n; // Match split.ts MAX_PART_SIZE
+    const MAX_UPLOAD_SIZE = BigInt(config.maxPartSizeMB) * 1024n * 1024n;
     const hasOversizedPart = archiveSet.parts.some((p) => p.fileSize > MAX_UPLOAD_SIZE);
 
     if (hasOversizedPart) {
@@ -1053,18 +1102,60 @@ async function processOneArchiveSet(
       uploadPaths = splitPaths;
     }
 
+    // ── Hash verification after split ──
+    // If we split/repacked, verify the split parts hash matches the original
+    if (splitPaths.length > 0) {
+      const splitHash = await hashParts(splitPaths);
+      if (splitHash !== contentHash) {
+        accountLog.error(
+          { fileName: archiveName, originalHash: contentHash, splitHash, parts: splitPaths.length },
+          "Hash mismatch after split — file may be corrupted"
+        );
+        // Record notification for visibility
+        try {
+          await db.systemNotification.create({
+            data: {
+              type: "HASH_MISMATCH",
+              severity: "ERROR",
+              title: `Hash mismatch after splitting ${archiveName}`,
+              message: `Expected ${contentHash.slice(0, 16)}… but got ${splitHash.slice(0, 16)}… after splitting into ${splitPaths.length} parts`,
+              context: {
+                fileName: archiveName,
+                originalHash: contentHash,
+                splitHash,
+                partCount: splitPaths.length,
+                sourceChannelId: channel.id,
+              },
+            },
+          });
+        } catch {
+          // Best-effort notification
+        }
+        throw new Error(`Hash mismatch after split for ${archiveName}: expected ${contentHash}, got ${splitHash}`);
+      }
+      accountLog.debug(
+        { fileName: archiveName, hash: contentHash.slice(0, 16), parts: splitPaths.length },
+        "Split hash verified — matches original"
+      );
+    }
+
     // ── Uploading ──
     // Check if a prior run already uploaded this file (orphaned upload scenario:
     // file reached Telegram but DB write failed or worker crashed before indexing)
     const existingUpload = await getUploadedPackageByHash(contentHash);
-    let destResult: { messageId: bigint };
+    let destResult: { messageId: bigint; messageIds: bigint[] };
 
     if (existingUpload && existingUpload.destMessageId) {
       accountLog.info(
         { fileName: archiveName, destMessageId: Number(existingUpload.destMessageId) },
         "Reusing existing upload (file already on destination channel)"
       );
-      destResult = { messageId: existingUpload.destMessageId };
+      destResult = {
+        messageId: existingUpload.destMessageId,
+        messageIds: existingUpload.destMessageIds?.length
+          ? (existingUpload.destMessageIds as bigint[])
+          : [existingUpload.destMessageId],
+      };
     } else {
       const uploadLabel = uploadPaths.length > 1
         ? ` (${uploadPaths.length} parts)`
@@ -1083,6 +1174,34 @@ async function processOneArchiveSet(
         destChannelTelegramId,
         uploadPaths
       );
+    }
+
+    // ── Post-upload integrity check ──
+    // Verify the files on disk still match before we index
+    if (uploadPaths.length > 0 && !existingUpload) {
+      try {
+        const postUploadHash = await hashParts(uploadPaths);
+        if (splitPaths.length > 0) {
+          // Split files — hash should match the split hash (already verified above)
+          // No additional check needed since we verified split hash = original hash
+        } else if (postUploadHash !== contentHash) {
+          accountLog.error(
+            { fileName: archiveName, originalHash: contentHash, postUploadHash },
+            "Hash changed between hashing and upload — possible disk corruption"
+          );
+          await db.systemNotification.create({
+            data: {
+              type: "HASH_MISMATCH",
+              severity: "ERROR",
+              title: `Post-upload hash mismatch: ${archiveName}`,
+              message: `Hash changed between download and upload. Original: ${contentHash.slice(0, 16)}…, post-upload: ${postUploadHash.slice(0, 16)}…`,
+              context: { fileName: archiveName, originalHash: contentHash, postUploadHash, sourceChannelId: channel.id },
+            },
+          });
+        }
+      } catch {
+        // Best-effort — don't fail the ingestion
+      }
     }
 
     // ── Preview thumbnail ──
@@ -1158,6 +1277,7 @@ async function processOneArchiveSet(
       sourceTopicId,
       destChannelId,
       destMessageId: destResult.messageId,
+      destMessageIds: destResult.messageIds,
       isMultipart:
         archiveSet.parts.length > 1 || uploadPaths.length > 1,
       partCount: uploadPaths.length,
@@ -1166,6 +1286,8 @@ async function processOneArchiveSet(
       tags,
       previewData,
       previewMsgId,
+      sourceCaption: archiveSet.parts[0].caption ?? null,
+      replyToMessageId: archiveSet.parts[0].replyToMessageId ?? null,
       files: entries,
     });
 
