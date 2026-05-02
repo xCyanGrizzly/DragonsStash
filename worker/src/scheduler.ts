@@ -24,8 +24,8 @@ const CYCLE_TIMEOUT_MS = (parseInt(process.env.WORKER_CYCLE_TIMEOUT_MINUTES ?? "
  * 1. Authenticate any PENDING accounts (triggers SMS code flow + auto-fetch channels)
  * 2. Process all active AUTHENTICATED accounts for ingestion
  *
- * All TDLib operations are wrapped in the mutex to ensure only one client
- * runs at a time (also shared with the fetch listener for on-demand requests).
+ * Each account's TDLib operations are wrapped in a per-key mutex so different
+ * accounts run concurrently while the same account is still serialized.
  *
  * The cycle has a configurable timeout (WORKER_CYCLE_TIMEOUT_MINUTES, default 4h).
  * Once the timeout elapses, no new accounts will be started but any in-progress
@@ -55,7 +55,7 @@ async function runCycle(): Promise<void> {
           log.warn("Cycle timeout reached during authentication phase, stopping");
           break;
         }
-        await withTdlibMutex(`auth:${account.phone}`, () =>
+        await withTdlibMutex(account.phone, `auth:${account.phone}`, () =>
           authenticateAccount(account)
         );
       }
@@ -71,18 +71,13 @@ async function runCycle(): Promise<void> {
 
     log.info({ accountCount: accounts.length }, "Processing accounts");
 
-    for (const account of accounts) {
-      if (Date.now() - cycleStart > CYCLE_TIMEOUT_MS) {
-        log.warn(
-          { elapsed: Math.round((Date.now() - cycleStart) / 60_000), timeoutMinutes: CYCLE_TIMEOUT_MS / 60_000 },
-          "Cycle timeout reached, skipping remaining accounts"
-        );
-        break;
-      }
-      await withTdlibMutex(`ingest:${account.phone}`, () =>
-        runWorkerForAccount(account)
-      );
-    }
+    await Promise.allSettled(
+      accounts.map((account) =>
+        withTdlibMutex(account.phone, `ingest:${account.phone}`, () =>
+          runWorkerForAccount(account)
+        )
+      )
+    );
 
     log.info(
       { elapsed: Math.round((Date.now() - cycleStart) / 1000) },

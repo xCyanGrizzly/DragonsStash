@@ -2,39 +2,43 @@ import { childLogger } from "./logger.js";
 
 const log = childLogger("mutex");
 
-let locked = false;
-let holder = "";
-const queue: Array<{ resolve: () => void; reject: (err: Error) => void; label: string }> = [];
-
-/**
- * Maximum time to wait for the TDLib mutex (ms).
- * If the mutex is not available within this time, the operation is rejected.
- * Default: 30 minutes (long enough for large downloads, short enough to detect hangs).
- */
 const MUTEX_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
 
+const locks = new Map<string, boolean>();
+const holders = new Map<string, string>();
+const queues = new Map<
+  string,
+  Array<{ resolve: () => void; reject: (err: Error) => void; label: string }>
+>();
+
 /**
- * Ensures only one TDLib client runs at a time across the entire worker process.
- * Both the scheduler (auth, ingestion) and the fetch listener acquire this
- * before creating any TDLib client.
+ * Ensures only one TDLib operation runs at a time FOR THE SAME KEY.
+ * Different keys run concurrently — this allows two accounts to ingest in parallel
+ * while still preventing concurrent use of the same account's TDLib state dir.
  *
- * Includes a wait timeout to prevent indefinite blocking if the current holder hangs.
+ * key:   the account phone number for account-specific ops (auth, ingest),
+ *        or 'global' for ops that don't belong to a specific account.
+ * label: human-readable name for logging.
  */
 export async function withTdlibMutex<T>(
+  key: string,
   label: string,
   fn: () => Promise<T>
 ): Promise<T> {
-  if (locked) {
-    log.info({ waiting: label, holder }, "Waiting for TDLib mutex");
+  if (locks.get(key)) {
+    log.info({ waiting: label, key, holder: holders.get(key) }, "Waiting for TDLib mutex");
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
-        const idx = queue.indexOf(entry);
+        const q = queues.get(key) ?? [];
+        const idx = q.indexOf(entry);
         if (idx !== -1) {
-          queue.splice(idx, 1);
-          reject(new Error(
-            `TDLib mutex wait timeout after ${MUTEX_WAIT_TIMEOUT_MS / 60_000}min ` +
-            `(waiting: ${label}, holder: ${holder})`
-          ));
+          q.splice(idx, 1);
+          reject(
+            new Error(
+              `TDLib mutex wait timeout after ${MUTEX_WAIT_TIMEOUT_MS / 60_000}min ` +
+                `(waiting: ${label}, key: ${key}, holder: ${holders.get(key)})`
+            )
+          );
         }
       }, MUTEX_WAIT_TIMEOUT_MS);
 
@@ -46,25 +50,28 @@ export async function withTdlibMutex<T>(
         reject,
         label,
       };
-      queue.push(entry);
+
+      if (!queues.has(key)) queues.set(key, []);
+      queues.get(key)!.push(entry);
     });
   }
 
-  locked = true;
-  holder = label;
-  log.debug({ label }, "TDLib mutex acquired");
+  locks.set(key, true);
+  holders.set(key, label);
+  log.debug({ key, label }, "TDLib mutex acquired");
 
   try {
     return await fn();
   } finally {
-    locked = false;
-    holder = "";
-    const next = queue.shift();
+    locks.delete(key);
+    holders.delete(key);
+    const next = queues.get(key)?.shift();
     if (next) {
-      log.debug({ next: next.label }, "TDLib mutex releasing to next waiter");
+      log.debug({ key, next: next.label }, "TDLib mutex releasing to next waiter");
       next.resolve();
     } else {
-      log.debug({ label }, "TDLib mutex released");
+      queues.delete(key);
+      log.debug({ key, label }, "TDLib mutex released");
     }
   }
 }

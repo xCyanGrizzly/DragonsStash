@@ -133,7 +133,7 @@ let fetchQueue: Promise<void> = Promise.resolve();
 function handleChannelFetch(requestId: string): void {
   fetchQueue = fetchQueue.then(async () => {
     try {
-      await withTdlibMutex("fetch-channels", () =>
+      await withTdlibMutex("global", "fetch-channels", () =>
         processFetchRequest(requestId)
       );
     } catch (err) {
@@ -147,7 +147,7 @@ function handleChannelFetch(requestId: string): void {
 function handleGenerateInvite(channelId: string): void {
   fetchQueue = fetchQueue.then(async () => {
     try {
-      await withTdlibMutex("generate-invite", async () => {
+      await withTdlibMutex("global", "generate-invite", async () => {
         const destChannel = await getGlobalDestinationChannel();
         if (!destChannel || destChannel.id !== channelId) {
           log.warn({ channelId }, "Destination channel mismatch, skipping invite generation");
@@ -187,7 +187,7 @@ function handleCreateDestination(payload: string): void {
       const parsed = JSON.parse(payload) as { requestId: string; title: string };
       requestId = parsed.requestId;
 
-      await withTdlibMutex("create-destination", async () => {
+      await withTdlibMutex("global", "create-destination", async () => {
         const { db } = await import("./db/client.js");
 
         // Mark the request as in-progress
@@ -328,7 +328,7 @@ function handleJoinChannel(payload: string): void {
       const parsed = JSON.parse(payload) as { requestId: string; input: string; accountId: string };
       requestId = parsed.requestId;
 
-      await withTdlibMutex("join-channel", async () => {
+      await withTdlibMutex("global", "join-channel", async () => {
         await updateFetchRequestStatus(requestId!, "IN_PROGRESS");
 
         const accounts = await getActiveAccounts();
@@ -507,7 +507,7 @@ function handleIngestionTrigger(): void {
 function handleRebuildPackages(requestId: string): void {
   fetchQueue = fetchQueue.then(async () => {
     try {
-      await withTdlibMutex("rebuild-packages", () =>
+      await withTdlibMutex("global", "rebuild-packages", () =>
         rebuildPackageDatabase(requestId)
       );
     } catch (err) {
