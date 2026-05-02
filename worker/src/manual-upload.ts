@@ -49,7 +49,7 @@ export async function processManualUpload(uploadId: string): Promise<void> {
     const account = accounts[0];
     if (!account) throw new Error("No authenticated Telegram account available");
 
-    const client = await createTdlibClient({ id: account.id, phone: account.phone });
+    const { client } = await createTdlibClient({ id: account.id, phone: account.phone });
 
     try {
       const packageIds: string[] = [];

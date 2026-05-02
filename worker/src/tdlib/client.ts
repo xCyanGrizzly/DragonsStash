@@ -6,6 +6,7 @@ import { childLogger } from "../util/logger.js";
 import {
   updateAccountAuthState,
   getAccountAuthCode,
+  updateAccountPremiumStatus,
 } from "../db/queries.js";
 
 const log = childLogger("tdlib-client");
@@ -27,7 +28,7 @@ interface AccountConfig {
  */
 export async function createTdlibClient(
   account: AccountConfig
-): Promise<Client> {
+): Promise<{ client: Client; isPremium: boolean }> {
   const dbPath = path.join(config.tdlibStateDir, account.id);
 
   const client = createClient({
@@ -78,7 +79,30 @@ export async function createTdlibClient(
 
     await updateAccountAuthState(account.id, "AUTHENTICATED");
     log.info({ accountId: account.id }, "TDLib client authenticated");
-    return client;
+
+    let isPremium = false;
+    try {
+      const me = await client.invoke({ _: "getMe" }) as { is_premium?: boolean };
+      isPremium = me.is_premium ?? false;
+      await updateAccountPremiumStatus(account.id, isPremium);
+      log.info({ accountId: account.id, isPremium }, "Account Premium status detected");
+    } catch (err) {
+      log.warn({ err, accountId: account.id }, "Could not detect Premium status, defaulting to false");
+    }
+
+    client.on("update", (update: unknown) => {
+      const u = update as { _?: string; is_upload?: boolean };
+      if (u?._ === "updateSpeedLimitNotification") {
+        log.warn(
+          { accountId: account.id, isUpload: u.is_upload },
+          u.is_upload
+            ? "Upload speed limited by Telegram (account is not Premium)"
+            : "Download speed limited by Telegram (account is not Premium)"
+        );
+      }
+    });
+
+    return { client, isPremium };
   } catch (err) {
     log.error({ err, accountId: account.id }, "TDLib authentication failed");
     await updateAccountAuthState(account.id, "EXPIRED");

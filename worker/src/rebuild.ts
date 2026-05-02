@@ -63,7 +63,7 @@ export async function rebuildPackageDatabase(
     }
 
     const account = accounts[0];
-    const client = await createTdlibClient({
+    const { client } = await createTdlibClient({
       id: account.id,
       phone: account.phone,
     });

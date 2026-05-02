@@ -73,10 +73,10 @@ export async function authenticateAccount(
 
   let client: Client | undefined;
   try {
-    client = await createTdlibClient({
+    client = (await createTdlibClient({
       id: account.id,
       phone: account.phone,
-    });
+    })).client;
     aLog.info("Authentication successful");
 
     // Auto-fetch channels and create a fetch request result
@@ -131,7 +131,7 @@ export async function processFetchRequest(requestId: string): Promise<void> {
   await updateFetchRequestStatus(requestId, "IN_PROGRESS");
   aLog.info({ accountId: request.accountId }, "Processing fetch request");
 
-  const client = await createTdlibClient({
+  const { client } = await createTdlibClient({
     id: request.account.id,
     phone: request.account.phone,
   });
@@ -336,10 +336,11 @@ export async function runWorkerForAccount(
       currentStep: "connecting",
     });
 
-    const client = await createTdlibClient({
+    const { client, isPremium } = await createTdlibClient({
       id: account.id,
       phone: account.phone,
     });
+    void isPremium; // will be used in Task 6 for upload limits
 
     // Load all chats into TDLib's local cache using loadChats (the recommended API).
     // Without this, getChat/searchChatMessages fail with "Chat not found".

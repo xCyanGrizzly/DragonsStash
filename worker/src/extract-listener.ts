@@ -110,7 +110,7 @@ export async function processExtractRequest(requestId: string): Promise<void> {
       }
 
       const account = accounts[0];
-      const client = await createTdlibClient({ id: account.id, phone: account.phone });
+      const { client } = await createTdlibClient({ id: account.id, phone: account.phone });
 
       try {
         // Load chat list so TDLib can find the dest channel

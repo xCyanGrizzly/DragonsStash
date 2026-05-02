@@ -63,7 +63,7 @@ export async function recoverIncompleteUploads(): Promise<void> {
   let client: Client | undefined;
 
   try {
-    client = await createTdlibClient({ id: account.id, phone: account.phone });
+    ({ client } = await createTdlibClient({ id: account.id, phone: account.phone }));
 
     // Load the chat list so TDLib can resolve chat IDs
     try {

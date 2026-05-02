@@ -162,7 +162,7 @@ function handleGenerateInvite(channelId: string): void {
         }
 
         const account = accounts[0];
-        const client = await createTdlibClient({ id: account.id, phone: account.phone });
+        const { client } = await createTdlibClient({ id: account.id, phone: account.phone });
 
         try {
           const link = await generateInviteLink(client, destChannel.telegramId);
@@ -203,7 +203,7 @@ function handleCreateDestination(payload: string): void {
         }
 
         const account = accounts[0];
-        const client = await createTdlibClient({ id: account.id, phone: account.phone });
+        const { client } = await createTdlibClient({ id: account.id, phone: account.phone });
 
         try {
           // Create the supergroup via TDLib
@@ -337,7 +337,7 @@ function handleJoinChannel(payload: string): void {
           throw new Error("No authenticated accounts available");
         }
 
-        const client = await createTdlibClient({ id: account.id, phone: account.phone });
+        const { client } = await createTdlibClient({ id: account.id, phone: account.phone });
 
         try {
           const linkInfo = parseTelegramInput(parsed.input);
