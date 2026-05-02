@@ -342,7 +342,9 @@ export async function runWorkerForAccount(
       id: account.id,
       phone: account.phone,
     });
-    void isPremium; // will be used in Task 6 for upload limits
+    const maxUploadSize = isPremium
+      ? 3950n * 1024n * 1024n
+      : BigInt(config.maxPartSizeMB) * 1024n * 1024n;
 
     // Load all chats into TDLib's local cache using loadChats (the recommended API).
     // Without this, getChat/searchChatMessages fail with "Chat not found".
@@ -455,7 +457,7 @@ export async function runWorkerForAccount(
           topicCreator: null,
           sourceTopicId: null,
           accountLog,
-          maxUploadSize: BigInt(config.maxPartSizeMB) * 1024n * 1024n,
+          maxUploadSize,
         };
 
         if (forum) {
@@ -1116,7 +1118,7 @@ async function processOneArchiveSet(
       });
       const concatPath = path.join(setDir, `${archiveSet.baseName}.concat`);
       await concatenateFiles(tempPaths, concatPath);
-      splitPaths = await byteLevelSplit(concatPath);
+      splitPaths = await byteLevelSplit(concatPath, ctx.maxUploadSize);
       uploadPaths = splitPaths;
       // Clean up the concat intermediate file
       await unlink(concatPath).catch(() => {});
@@ -1130,7 +1132,7 @@ async function processOneArchiveSet(
         currentFileNum: setIdx + 1,
         totalFiles: totalSets,
       });
-      splitPaths = await byteLevelSplit(tempPaths[0]);
+      splitPaths = await byteLevelSplit(tempPaths[0], ctx.maxUploadSize);
       uploadPaths = splitPaths;
     }
 

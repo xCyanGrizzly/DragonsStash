@@ -18,20 +18,22 @@ const log = childLogger("split");
 const MAX_PART_SIZE = BigInt(config.maxPartSizeMB) * 1024n * 1024n;
 
 /**
- * Split a file into ≤2GB parts using byte-level splitting.
- * Returns paths to the split parts. If the file is already ≤2GB, returns the original path.
+ * Split a file into parts using byte-level splitting.
+ * Returns paths to the split parts. If the file fits in one part, returns the original path.
+ * Pass maxPartSize to override the global default (e.g., 3950 MiB for Premium accounts).
  */
-export async function byteLevelSplit(filePath: string): Promise<string[]> {
+export async function byteLevelSplit(filePath: string, maxPartSize?: bigint): Promise<string[]> {
+  const effectiveMax = maxPartSize ?? MAX_PART_SIZE;
   const stats = await stat(filePath);
   const fileSize = BigInt(stats.size);
 
-  if (fileSize <= MAX_PART_SIZE) {
+  if (fileSize <= effectiveMax) {
     return [filePath];
   }
 
   const dir = path.dirname(filePath);
   const baseName = path.basename(filePath);
-  const partSize = Number(MAX_PART_SIZE);
+  const partSize = Number(effectiveMax);
   const totalParts = Math.ceil(Number(fileSize) / partSize);
   const parts: string[] = [];
 
