@@ -14,6 +14,7 @@ import {
   getGlobalSetting,
   setGlobalSetting,
   getActiveAccounts,
+  getChannelFetchRequest,
   upsertChannel,
   ensureAccountChannelLink,
   updateFetchRequestStatus,
@@ -133,7 +134,9 @@ let fetchQueue: Promise<void> = Promise.resolve();
 function handleChannelFetch(requestId: string): void {
   fetchQueue = fetchQueue.then(async () => {
     try {
-      await withTdlibMutex("global", "fetch-channels", () =>
+      const request = await getChannelFetchRequest(requestId);
+      const key = request?.account?.phone ?? "global";
+      await withTdlibMutex(key, "fetch-channels", () =>
         processFetchRequest(requestId)
       );
     } catch (err) {
@@ -147,21 +150,19 @@ function handleChannelFetch(requestId: string): void {
 function handleGenerateInvite(channelId: string): void {
   fetchQueue = fetchQueue.then(async () => {
     try {
-      await withTdlibMutex("global", "generate-invite", async () => {
+      const accounts = await getActiveAccounts();
+      if (accounts.length === 0) {
+        log.warn("No authenticated accounts to generate invite link");
+        return;
+      }
+      const account = accounts[0];
+      await withTdlibMutex(account.phone, "generate-invite", async () => {
         const destChannel = await getGlobalDestinationChannel();
         if (!destChannel || destChannel.id !== channelId) {
           log.warn({ channelId }, "Destination channel mismatch, skipping invite generation");
           return;
         }
 
-        // Use the first available authenticated account to generate the link
-        const accounts = await getActiveAccounts();
-        if (accounts.length === 0) {
-          log.warn("No authenticated accounts to generate invite link");
-          return;
-        }
-
-        const account = accounts[0];
         const { client } = await createTdlibClient({ id: account.id, phone: account.phone });
 
         try {
@@ -187,7 +188,13 @@ function handleCreateDestination(payload: string): void {
       const parsed = JSON.parse(payload) as { requestId: string; title: string };
       requestId = parsed.requestId;
 
-      await withTdlibMutex("global", "create-destination", async () => {
+      const accounts = await getActiveAccounts();
+      if (accounts.length === 0) {
+        throw new Error("No authenticated accounts available to create the group");
+      }
+      const account = accounts[0];
+
+      await withTdlibMutex(account.phone, "create-destination", async () => {
         const { db } = await import("./db/client.js");
 
         // Mark the request as in-progress
@@ -196,13 +203,6 @@ function handleCreateDestination(payload: string): void {
           data: { status: "IN_PROGRESS" },
         });
 
-        // Use the first available authenticated account
-        const accounts = await getActiveAccounts();
-        if (accounts.length === 0) {
-          throw new Error("No authenticated accounts available to create the group");
-        }
-
-        const account = accounts[0];
         const { client } = await createTdlibClient({ id: account.id, phone: account.phone });
 
         try {
@@ -328,14 +328,14 @@ function handleJoinChannel(payload: string): void {
       const parsed = JSON.parse(payload) as { requestId: string; input: string; accountId: string };
       requestId = parsed.requestId;
 
-      await withTdlibMutex("global", "join-channel", async () => {
-        await updateFetchRequestStatus(requestId!, "IN_PROGRESS");
+      const accounts = await getActiveAccounts();
+      const account = accounts.find((a) => a.id === parsed.accountId) ?? accounts[0];
+      if (!account) {
+        throw new Error("No authenticated accounts available");
+      }
 
-        const accounts = await getActiveAccounts();
-        const account = accounts.find((a) => a.id === parsed.accountId) ?? accounts[0];
-        if (!account) {
-          throw new Error("No authenticated accounts available");
-        }
+      await withTdlibMutex(account.phone, "join-channel", async () => {
+        await updateFetchRequestStatus(requestId!, "IN_PROGRESS");
 
         const { client } = await createTdlibClient({ id: account.id, phone: account.phone });
 
@@ -507,7 +507,12 @@ function handleIngestionTrigger(): void {
 function handleRebuildPackages(requestId: string): void {
   fetchQueue = fetchQueue.then(async () => {
     try {
-      await withTdlibMutex("global", "rebuild-packages", () =>
+      const accounts = await getActiveAccounts();
+      if (accounts.length === 0) {
+        log.warn("No authenticated accounts to rebuild packages");
+        return;
+      }
+      await withTdlibMutex(accounts[0].phone, "rebuild-packages", () =>
         rebuildPackageDatabase(requestId)
       );
     } catch (err) {

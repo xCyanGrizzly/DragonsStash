@@ -71,13 +71,30 @@ async function runCycle(): Promise<void> {
 
     log.info({ accountCount: accounts.length }, "Processing accounts");
 
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       accounts.map((account) =>
-        withTdlibMutex(account.phone, `ingest:${account.phone}`, () =>
-          runWorkerForAccount(account)
-        )
+        Promise.race([
+          withTdlibMutex(account.phone, `ingest:${account.phone}`, () =>
+            runWorkerForAccount(account)
+          ),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error(`Account ${account.phone} ingestion timed out after ${CYCLE_TIMEOUT_MS / 60_000}min`)),
+              CYCLE_TIMEOUT_MS
+            )
+          ),
+        ])
       )
     );
+
+    for (let i = 0; i < results.length; i++) {
+      if (results[i].status === "rejected") {
+        log.error(
+          { phone: accounts[i].phone, err: (results[i] as PromiseRejectedResult).reason },
+          "Account ingestion failed"
+        );
+      }
+    }
 
     log.info(
       { elapsed: Math.round((Date.now() - cycleStart) / 1000) },

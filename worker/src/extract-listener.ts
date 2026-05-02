@@ -101,15 +101,13 @@ export async function processExtractRequest(requestId: string): Promise<void> {
   try {
     await mkdir(tempDir, { recursive: true });
 
-    // Wrap the entire TDLib session in the mutex so no other TDLib
-    // operation can run concurrently (TDLib is single-session).
-    await withTdlibMutex("global", "extract", async () => {
-      const accounts = await getActiveAccounts();
-      if (accounts.length === 0) {
-        throw new Error("No authenticated Telegram accounts available");
-      }
+    const accounts = await getActiveAccounts();
+    if (accounts.length === 0) {
+      throw new Error("No authenticated Telegram accounts available");
+    }
+    const account = accounts[0];
 
-      const account = accounts[0];
+    await withTdlibMutex(account.phone, "extract", async () => {
       const { client } = await createTdlibClient({ id: account.id, phone: account.phone });
 
       try {
