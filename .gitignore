@@ -54,3 +54,4 @@ src/generated
 # temp files
 nul
 tmpclaude-*
+.worktrees/
