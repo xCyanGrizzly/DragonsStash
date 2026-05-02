@@ -72,19 +72,20 @@ async function runCycle(): Promise<void> {
     log.info({ accountCount: accounts.length }, "Processing accounts");
 
     const results = await Promise.allSettled(
-      accounts.map((account) =>
-        Promise.race([
+      accounts.map((account) => {
+        let timer: ReturnType<typeof setTimeout>;
+        return Promise.race([
           withTdlibMutex(account.phone, `ingest:${account.phone}`, () =>
             runWorkerForAccount(account)
           ),
-          new Promise<never>((_, reject) =>
-            setTimeout(
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
               () => reject(new Error(`Account ${account.phone} ingestion timed out after ${CYCLE_TIMEOUT_MS / 60_000}min`)),
               CYCLE_TIMEOUT_MS
-            )
-          ),
-        ])
-      )
+            );
+          }),
+        ]).finally(() => clearTimeout(timer));
+      })
     );
 
     for (let i = 0; i < results.length; i++) {
