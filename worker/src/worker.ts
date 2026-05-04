@@ -538,6 +538,15 @@ export async function runWorkerForAccount(
                   { channelId: channel.id, topic: topic.name, totalScanned: scanResult.totalScanned },
                   "No new archives in topic"
                 );
+                // Still advance topic watermark so we don't re-scan these messages next cycle
+                if (scanResult.maxScannedMessageId) {
+                  await upsertTopicProgress(
+                    mapping.id,
+                    topic.topicId,
+                    topic.name,
+                    scanResult.maxScannedMessageId
+                  );
+                }
                 continue;
               }
 
@@ -555,13 +564,14 @@ export async function runWorkerForAccount(
               // Sync client back in case it was recreated during upload stall recovery
               client = pipelineCtx.client;
 
-              // Only advance progress to the highest successfully processed message
-              if (maxProcessedId) {
+              // Advance progress: use archive watermark if available, fall back to scan watermark
+              const topicWatermark = maxProcessedId ?? scanResult.maxScannedMessageId;
+              if (topicWatermark) {
                 await upsertTopicProgress(
                   mapping.id,
                   topic.topicId,
                   topic.name,
-                  maxProcessedId
+                  topicWatermark
                 );
               }
             } catch (topicErr) {
@@ -611,6 +621,11 @@ export async function runWorkerForAccount(
 
           if (scanResult.archives.length === 0) {
             accountLog.info({ channelId: channel.id, title: channel.title, totalScanned: scanResult.totalScanned }, "No new archives in channel");
+            // Still advance watermark to highest scanned message so we don't
+            // re-scan these messages next cycle
+            if (scanResult.maxScannedMessageId) {
+              await updateLastProcessedMessage(mapping.id, scanResult.maxScannedMessageId);
+            }
             continue;
           }
 
@@ -628,9 +643,10 @@ export async function runWorkerForAccount(
           // Sync client back in case it was recreated during upload stall recovery
           client = pipelineCtx.client;
 
-          // Only advance progress to the highest successfully processed message
-          if (maxProcessedId) {
-            await updateLastProcessedMessage(mapping.id, maxProcessedId);
+          // Advance progress: use archive watermark if available, fall back to scan watermark
+          const channelWatermark = maxProcessedId ?? scanResult.maxScannedMessageId;
+          if (channelWatermark) {
+            await updateLastProcessedMessage(mapping.id, channelWatermark);
           }
         }
         } catch (channelErr) {

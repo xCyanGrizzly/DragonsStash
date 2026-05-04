@@ -178,6 +178,7 @@ export async function getTopicMessages(
   const archives: TelegramMessage[] = [];
   const photos: TelegramPhoto[] = [];
   const boundary = lastProcessedMessageId ? Number(lastProcessedMessageId) : null;
+  let maxScannedMessageId: bigint | null = null;
 
   let currentFromId = 0;
   let totalScanned = 0;
@@ -238,6 +239,12 @@ export async function getTopicMessages(
     if (!result.messages || result.messages.length === 0) break;
 
     totalScanned += result.messages.length;
+
+    // Track highest message ID (first message = newest, since results are newest-first)
+    const batchMaxId = BigInt(result.messages[0].id);
+    if (maxScannedMessageId === null || batchMaxId > maxScannedMessageId) {
+      maxScannedMessageId = batchMaxId;
+    }
 
     for (const msg of result.messages) {
       // Check for archive documents
@@ -302,6 +309,7 @@ export async function getTopicMessages(
     archives: archives.reverse(),
     photos: photos.reverse(),
     totalScanned,
+    maxScannedMessageId,
   };
 }
 

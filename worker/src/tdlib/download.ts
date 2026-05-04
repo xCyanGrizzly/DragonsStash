@@ -79,6 +79,8 @@ export interface ChannelScanResult {
   archives: TelegramMessage[];
   photos: TelegramPhoto[];
   totalScanned: number;
+  /** Highest message ID seen during scan (for watermark, even when no archives found). */
+  maxScannedMessageId: bigint | null;
 }
 
 export type ScanProgressCallback = (messagesScanned: number) => void;
@@ -158,6 +160,7 @@ export async function getChannelMessages(
   const archives: TelegramMessage[] = [];
   const photos: TelegramPhoto[] = [];
   const boundary = lastProcessedMessageId ? Number(lastProcessedMessageId) : null;
+  let maxScannedMessageId: bigint | null = null;
 
   // Open the chat so TDLib can access it
   try {
@@ -203,6 +206,12 @@ export async function getChannelMessages(
       if (!result.messages || result.messages.length === 0) break;
 
       totalScanned += result.messages.length;
+
+      // Track highest message ID (first message in batch = newest, since results are newest-first)
+      const batchMaxId = BigInt(result.messages[0].id);
+      if (maxScannedMessageId === null || batchMaxId > maxScannedMessageId) {
+        maxScannedMessageId = batchMaxId;
+      }
 
       for (const msg of result.messages) {
         // Check for archive documents
@@ -271,6 +280,7 @@ export async function getChannelMessages(
     archives: archives.reverse(),
     photos: photos.reverse(),
     totalScanned,
+    maxScannedMessageId,
   };
 }
 
