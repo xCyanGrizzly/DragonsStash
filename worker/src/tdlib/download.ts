@@ -246,6 +246,11 @@ export async function getChannelMessages(
       fromMessageId = result.messages[result.messages.length - 1].id;
       if (result.messages.length < Math.min(limit, 100)) break;
 
+      // Early exit: searchChatMessages returns newest-first. Once the oldest
+      // message on this page is at or below the boundary, all remaining pages
+      // are even older — no new messages exist, stop scanning immediately.
+      if (boundary && fromMessageId <= boundary) break;
+
       await sleep(config.apiDelayMs);
     }
   }
