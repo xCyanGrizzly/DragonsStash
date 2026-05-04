@@ -12,6 +12,29 @@ const queues = new Map<
 >();
 
 /**
+ * Force-release a stuck mutex.
+ * This should only be called when the holder is known to be stuck (e.g. after
+ * a cycle timeout). It releases the lock and lets the next queued waiter proceed.
+ */
+export function forceReleaseMutex(key: string): void {
+  if (!locks.has(key)) return;
+
+  const holder = holders.get(key);
+  log.warn({ key, holder }, "Force-releasing stuck TDLib mutex");
+
+  locks.delete(key);
+  holders.delete(key);
+  const next = queues.get(key)?.shift();
+  if (next) {
+    log.info({ key, next: next.label }, "TDLib mutex force-released to next waiter");
+    next.resolve();
+  } else {
+    queues.delete(key);
+    log.info({ key }, "TDLib mutex force-released (no waiters)");
+  }
+}
+
+/**
  * Ensures only one TDLib operation runs at a time FOR THE SAME KEY.
  * Different keys run concurrently — this allows two accounts to ingest in parallel
  * while still preventing concurrent use of the same account's TDLib state dir.

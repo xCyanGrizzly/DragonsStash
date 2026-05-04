@@ -47,7 +47,7 @@ import { readZipCentralDirectory } from "./archive/zip-reader.js";
 import { readRarContents } from "./archive/rar-reader.js";
 import { read7zContents } from "./archive/sevenz-reader.js";
 import { byteLevelSplit, concatenateFiles } from "./archive/split.js";
-import { uploadToChannel } from "./upload/channel.js";
+import { uploadToChannel, UploadStallError } from "./upload/channel.js";
 import { processAlbumGroups, processRuleBasedGroups, processTimeWindowGroups, processPatternGroups, processCreatorGroups, processZipPathGroups, processReplyChainGroups, processCaptionGroups, detectGroupingConflicts, type IndexedPackageRef } from "./grouping.js";
 import { db } from "./db/client.js";
 import type { TelegramAccount, TelegramChannel } from "@prisma/client";
@@ -286,6 +286,7 @@ interface PipelineContext {
   client: Client;
   runId: string;
   accountId: string;
+  accountPhone: string;
   channelTitle: string;
   channel: TelegramChannel;
   destChannelTelegramId: bigint;
@@ -303,6 +304,8 @@ interface PipelineContext {
   sourceTopicId: bigint | null;
   accountLog: ReturnType<typeof childLogger>;
   maxUploadSize: bigint;
+  /** How many consecutive upload stalls have occurred (resets on success). */
+  consecutiveStalls: number;
 }
 
 /**
@@ -338,7 +341,8 @@ export async function runWorkerForAccount(
       currentStep: "connecting",
     });
 
-    const { client, isPremium } = await createTdlibClient({
+    // Use let so the client can be replaced on TDLib recreation after stalls
+    let { client, isPremium } = await createTdlibClient({
       id: account.id,
       phone: account.phone,
     });
@@ -448,6 +452,7 @@ export async function runWorkerForAccount(
           client,
           runId: activeRunId,
           accountId: account.id,
+          accountPhone: account.phone,
           channelTitle: channel.title,
           channel,
           destChannelTelegramId: destChannel.telegramId,
@@ -458,6 +463,7 @@ export async function runWorkerForAccount(
           sourceTopicId: null,
           accountLog,
           maxUploadSize,
+          consecutiveStalls: 0,
         };
 
         if (forum) {
@@ -546,6 +552,8 @@ export async function runWorkerForAccount(
               pipelineCtx.channelTitle = `${channel.title} › ${topic.name}`;
 
               const maxProcessedId = await processArchiveSets(pipelineCtx, scanResult, run.id, progress?.lastProcessedMessageId);
+              // Sync client back in case it was recreated during upload stall recovery
+              client = pipelineCtx.client;
 
               // Only advance progress to the highest successfully processed message
               if (maxProcessedId) {
@@ -617,6 +625,8 @@ export async function runWorkerForAccount(
           pipelineCtx.channelTitle = channel.title;
 
           const maxProcessedId = await processArchiveSets(pipelineCtx, scanResult, run.id, mapping.lastProcessedMessageId);
+          // Sync client back in case it was recreated during upload stall recovery
+          client = pipelineCtx.client;
 
           // Only advance progress to the highest successfully processed message
           if (maxProcessedId) {
@@ -760,12 +770,68 @@ async function processArchiveSets(
       if (setMaxId > (maxProcessedId ?? 0n)) {
         maxProcessedId = setMaxId;
       }
+
+      // Reset stall counter on any successful upload
+      ctx.consecutiveStalls = 0;
     } catch (setErr) {
       // If a set fails, do NOT advance the watermark past it
       accountLog.warn(
         { err: setErr, baseName: archiveSets[setIdx].baseName },
         "Archive set failed, watermark will not advance past this set"
       );
+
+      // ── TDLib client recreation on repeated upload stalls ──
+      // When the TDLib event stream degrades, uploads complete (bytes sent)
+      // but confirmations never arrive. Retrying with the same broken client
+      // is futile. Recreate the client to get a fresh connection.
+      if (setErr instanceof UploadStallError) {
+        ctx.consecutiveStalls++;
+        accountLog.warn(
+          { consecutiveStalls: ctx.consecutiveStalls },
+          "Upload stall detected — TDLib event stream may be degraded"
+        );
+
+        // After 1 stalled set (= 3 failed retry attempts already), recreate the client
+        if (ctx.consecutiveStalls >= 1) {
+          accountLog.info("Recreating TDLib client after consecutive upload stalls");
+          try {
+            await closeTdlibClient(ctx.client);
+          } catch (closeErr) {
+            accountLog.warn({ err: closeErr }, "Error closing stale TDLib client");
+          }
+
+          try {
+            const { client: newClient } = await createTdlibClient({
+              id: ctx.accountId,
+              phone: ctx.accountPhone,
+            });
+            ctx.client = newClient;
+
+            // Reload chats so the new client can access channels
+            try {
+              for (let page = 0; page < 500; page++) {
+                await newClient.invoke({
+                  _: "loadChats",
+                  chat_list: { _: "chatListMain" },
+                  limit: 100,
+                });
+              }
+            } catch {
+              // 404 = all loaded (expected)
+            }
+
+            ctx.consecutiveStalls = 0;
+            accountLog.info("TDLib client recreated successfully — continuing ingestion");
+          } catch (recreateErr) {
+            accountLog.error(
+              { err: recreateErr },
+              "Failed to recreate TDLib client — aborting remaining uploads"
+            );
+            break;
+          }
+        }
+      }
+
       // Record the failure for visibility in the UI
       try {
         const archiveSet = archiveSets[setIdx];

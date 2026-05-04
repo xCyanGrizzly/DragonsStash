@@ -7,6 +7,18 @@ import { withFloodWait, extractFloodWaitSeconds } from "../util/retry.js";
 
 const log = childLogger("upload");
 
+/**
+ * Custom error class to distinguish upload stalls from other errors.
+ * When consecutive stalls occur, the caller can use this signal to
+ * recreate the TDLib client (whose event stream may have degraded).
+ */
+export class UploadStallError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UploadStallError";
+  }
+}
+
 export interface UploadResult {
   messageId: bigint;
   messageIds: bigint[];
@@ -109,13 +121,21 @@ async function sendWithRetry(
 
       // Stall or timeout — retry with a cooldown
       const errMsg = err instanceof Error ? err.message : "";
-      if ((errMsg.includes("stalled") || errMsg.includes("timed out")) && !isLastAttempt) {
-        log.warn(
-          { fileName, attempt: attempt + 1, maxRetries: MAX_UPLOAD_RETRIES },
-          "Upload stalled/timed out — retrying"
+      if (errMsg.includes("stalled") || errMsg.includes("timed out")) {
+        if (!isLastAttempt) {
+          log.warn(
+            { fileName, attempt: attempt + 1, maxRetries: MAX_UPLOAD_RETRIES },
+            "Upload stalled/timed out — retrying"
+          );
+          await sleep(10_000);
+          continue;
+        }
+        // All stall retries exhausted — throw UploadStallError so the caller
+        // knows the TDLib client's event stream is likely degraded and can
+        // recreate the client before continuing.
+        throw new UploadStallError(
+          `Upload stalled after ${MAX_UPLOAD_RETRIES} retries for ${fileName}`
         );
-        await sleep(10_000);
-        continue;
       }
 
       throw err;
@@ -166,8 +186,10 @@ async function sendAndWaitForUpload(
       }
     }, timeoutMs);
 
-    // Stall detection: no progress for 5 minutes after upload started → reject
-    const STALL_TIMEOUT_MS = 5 * 60_000;
+    // Stall detection: no progress for 3 minutes after upload started → reject
+    // (reduced from 5min — once data is fully sent, confirmation should arrive quickly;
+    //  a 3min silence strongly indicates a degraded TDLib event stream)
+    const STALL_TIMEOUT_MS = 3 * 60_000;
     const stallChecker = setInterval(() => {
       if (settled || !uploadStarted) return;
       const stallMs = Date.now() - lastProgressTime;

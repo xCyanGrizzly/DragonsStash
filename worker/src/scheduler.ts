@@ -1,6 +1,6 @@
 import { config } from "./util/config.js";
 import { childLogger } from "./util/logger.js";
-import { withTdlibMutex } from "./util/mutex.js";
+import { withTdlibMutex, forceReleaseMutex } from "./util/mutex.js";
 import { getActiveAccounts, getPendingAccounts } from "./db/queries.js";
 import { runWorkerForAccount, authenticateAccount } from "./worker.js";
 import { runIntegrityAudit } from "./audit.js";
@@ -90,10 +90,18 @@ async function runCycle(): Promise<void> {
 
     for (let i = 0; i < results.length; i++) {
       if (results[i].status === "rejected") {
+        const reason = (results[i] as PromiseRejectedResult).reason;
         log.error(
-          { phone: accounts[i].phone, err: (results[i] as PromiseRejectedResult).reason },
+          { phone: accounts[i].phone, err: reason },
           "Account ingestion failed"
         );
+        // If the cycle timed out, force-release the mutex so the next cycle
+        // (or other operations like fetch-channels) can proceed immediately
+        // instead of waiting 30 minutes for the mutex timeout.
+        const errMsg = reason instanceof Error ? reason.message : String(reason);
+        if (errMsg.includes("timed out") || errMsg.includes("mutex wait timeout")) {
+          forceReleaseMutex(accounts[i].phone);
+        }
       }
     }
 
