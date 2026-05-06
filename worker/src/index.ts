@@ -27,6 +27,33 @@ async function main(): Promise<void> {
   await cleanupTempDir();
   await markStaleRunsAsFailed();
 
+  // Release any advisory locks orphaned by a previous worker instance.
+  // When Docker kills a container, PostgreSQL may keep the session alive
+  // (zombie connections), holding advisory locks that block the new worker.
+  try {
+    const result = await pool.query(`
+      SELECT pid, state, left(query, 80) as query, age(clock_timestamp(), state_change) as idle_time
+      FROM pg_stat_activity
+      WHERE datname = current_database()
+        AND pid != pg_backend_pid()
+        AND state = 'idle'
+        AND query LIKE '%pg_try_advisory_lock%'
+        AND state_change < clock_timestamp() - interval '5 minutes'
+    `);
+    for (const row of result.rows) {
+      log.warn(
+        { pid: row.pid, idleTime: row.idle_time, query: row.query },
+        "Terminating stale advisory lock session from previous worker"
+      );
+      await pool.query("SELECT pg_terminate_backend($1)", [row.pid]);
+    }
+    if (result.rows.length > 0) {
+      log.info({ terminated: result.rows.length }, "Cleaned up stale advisory lock sessions");
+    }
+  } catch (err) {
+    log.warn({ err }, "Failed to clean up stale advisory locks (non-fatal)");
+  }
+
   // Verify destination messages exist for all "uploaded" packages.
   // Resets any packages whose dest message is missing so they get re-processed.
   await recoverIncompleteUploads();
