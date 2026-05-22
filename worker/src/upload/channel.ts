@@ -166,6 +166,12 @@ async function sendAndWaitForUpload(
     let lastProgressBytes = 0;
     let lastProgressTime = Date.now();
 
+    // Events for our message can arrive before `sendMessage` resolves
+    // (TDLib emits them while our .then() is still in the microtask queue).
+    // Buffer them and replay once tempMsgId is known.
+    let pendingSuccess: { oldMsgId: number; finalId: number } | null = null;
+    let pendingFailure: { oldMsgId: number; errorMsg: string; code?: number } | null = null;
+
     // Timeout: 20 minutes per GB, minimum 15 minutes
     const timeoutMs = Math.max(
       15 * 60_000,
@@ -202,6 +208,26 @@ async function sendAndWaitForUpload(
       }
     }, 30_000);
 
+    const completeWithSuccess = (finalId: number) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      log.info(
+        { fileName, tempMsgId, finalMsgId: finalId },
+        "Upload confirmed by Telegram"
+      );
+      resolve(BigInt(finalId));
+    };
+
+    const completeWithFailure = (errorMsg: string, code?: number) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const error = new Error(`Upload failed for ${fileName}: ${errorMsg}`);
+      (error as Error & { code?: number }).code = code;
+      reject(error);
+    };
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleUpdate = (update: any) => {
       // Track upload progress via updateFile events
@@ -232,33 +258,29 @@ async function sendAndWaitForUpload(
       // The money event: upload succeeded, we get the final server message ID
       if (update?._ === "updateMessageSendSucceeded") {
         const msg = update.message;
-        const oldMsgId = update.old_message_id;
-        if (tempMsgId !== null && oldMsgId === tempMsgId) {
-          if (!settled) {
-            settled = true;
-            cleanup();
-            const finalId = BigInt(msg.id);
-            log.info(
-              { fileName, tempMsgId, finalMsgId: Number(finalId) },
-              "Upload confirmed by Telegram"
-            );
-            resolve(finalId);
-          }
+        const oldMsgId: number = update.old_message_id;
+        if (tempMsgId === null) {
+          // Race: event arrived before our .then() assigned tempMsgId.
+          // Buffer it and process once tempMsgId is known.
+          pendingSuccess = { oldMsgId, finalId: msg.id };
+          return;
+        }
+        if (oldMsgId === tempMsgId) {
+          completeWithSuccess(msg.id);
         }
       }
 
       // Upload failed
       if (update?._ === "updateMessageSendFailed") {
-        const oldMsgId = update.old_message_id;
-        if (tempMsgId !== null && oldMsgId === tempMsgId) {
-          if (!settled) {
-            settled = true;
-            cleanup();
-            const errorMsg = update.error?.message ?? "Unknown upload error";
-            const error = new Error(`Upload failed for ${fileName}: ${errorMsg}`);
-            (error as Error & { code?: number }).code = update.error?.code;
-            reject(error);
-          }
+        const oldMsgId: number = update.old_message_id;
+        const errorMsg: string = update.error?.message ?? "Unknown upload error";
+        const code: number | undefined = update.error?.code;
+        if (tempMsgId === null) {
+          pendingFailure = { oldMsgId, errorMsg, code };
+          return;
+        }
+        if (oldMsgId === tempMsgId) {
+          completeWithFailure(errorMsg, code);
         }
       }
     };
@@ -302,6 +324,13 @@ async function sendAndWaitForUpload(
           { fileName, tempMsgId },
           "Message queued, waiting for upload confirmation"
         );
+
+        // Replay any event that arrived before we knew tempMsgId
+        if (pendingSuccess && pendingSuccess.oldMsgId === tempMsgId) {
+          completeWithSuccess(pendingSuccess.finalId);
+        } else if (pendingFailure && pendingFailure.oldMsgId === tempMsgId) {
+          completeWithFailure(pendingFailure.errorMsg, pendingFailure.code);
+        }
       })
       .catch((err) => {
         if (!settled) {
