@@ -20,4 +20,8 @@ export const config = {
   apiDelayMs: 1000,
   /** Max retries for rate-limited requests */
   maxRetries: 5,
+  /** After this many failed attempts on the same source message, the worker
+   *  stops auto-retrying and lets the watermark advance past it. The user can
+   *  manually retry via the UI to reset and try again. */
+  maxSkipAttempts: parseInt(process.env.WORKER_MAX_SKIP_ATTEMPTS ?? "5", 10),
 } as const;

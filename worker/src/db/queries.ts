@@ -625,6 +625,7 @@ export async function upsertSkippedPackage(data: {
       errorMessage: data.errorMessage ?? null,
       fileName: data.fileName,
       fileSize: data.fileSize,
+      attemptCount: { increment: 1 },
       createdAt: new Date(),
     },
     create: {
@@ -640,6 +641,26 @@ export async function upsertSkippedPackage(data: {
       accountId: data.accountId,
     },
   });
+}
+
+/**
+ * Return source-message IDs in a channel whose SkippedPackage attemptCount has
+ * reached or exceeded the cap — these are treated as "permanently failed for
+ * now" so the watermark can advance past them. The user can manually retry via
+ * the UI to reset the SkippedPackage record.
+ */
+export async function getCappedSkippedMessageIds(
+  sourceChannelId: string,
+  cap: number
+): Promise<Set<bigint>> {
+  const rows = await db.skippedPackage.findMany({
+    where: {
+      sourceChannelId,
+      attemptCount: { gte: cap },
+    },
+    select: { sourceMessageId: true },
+  });
+  return new Set(rows.map((r) => r.sourceMessageId));
 }
 
 export async function deleteSkippedPackage(

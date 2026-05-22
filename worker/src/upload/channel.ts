@@ -136,6 +136,28 @@ async function sendWithRetry(
         );
       }
 
+      // Transient Telegram server-side error (HTTP 5xx returned via
+      // updateMessageSendFailed). These are NOT FLOOD_WAIT, NOT stalls — just
+      // TG having a bad moment. They typically resolve on a short backoff, so
+      // retry up to MAX_UPLOAD_RETRIES with linear backoff before giving up.
+      const lowerMsg = errMsg.toLowerCase();
+      const isTransientServerError =
+        lowerMsg.includes("internal server error") ||
+        lowerMsg.includes("internal error") ||
+        lowerMsg.includes("server error") ||
+        lowerMsg.includes("bad gateway") ||
+        lowerMsg.includes("service unavailable") ||
+        lowerMsg.includes("gateway timeout");
+      if (isTransientServerError && !isLastAttempt) {
+        const backoffMs = 15_000 * (attempt + 1) + Math.random() * 5_000;
+        log.warn(
+          { fileName, attempt: attempt + 1, maxRetries: MAX_UPLOAD_RETRIES, backoffMs: Math.round(backoffMs) },
+          `Transient Telegram server error — retrying after backoff`
+        );
+        await sleep(backoffMs);
+        continue;
+      }
+
       throw err;
     }
   }
