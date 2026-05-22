@@ -589,6 +589,7 @@ export async function listSkippedPackages(options: {
     sourceMessageId: s.sourceMessageId.toString(),
     isMultipart: s.isMultipart,
     partCount: s.partCount,
+    attemptCount: s.attemptCount,
     createdAt: s.createdAt.toISOString(),
   }));
 

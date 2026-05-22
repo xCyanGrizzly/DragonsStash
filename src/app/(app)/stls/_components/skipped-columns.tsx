@@ -20,6 +20,7 @@ export interface SkippedRow {
   sourceChannel: { id: string; title: string };
   isMultipart: boolean;
   partCount: number;
+  attemptCount: number;
   createdAt: string;
 }
 
@@ -108,8 +109,21 @@ export function getSkippedColumns({
       accessorFn: (row) => row.sourceChannel.title,
     },
     {
+      accessorKey: "attemptCount",
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Attempts" />,
+      cell: ({ row }) => {
+        const count = row.original.attemptCount;
+        const variant = count >= 5 ? "destructive" : count > 1 ? "secondary" : "outline";
+        return (
+          <Badge variant={variant} className="text-[10px]">
+            {count}
+          </Badge>
+        );
+      },
+    },
+    {
       accessorKey: "createdAt",
-      header: ({ column }) => <DataTableColumnHeader column={column} title="Skipped" />,
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Last Skipped" />,
       cell: ({ row }) => (
         <span className="text-sm text-muted-foreground">
           {new Date(row.original.createdAt).toLocaleDateString()}

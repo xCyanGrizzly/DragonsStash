@@ -55,6 +55,8 @@ export interface SkippedPackageItem {
   sourceMessageId: string;
   isMultipart: boolean;
   partCount: number;
+  /** How many times the worker has tried this source message across cycles. */
+  attemptCount: number;
   createdAt: string;
 }
 
