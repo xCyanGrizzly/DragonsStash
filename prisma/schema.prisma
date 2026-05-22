@@ -741,6 +741,12 @@ model SkippedPackage {
   sourceTopicId   BigInt?
   isMultipart     Boolean          @default(false)
   partCount       Int              @default(1)
+  /// How many times the worker has tried to process this source message.
+  /// The worker auto-retries failures across cycles up to a configurable cap
+  /// (WORKER_MAX_SKIP_ATTEMPTS, default 5). After the cap, the watermark is
+  /// allowed to advance past the failure so cycles aren't pinned forever;
+  /// the user can manually retry via the UI to reset and try again.
+  attemptCount    Int              @default(1)
   accountId       String
   account         TelegramAccount  @relation(fields: [accountId], references: [id], onDelete: Cascade)
   createdAt       DateTime         @default(now())
@@ -830,6 +836,7 @@ enum NotificationType {
   DOWNLOAD_FAILED
   GROUPING_CONFLICT
   INTEGRITY_AUDIT
+  CHANNEL_ACCESS_LOST
 }
 
 enum NotificationSeverity {
