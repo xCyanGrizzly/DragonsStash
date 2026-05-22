@@ -119,22 +119,20 @@ async function sendWithRetry(
         continue;
       }
 
-      // Stall or timeout — retry with a cooldown
+      // Stall or timeout — fail fast and let the caller recreate the TDLib
+      // client. Retrying on the same degraded event stream wastes ~15 min
+      // per attempt because the underlying issue (missing send-success
+      // events) is client-level, not transient. The set ends up in
+      // SkippedPackage and the caller's watermark cap ensures it gets
+      // retried next cycle on a fresh client.
       const errMsg = err instanceof Error ? err.message : "";
       if (errMsg.includes("stalled") || errMsg.includes("timed out")) {
-        if (!isLastAttempt) {
-          log.warn(
-            { fileName, attempt: attempt + 1, maxRetries: MAX_UPLOAD_RETRIES },
-            "Upload stalled/timed out — retrying"
-          );
-          await sleep(10_000);
-          continue;
-        }
-        // All stall retries exhausted — throw UploadStallError so the caller
-        // knows the TDLib client's event stream is likely degraded and can
-        // recreate the client before continuing.
+        log.warn(
+          { fileName, attempt: attempt + 1 },
+          "Upload stalled — failing fast so caller can recreate TDLib client"
+        );
         throw new UploadStallError(
-          `Upload stalled after ${MAX_UPLOAD_RETRIES} retries for ${fileName}`
+          `Upload stalled for ${fileName}: ${errMsg}`
         );
       }
 
