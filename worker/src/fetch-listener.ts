@@ -6,6 +6,7 @@ import { processFetchRequest } from "./worker.js";
 import { processExtractRequest } from "./extract-listener.js";
 import { rebuildPackageDatabase } from "./rebuild.js";
 import { processManualUpload } from "./manual-upload.js";
+import { processBackfillRequest } from "./backfill.js";
 import { generateInviteLink, createSupergroup, searchPublicChat } from "./tdlib/chats.js";
 import { createTdlibClient, closeTdlibClient } from "./tdlib/client.js";
 import { triggerImmediateCycle } from "./scheduler.js";
@@ -58,6 +59,7 @@ async function connectListener(): Promise<void> {
     await pgClient.query("LISTEN archive_extract");
     await pgClient.query("LISTEN rebuild_packages");
     await pgClient.query("LISTEN manual_upload");
+    await pgClient.query("LISTEN backfill_filelists");
 
     pgClient.on("notification", (msg) => {
       if (msg.channel === "channel_fetch" && msg.payload) {
@@ -76,6 +78,8 @@ async function connectListener(): Promise<void> {
         handleRebuildPackages(msg.payload);
       } else if (msg.channel === "manual_upload" && msg.payload) {
         handleManualUpload(msg.payload);
+      } else if (msg.channel === "backfill_filelists") {
+        handleBackfillFilelists(msg.payload ?? "{}");
       }
     });
 
@@ -101,7 +105,7 @@ async function connectListener(): Promise<void> {
       }
     });
 
-    log.info("Fetch listener started (channel_fetch, generate_invite, create_destination, ingestion_trigger, join_channel, archive_extract, rebuild_packages, manual_upload)");
+    log.info("Fetch listener started (channel_fetch, generate_invite, create_destination, ingestion_trigger, join_channel, archive_extract, rebuild_packages, manual_upload, backfill_filelists)");
   } catch (err) {
     log.error({ err }, "Failed to start fetch listener — retrying");
     scheduleReconnect();
@@ -527,4 +531,18 @@ function handleManualUpload(uploadId: string): void {
   fetchQueue = fetchQueue
     .then(() => processManualUpload(uploadId))
     .catch((err) => log.error({ err, uploadId }, "Manual upload processing failed"));
+}
+
+// ── Backfill file-list handler ──
+//
+// Trigger via:
+//   SELECT pg_notify('backfill_filelists', '{"limit":50,"archiveType":"RAR"}');
+//
+// Both fields are optional. archiveType filters to one of ZIP/RAR/SEVEN_Z.
+// Default limit is 100. The handler queues so multiple notifications run
+// sequentially (no concurrent TDLib downloads competing for the mutex).
+function handleBackfillFilelists(payload: string): void {
+  fetchQueue = fetchQueue
+    .then(() => processBackfillRequest(payload))
+    .catch((err) => log.error({ err, payload }, "Backfill request failed"));
 }
