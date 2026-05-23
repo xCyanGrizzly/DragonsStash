@@ -78,18 +78,20 @@ export async function recoverIncompleteUploads(): Promise<void> {
 
     let resetCount = 0;
     let verifiedCount = 0;
+    let unknownCount = 0;
+    let wrongContentCount = 0;
 
     for (const [, channelPackages] of byChannel) {
       for (const pkg of channelPackages) {
-        const exists = await verifyMessageExists(
+        const result = await verifyMessageExists(
           client,
           destChannel.telegramId,
           pkg.destMessageId!
         );
 
-        if (exists) {
+        if (result.state === "exists") {
           verifiedCount++;
-        } else {
+        } else if (result.state === "deleted") {
           log.warn(
             {
               packageId: pkg.id,
@@ -100,21 +102,49 @@ export async function recoverIncompleteUploads(): Promise<void> {
           );
           await resetPackageDestination(pkg.id);
           resetCount++;
+        } else if (result.state === "wrong-content") {
+          // The message exists but isn't a document anymore (got cleared /
+          // replaced). Treat as missing so we re-upload.
+          log.warn(
+            {
+              packageId: pkg.id,
+              fileName: pkg.fileName,
+              destMessageId: Number(pkg.destMessageId),
+              contentType: result.contentType,
+            },
+            "Destination message is not a document, resetting package for re-upload"
+          );
+          await resetPackageDestination(pkg.id);
+          wrongContentCount++;
+        } else {
+          // Unknown — TDLib couldn't tell us. Don't reset, but DO count this
+          // so the summary line shows recovery wasn't 100% successful.
+          unknownCount++;
+          log.warn(
+            {
+              packageId: pkg.id,
+              fileName: pkg.fileName,
+              destMessageId: Number(pkg.destMessageId),
+              reason: result.reason.slice(0, 200),
+            },
+            "Could not verify destination message — will retry on next startup"
+          );
         }
       }
     }
 
-    if (resetCount > 0) {
-      log.info(
-        { resetCount, verifiedCount, totalChecked: packages.length },
-        "Upload recovery complete — packages reset for re-processing"
-      );
-    } else {
-      log.info(
-        { verifiedCount, totalChecked: packages.length },
-        "Upload recovery complete — all destination messages verified"
-      );
-    }
+    log.info(
+      {
+        verifiedCount,
+        resetCount,
+        wrongContentCount,
+        unknownCount,
+        totalChecked: packages.length,
+      },
+      unknownCount === 0
+        ? "Upload recovery complete"
+        : "Upload recovery complete — some packages could not be verified, will retry next startup"
+    );
   } catch (err) {
     log.error({ err }, "Upload recovery failed (non-fatal, will retry next startup)");
   } finally {
@@ -124,15 +154,28 @@ export async function recoverIncompleteUploads(): Promise<void> {
   }
 }
 
+type VerifyResult =
+  | { state: "exists" }
+  | { state: "deleted" }
+  | { state: "wrong-content"; contentType: string }
+  | { state: "unknown"; reason: string };
+
 /**
- * Check whether a message exists in a Telegram chat.
- * Returns false if the message was deleted or never existed.
+ * Check whether a message exists in a Telegram chat and is the document we
+ * uploaded. Returns a discriminated result instead of a bare boolean so the
+ * caller can distinguish "definitely gone" (reset) from "couldn't reach TG"
+ * (leave alone, try again next startup).
+ *
+ * Previous version conflated all non-404 errors with "exists", which masked
+ * recovery completely when TDLib had a degraded connection — the worker
+ * would log "all destination messages verified" even though it had answered
+ * questions it couldn't actually answer.
  */
 async function verifyMessageExists(
   client: Client,
   chatTelegramId: bigint,
   messageId: bigint
-): Promise<boolean> {
+): Promise<VerifyResult> {
   try {
     const result = await withFloodWait(
       () =>
@@ -144,44 +187,37 @@ async function verifyMessageExists(
       "getMessage:verify"
     );
 
-    // TDLib returns the message object if it exists.
-    // A deleted message may return with content type "messageChatDeleteMessage"
-    // or the call may throw. Check that we got a real message with content.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const msg = result as any;
     if (!msg || !msg.content) {
-      return false;
+      return { state: "deleted" };
     }
 
-    // Check that the message has document content (our uploads are documents)
-    // A message that exists but has no document content was likely cleared/replaced
     if (msg.content._ !== "messageDocument") {
-      log.debug(
-        {
-          messageId: Number(messageId),
-          contentType: msg.content._,
-        },
-        "Destination message exists but is not a document"
-      );
-      return false;
+      return { state: "wrong-content", contentType: String(msg.content._) };
     }
 
-    return true;
+    return { state: "exists" };
   } catch (err) {
-    // TDLib throws "Message not found" (error code 404) for deleted messages
-    const message = err instanceof Error ? err.message : String(err);
+    const errMessage = err instanceof Error ? err.message : String(err);
     const code = (err as { code?: number })?.code;
 
-    if (code === 404 || message.includes("not found") || message.includes("Not Found")) {
-      return false;
+    // Hard "the message is definitely gone" signals from TDLib:
+    //   - HTTP 404
+    //   - "Message not found" / "MESSAGE_ID_INVALID" error strings
+    const lower = errMessage.toLowerCase();
+    if (
+      code === 404 ||
+      lower.includes("message not found") ||
+      lower.includes("message_id_invalid") ||
+      lower.includes("messageidinvalid") ||
+      lower.includes("not found")
+    ) {
+      return { state: "deleted" };
     }
 
-    // For other errors (network issues, etc.), assume the message exists
-    // to avoid incorrectly resetting packages due to transient failures
-    log.warn(
-      { err, messageId: Number(messageId) },
-      "Could not verify message (assuming it exists)"
-    );
-    return true;
+    // Everything else (network, connection, TDLib internal) is genuinely
+    // unknown — do NOT claim "verified".
+    return { state: "unknown", reason: errMessage };
   }
 }
