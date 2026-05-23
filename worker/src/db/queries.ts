@@ -190,6 +190,36 @@ export async function packageExistsBySourceMessage(
 }
 
 /**
+ * Detect a likely repost: same source channel + same fileName + same total
+ * fileSize already exists with destMessageId set. Used to skip downloads
+ * when the channel admin re-posts the same file under a new message ID
+ * (which `packageExistsBySourceMessage` cannot catch because the message ID
+ * is different).
+ *
+ * Returns the existing package's destMessageId for logging/observability,
+ * or null if no match. Approximate: same name + same total size is an
+ * extremely strong signal that it's the same content, but theoretically
+ * two unrelated files could collide. If that ever happens, the new file
+ * gets treated as a duplicate and is lost; the user can manually re-link
+ * via the UI by removing the existing Package.
+ */
+export async function findRepostedPackage(
+  sourceChannelId: string,
+  fileName: string,
+  fileSize: bigint
+): Promise<{ id: string; destMessageId: bigint | null } | null> {
+  return db.package.findFirst({
+    where: {
+      sourceChannelId,
+      fileName,
+      fileSize,
+      destMessageId: { not: null },
+    },
+    select: { id: true, destMessageId: true },
+  });
+}
+
+/**
  * Delete orphaned Package rows that have the same content hash but never
  * completed the upload (destMessageId is null). Called before creating a
  * new complete record to avoid unique constraint violations.

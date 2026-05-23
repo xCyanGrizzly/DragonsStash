@@ -31,6 +31,7 @@ import {
   upsertSkippedPackage,
   deleteSkippedPackage,
   getCappedSkippedMessageIds,
+  findRepostedPackage,
 } from "./db/queries.js";
 import type { ActivityUpdate } from "./db/queries.js";
 import { createTdlibClient, closeTdlibClient } from "./tdlib/client.js";
@@ -1160,8 +1161,51 @@ async function processOneArchiveSet(
     return null;
   }
 
-  // ── Size guard: skip archives that exceed WORKER_MAX_ZIP_SIZE_MB ──
+  // Compute the total size across all parts (used by the repost check below
+  // AND by the size guard further down).
   const totalArchiveSize = archiveSet.parts.reduce((sum, p) => sum + p.fileSize, 0n);
+
+  // ── Pre-download repost detection ──
+  // The source channel admin frequently reposts the same file at new message
+  // IDs. packageExistsBySourceMessage misses these (different msgId), so we
+  // historically downloaded the file just to discover via hash that it's a
+  // duplicate — wasting hours of bandwidth per run.
+  //
+  // Match by (sourceChannelId, fileName, totalSize). The totalSize comparison
+  // makes this very strong — name-and-size collision between unrelated files
+  // is rare in practice. If it ever happens, the new file is treated as a
+  // duplicate; the user can remove the existing Package via the UI to force
+  // a re-ingestion.
+  const reposted = await findRepostedPackage(
+    channel.id,
+    archiveName,
+    totalArchiveSize
+  );
+  if (reposted) {
+    counters.zipsDuplicate++;
+    accountLog.info(
+      {
+        fileName: archiveName,
+        sourceMessageId: Number(archiveSet.parts[0].id),
+        existingPackageId: reposted.id,
+        existingDestMessageId: reposted.destMessageId ? Number(reposted.destMessageId) : null,
+        totalSize: Number(totalArchiveSize),
+      },
+      "Skipping repost — same fileName + size already uploaded in this channel"
+    );
+    await updateRunActivity(runId, {
+      currentActivity: `Skipped ${archiveName} (repost of already-uploaded file)`,
+      currentStep: "deduplicating",
+      currentChannel: channelTitle,
+      currentFile: archiveName,
+      currentFileNum: setIdx + 1,
+      totalFiles: totalSets,
+      zipsDuplicate: counters.zipsDuplicate,
+    });
+    return null;
+  }
+
+  // ── Size guard: skip archives that exceed WORKER_MAX_ZIP_SIZE_MB ──
   const maxSizeBytes = BigInt(config.maxZipSizeMB) * 1024n * 1024n;
   if (totalArchiveSize > maxSizeBytes) {
     accountLog.warn(
