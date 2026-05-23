@@ -207,7 +207,11 @@ export async function findRepostedPackage(
   sourceChannelId: string,
   fileName: string,
   fileSize: bigint
-): Promise<{ id: string; destMessageId: bigint | null } | null> {
+): Promise<{
+  id: string;
+  destMessageId: bigint | null;
+  sourceTopicId: bigint | null;
+} | null> {
   return db.package.findFirst({
     where: {
       sourceChannelId,
@@ -215,7 +219,12 @@ export async function findRepostedPackage(
       fileSize,
       destMessageId: { not: null },
     },
-    select: { id: true, destMessageId: true },
+    // Prefer the existing Package with the most specific (non-NULL)
+    // sourceTopicId, so when the user is re-scanning and the file already
+    // exists in a specific topic, the audit log shows the most informative
+    // match. NULLS LAST in DESC order achieves that for any non-null IDs.
+    orderBy: { sourceTopicId: { sort: "desc", nulls: "last" } },
+    select: { id: true, destMessageId: true, sourceTopicId: true },
   });
 }
 
@@ -699,6 +708,63 @@ export async function deleteSkippedPackage(
 ) {
   return db.skippedPackage.deleteMany({
     where: { sourceChannelId, sourceMessageId },
+  });
+}
+
+/**
+ * Find SkippedPackages for a given account+channel that are still eligible
+ * for auto-retry (attemptCount below the cap). Used at the start of a scan
+ * to pull the watermark back so we don't strand failed messages forever
+ * after the watermark has advanced past them.
+ *
+ * For non-forum channels, pass `topicId: null` to get rows with NULL topic.
+ * For forum channels, pass the topic ID to scope to that topic only.
+ */
+export async function getRetryableSkippedMessageIds(args: {
+  accountId: string;
+  sourceChannelId: string;
+  topicId: bigint | null;
+  cap: number;
+}): Promise<bigint[]> {
+  const rows = await db.skippedPackage.findMany({
+    where: {
+      accountId: args.accountId,
+      sourceChannelId: args.sourceChannelId,
+      sourceTopicId: args.topicId,
+      attemptCount: { lt: args.cap },
+    },
+    select: { sourceMessageId: true },
+    orderBy: { sourceMessageId: "asc" },
+  });
+  return rows.map((r) => r.sourceMessageId);
+}
+
+/**
+ * Update a Package's source topic when a more specific topic context is
+ * discovered for the same content. Used when findRepostedPackage matches
+ * an existing Package whose topic is less specific (e.g., "General") than
+ * the topic we just encountered the file in.
+ *
+ * Also updates the creator if the new topic name is more informative than
+ * the existing creator (i.e., the existing creator was derived from a
+ * less-specific topic name like "General").
+ */
+export async function updatePackageTopicContext(
+  packageId: string,
+  newTopicId: bigint,
+  newTopicName: string | null
+): Promise<void> {
+  await db.package.update({
+    where: { id: packageId },
+    data: {
+      sourceTopicId: newTopicId,
+      // Only overwrite creator if the new topic name is meaningful (non-empty,
+      // non-General). Keeps explicit creator values from filename or admin
+      // input intact.
+      ...(newTopicName && newTopicName !== "General"
+        ? { creator: newTopicName }
+        : {}),
+    },
   });
 }
 
