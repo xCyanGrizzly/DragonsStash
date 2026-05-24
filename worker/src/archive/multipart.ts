@@ -11,8 +11,11 @@ export interface TelegramMessage {
   fileSize: bigint;
   date: Date;
   mediaAlbumId?: string;
-  replyToMessageId?: bigint;  // NEW
-  caption?: string;            // NEW
+  replyToMessageId?: bigint;
+  caption?: string;
+  /** TDLib's `remote.unique_id` for the file — stable across reposts of
+   *  the exact same content. Empty string if the message didn't expose it. */
+  remoteUniqueId?: string;
 }
 
 export interface ArchiveSet {

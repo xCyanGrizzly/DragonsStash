@@ -210,6 +210,7 @@ export async function getTopicMessages(
             document?: {
               id: number;
               size: number;
+              remote?: { unique_id?: string };
             };
           };
           photo?: {
@@ -257,6 +258,7 @@ export async function getTopicMessages(
           fileSize: BigInt(doc.document.size),
           date: new Date(msg.date * 1000),
           mediaAlbumId: msg.media_album_id && msg.media_album_id !== "0" ? msg.media_album_id : undefined,
+          remoteUniqueId: doc.document.remote?.unique_id || undefined,
         });
         continue;
       }

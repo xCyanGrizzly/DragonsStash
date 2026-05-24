@@ -51,6 +51,10 @@ interface TdMessage {
           path?: string;
           is_downloading_completed?: boolean;
         };
+        remote?: {
+          /** Stable identifier across reposts of the same file content. */
+          unique_id?: string;
+        };
       };
     };
     photo?: {
@@ -231,6 +235,7 @@ export async function getChannelMessages(
             mediaAlbumId: msg.media_album_id && msg.media_album_id !== "0" ? msg.media_album_id : undefined,
             replyToMessageId: msg.reply_to_message_id ? BigInt(msg.reply_to_message_id) : undefined,
             caption: msg.content?.caption?.text || undefined,
+            remoteUniqueId: doc.document.remote?.unique_id || undefined,
           });
           continue;
         }

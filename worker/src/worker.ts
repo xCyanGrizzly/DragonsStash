@@ -32,6 +32,7 @@ import {
   deleteSkippedPackage,
   getCappedSkippedMessageIds,
   findRepostedPackage,
+  findPackageByRemoteUniqueId,
   getRetryableSkippedMessageIds,
   updatePackageTopicContext,
 } from "./db/queries.js";
@@ -1240,6 +1241,38 @@ async function processOneArchiveSet(
 
   const archiveName = archiveSet.parts[0].fileName;
 
+  // ── Earliest skip: remote.unique_id match ──
+  // TDLib reports a stable unique_id per file content. If we already have a
+  // Package in this channel with the same unique_id, it's the exact same
+  // file content reposted at a new message ID — zero false positives.
+  const firstRemoteUniqueId = archiveSet.parts[0].remoteUniqueId;
+  if (firstRemoteUniqueId) {
+    const match = await findPackageByRemoteUniqueId(channel.id, firstRemoteUniqueId);
+    if (match) {
+      counters.zipsDuplicate++;
+      accountLog.info(
+        {
+          fileName: archiveSet.parts[0].fileName,
+          sourceMessageId: Number(archiveSet.parts[0].id),
+          remoteUniqueId: firstRemoteUniqueId,
+          existingPackageId: match.id,
+          existingDestMessageId: match.destMessageId ? Number(match.destMessageId) : null,
+        },
+        "Skipping — remote.unique_id matches an existing Package in this channel"
+      );
+      await updateRunActivity(runId, {
+        currentActivity: `Skipped ${archiveSet.parts[0].fileName} (already ingested by unique_id)`,
+        currentStep: "deduplicating",
+        currentChannel: channelTitle,
+        currentFile: archiveSet.parts[0].fileName,
+        currentFileNum: setIdx + 1,
+        totalFiles: totalSets,
+        zipsDuplicate: counters.zipsDuplicate,
+      });
+      return null;
+    }
+  }
+
   // ── Early skip: check if this archive set was already ingested ──
   // This avoids re-downloading large archives that were processed in a prior run.
   const alreadyIngested = await packageExistsBySourceMessage(
@@ -1705,6 +1738,7 @@ async function processOneArchiveSet(
         sourceChannelId: channel.id,
         sourceMessageId: archiveSet.parts[0].id,
         sourceTopicId,
+        remoteUniqueId: archiveSet.parts[0].remoteUniqueId ?? null,
         destChannelId,
         destMessageId: destResult.messageId,
         destMessageIds: destResult.messageIds,

@@ -472,6 +472,11 @@ model Package {
   sourceChannelId String
   sourceMessageId BigInt
   sourceTopicId   BigInt?
+  /// TDLib's `remote.unique_id` for the FIRST part's file. Stable across
+  /// reposts of identical content in the same channel — used as the
+  /// strongest pre-download dedup signal (no false positives unlike
+  /// fileName + size matching).
+  remoteUniqueId  String?
   destChannelId   String?
   destMessageId   BigInt?
   destMessageIds  BigInt[]    @default([])
@@ -503,6 +508,7 @@ model Package {
   @@index([archiveType])
   @@index([creator])
   @@index([packageGroupId])
+  @@index([sourceChannelId, remoteUniqueId])
   @@map("packages")
 }
 

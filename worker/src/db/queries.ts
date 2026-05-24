@@ -82,6 +82,8 @@ export interface CreatePackageStubInput {
   sourceChannelId: string;
   sourceMessageId: bigint;
   sourceTopicId?: bigint | null;
+  /** TDLib remote.unique_id of the first part — for future dedup. */
+  remoteUniqueId?: string | null;
   destChannelId: string;
   destMessageId: bigint;
   destMessageIds: bigint[];
@@ -111,6 +113,7 @@ export async function createPackageStub(
       sourceChannelId: input.sourceChannelId,
       sourceMessageId: input.sourceMessageId,
       sourceTopicId: input.sourceTopicId ?? undefined,
+      remoteUniqueId: input.remoteUniqueId ?? undefined,
       destChannelId: input.destChannelId,
       destMessageId: input.destMessageId,
       destMessageIds: input.destMessageIds,
@@ -187,6 +190,34 @@ export async function packageExistsBySourceMessage(
     select: { id: true },
   });
   return pkg !== null;
+}
+
+/**
+ * Strongest pre-download dedup signal: a Package in this channel already
+ * has a matching TDLib remote.unique_id. The unique_id is stable across
+ * reposts of the exact same file content, so a hit is a guaranteed
+ * (lossless) duplicate. No false positives.
+ *
+ * Falls back to the older findRepostedPackage (name + size) for packages
+ * that were ingested before we started capturing remote.unique_id.
+ */
+export async function findPackageByRemoteUniqueId(
+  sourceChannelId: string,
+  remoteUniqueId: string
+): Promise<{
+  id: string;
+  destMessageId: bigint | null;
+  sourceTopicId: bigint | null;
+} | null> {
+  return db.package.findFirst({
+    where: {
+      sourceChannelId,
+      remoteUniqueId,
+      destMessageId: { not: null },
+    },
+    orderBy: { sourceTopicId: { sort: "desc", nulls: "last" } },
+    select: { id: true, destMessageId: true, sourceTopicId: true },
+  });
 }
 
 /**
