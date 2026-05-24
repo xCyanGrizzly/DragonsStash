@@ -47,6 +47,7 @@ import { pickPreviewFile, extractPreviewImage } from "./preview/extract.js";
 import { groupArchiveSets } from "./archive/multipart.js";
 import type { ArchiveSet } from "./archive/multipart.js";
 import { extractCreatorFromFileName, extractCreatorFromChannelTitle } from "./archive/creator.js";
+import { extractSlicerTags } from "./archive/slicer-tags.js";
 import { hashParts } from "./archive/hash.js";
 import { readZipCentralDirectory } from "./archive/zip-reader.js";
 import { readRarContents } from "./archive/rar-reader.js";
@@ -1728,6 +1729,15 @@ async function processOneArchiveSet(
 
       if (channel.category) {
         tags.push(channel.category);
+      }
+
+      // Derive slicer tags from the file listing so users can filter the
+      // catalog by "what software opens these files". Tags include "lychee",
+      // "chitubox", "anycubic", "bambu", "fdm" etc. — only added if matching
+      // slicer-specific files are present in the archive.
+      const slicerTags = extractSlicerTags(entries);
+      for (const tag of slicerTags) {
+        if (!tags.includes(tag)) tags.push(tag);
       }
 
       stub = await createPackageStub({

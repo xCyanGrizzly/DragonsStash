@@ -6,7 +6,7 @@ import { processFetchRequest } from "./worker.js";
 import { processExtractRequest } from "./extract-listener.js";
 import { rebuildPackageDatabase } from "./rebuild.js";
 import { processManualUpload } from "./manual-upload.js";
-import { processBackfillRequest } from "./backfill.js";
+import { processBackfillRequest, processSlicerTagBackfill } from "./backfill.js";
 import { generateInviteLink, createSupergroup, searchPublicChat } from "./tdlib/chats.js";
 import { createTdlibClient, closeTdlibClient } from "./tdlib/client.js";
 import { triggerImmediateCycle } from "./scheduler.js";
@@ -60,6 +60,7 @@ async function connectListener(): Promise<void> {
     await pgClient.query("LISTEN rebuild_packages");
     await pgClient.query("LISTEN manual_upload");
     await pgClient.query("LISTEN backfill_filelists");
+    await pgClient.query("LISTEN backfill_slicer_tags");
 
     pgClient.on("notification", (msg) => {
       if (msg.channel === "channel_fetch" && msg.payload) {
@@ -80,6 +81,8 @@ async function connectListener(): Promise<void> {
         handleManualUpload(msg.payload);
       } else if (msg.channel === "backfill_filelists") {
         handleBackfillFilelists(msg.payload ?? "{}");
+      } else if (msg.channel === "backfill_slicer_tags") {
+        handleBackfillSlicerTags(msg.payload ?? "{}");
       }
     });
 
@@ -105,7 +108,7 @@ async function connectListener(): Promise<void> {
       }
     });
 
-    log.info("Fetch listener started (channel_fetch, generate_invite, create_destination, ingestion_trigger, join_channel, archive_extract, rebuild_packages, manual_upload, backfill_filelists)");
+    log.info("Fetch listener started (channel_fetch, generate_invite, create_destination, ingestion_trigger, join_channel, archive_extract, rebuild_packages, manual_upload, backfill_filelists, backfill_slicer_tags)");
   } catch (err) {
     log.error({ err }, "Failed to start fetch listener — retrying");
     scheduleReconnect();
@@ -545,4 +548,17 @@ function handleBackfillFilelists(payload: string): void {
   fetchQueue = fetchQueue
     .then(() => processBackfillRequest(payload))
     .catch((err) => log.error({ err, payload }, "Backfill request failed"));
+}
+
+// ── Slicer tag backfill handler ──
+//
+// Trigger:
+//   SELECT pg_notify('backfill_slicer_tags', '{"limit":1000}');
+//
+// Pure-DB pass over Packages that have file lists but no slicer tags.
+// No downloads, no TDLib involvement — fast and safe.
+function handleBackfillSlicerTags(payload: string): void {
+  fetchQueue = fetchQueue
+    .then(() => processSlicerTagBackfill(payload))
+    .catch((err) => log.error({ err, payload }, "Slicer tag backfill failed"));
 }

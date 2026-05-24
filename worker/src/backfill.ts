@@ -10,6 +10,7 @@ import { getActiveAccounts } from "./db/queries.js";
 import { readZipCentralDirectory } from "./archive/zip-reader.js";
 import { readRarContents } from "./archive/rar-reader.js";
 import { read7zContents } from "./archive/sevenz-reader.js";
+import { extractSlicerTags } from "./archive/slicer-tags.js";
 import type { FileEntry } from "./archive/zip-reader.js";
 
 const log = childLogger("backfill");
@@ -228,6 +229,10 @@ async function processOnePackage(
       return;
     }
 
+    // Also derive slicer tags from the file list so the backfilled packages
+    // gain the same search/filter context as newly-ingested ones.
+    const slicerTags = extractSlicerTags(entries);
+
     // Write everything in a single transaction so a partial backfill never
     // leaves the Package half-indexed.
     await db.$transaction(async (tx) => {
@@ -235,7 +240,7 @@ async function processOnePackage(
       // have backfilled this package between our read and write.
       const current = await tx.package.findUnique({
         where: { id: pkg.id },
-        select: { fileCount: true },
+        select: { fileCount: true, tags: true },
       });
       if (current && current.fileCount > 0) {
         log.debug({ ...ctx, existingFileCount: current.fileCount }, "Already backfilled by another worker — skipping");
@@ -254,9 +259,15 @@ async function processOnePackage(
           crc32: e.crc32,
         })),
       });
+
+      // Merge slicer tags with whatever's already on the Package (preserve
+      // channel category, manual tags, etc.).
+      const existingTags = current?.tags ?? [];
+      const mergedTags = [...new Set([...existingTags, ...slicerTags])];
+
       await tx.package.update({
         where: { id: pkg.id },
-        data: { fileCount: entries.length },
+        data: { fileCount: entries.length, tags: mergedTags },
       });
     });
 
@@ -264,4 +275,69 @@ async function processOnePackage(
   } finally {
     await rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+/**
+ * Cheap pure-DB backfill: walk Packages that already have PackageFile rows
+ * but no slicer tags, recompute the tags from their extensions, and merge
+ * with the existing tag list. No downloads, no TDLib.
+ *
+ * Trigger:
+ *   SELECT pg_notify('backfill_slicer_tags', '{"limit":1000}');
+ */
+export async function processSlicerTagBackfill(payloadJson: string): Promise<void> {
+  let limit = 1000;
+  try {
+    const parsed = JSON.parse(payloadJson) as { limit?: number };
+    if (typeof parsed.limit === "number" && parsed.limit > 0) limit = parsed.limit;
+  } catch {
+    // Use default
+  }
+
+  // KNOWN_TAGS = the slicer tags we know how to derive. A Package missing
+  // all of these is a candidate for recompute. extractSlicerTags is safe
+  // to run on every package (returns [] for archives with no slicer files),
+  // but filtering up-front avoids walking the entire DB.
+  const KNOWN_TAGS = ["lychee", "chitubox", "anycubic", "bambu", "fdm", "mango"];
+
+  const candidates = await db.package.findMany({
+    where: {
+      fileCount: { gt: 0 },
+      NOT: { tags: { hasSome: KNOWN_TAGS } },
+    },
+    select: {
+      id: true,
+      tags: true,
+      files: { select: { extension: true } },
+    },
+    orderBy: { createdAt: "asc" },
+    take: limit,
+  });
+
+  if (candidates.length === 0) {
+    log.info("Slicer tag backfill: no candidates");
+    return;
+  }
+
+  log.info({ count: candidates.length }, "Slicer tag backfill: starting");
+
+  let updated = 0;
+  for (const pkg of candidates) {
+    const fileEntries = pkg.files.map((f) => ({
+      path: "",
+      fileName: "",
+      extension: f.extension,
+      compressedSize: 0n,
+      uncompressedSize: 0n,
+      crc32: null as string | null,
+    }));
+    const slicerTags = extractSlicerTags(fileEntries);
+    if (slicerTags.length === 0) continue;
+    const merged = [...new Set([...pkg.tags, ...slicerTags])];
+    if (merged.length === pkg.tags.length) continue;
+    await db.package.update({ where: { id: pkg.id }, data: { tags: merged } });
+    updated++;
+  }
+
+  log.info({ candidates: candidates.length, updated }, "Slicer tag backfill: done");
 }
