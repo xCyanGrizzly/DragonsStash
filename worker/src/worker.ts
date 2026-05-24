@@ -357,24 +357,32 @@ export async function runWorkerForAccount(
     // Load all chats into TDLib's local cache using loadChats (the recommended API).
     // Without this, getChat/searchChatMessages fail with "Chat not found".
     // loadChats returns a 404 when all chats have been loaded — that's the stop signal.
-    // Load from main, archive, AND chat folders to cover all chat types.
+    //
+    // TDLib 1.8.64+ removed the synchronous getChatFolders call; folder IDs
+    // now arrive only via the updateChatFolders event. We listen briefly,
+    // then load main + archive + any folders we caught. Chats inside folders
+    // are also reachable from chatListMain so missing the folder sweep is
+    // not a functional regression — it just loses a small bit of cache warming.
     {
-      // Discover chat folders first
-      const folderLists: { _: "chatListFolder"; chat_folder_id: number }[] = [];
-      try {
-        const folders = await client.invoke({ _: "getChatFolders" }) as {
-          chat_folders?: { id: number }[];
-        };
-        if (folders.chat_folders) {
-          for (const f of folders.chat_folders) {
-            folderLists.push({ _: "chatListFolder", chat_folder_id: f.id });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const folderLists: any[] = await new Promise((resolve) => {
+        const ids: number[] = [];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const handler = (update: any) => {
+          if (update?._ === "updateChatFolders") {
+            const folders = update.chat_folders as { id: number }[] | undefined;
+            if (folders) for (const f of folders) ids.push(f.id);
           }
-        }
-      } catch {
-        // getChatFolders may not be available in older TDLib versions
-      }
+        };
+        client.on("update", handler);
+        setTimeout(() => {
+          client.off("update", handler);
+          resolve(ids.map((id) => ({ _: "chatListFolder", chat_folder_id: id })));
+        }, 200);
+      });
 
-      const chatLists: Record<string, unknown>[] = [
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const chatLists: any[] = [
         { _: "chatListMain" },
         { _: "chatListArchive" },
         ...folderLists,

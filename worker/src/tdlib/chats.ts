@@ -5,6 +5,36 @@ import { withFloodWait } from "../util/retry.js";
 
 const log = childLogger("chats");
 
+/**
+ * Collect chat folder IDs to widen the loadChats sweep across all folder
+ * chat lists. In TDLib 1.8.64+ there's no synchronous getChatFolders call —
+ * the folder list arrives via updateChatFolders. We listen for it briefly
+ * (200ms) and fall back to an empty list if nothing arrives; chats inside
+ * folders are still reachable via chatListMain so this only loses some
+ * preemptive cache warming.
+ */
+async function collectFolderIds(
+  client: Client
+): Promise<{ _: "chatListFolder"; chat_folder_id: number }[]> {
+  return new Promise((resolve) => {
+    const ids: number[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = (update: any) => {
+      if (update?._ === "updateChatFolders") {
+        const folders = update.chat_folders as { id: number }[] | undefined;
+        if (folders) {
+          for (const f of folders) ids.push(f.id);
+        }
+      }
+    };
+    client.on("update", handler);
+    setTimeout(() => {
+      client.off("update", handler);
+      resolve(ids.map((id) => ({ _: "chatListFolder" as const, chat_folder_id: id })));
+    }, 200);
+  });
+}
+
 export interface TelegramChatInfo {
   chatId: bigint;
   title: string;
@@ -37,21 +67,16 @@ export async function getAccountChats(
   // First, load all chats into TDLib's cache using loadChats (the proper API).
   // loadChats returns 404 when all chats have been loaded.
   // Then use getChats to retrieve the IDs for enrichment.
-  // Load from main, archive, AND chat folders to cover all chat types.
-  const folderLists: { _: "chatListFolder"; chat_folder_id: number }[] = [];
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const folders = (await client.invoke({ _: "getChatFolders" })) as any;
-    if (folders?.chat_folders) {
-      for (const f of folders.chat_folders) {
-        folderLists.push({ _: "chatListFolder", chat_folder_id: f.id });
-      }
-    }
-  } catch {
-    // getChatFolders may not be available in older TDLib versions
-  }
+  //
+  // Folder-specific loading (chatListFolder) was removed in TDLib 1.8.64+ —
+  // getChatFolders (plural) is no longer a callable method, only the
+  // updateChatFolders event. The chats inside folders are still reachable
+  // via chatListMain so this isn't a functional regression.
+  const folderLists: { _: "chatListFolder"; chat_folder_id: number }[] =
+    await collectFolderIds(client);
 
-  const chatLists: Record<string, unknown>[] = [
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const chatLists: any[] = [
     { _: "chatListMain" },
     { _: "chatListArchive" },
     ...folderLists,

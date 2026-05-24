@@ -115,7 +115,10 @@ export async function invokeWithTimeout<T>(
           }
         }, timeoutMs);
 
-        (client.invoke(request) as Promise<T>)
+        // The tdl 8.1+ types are very strict about the literal `_` field;
+        // our generic wrapper passes arbitrary requests, so cast through any.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (client.invoke(request as any) as Promise<T>)
           .then((result) => {
             if (!settled) {
               settled = true;
