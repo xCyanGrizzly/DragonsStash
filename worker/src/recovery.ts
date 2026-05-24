@@ -81,17 +81,28 @@ export async function recoverIncompleteUploads(): Promise<void> {
     let unknownCount = 0;
     let wrongContentCount = 0;
 
+    // Batch size for getMessages. TDLib accepts up to ~100 IDs per call.
+    // Using 100 means 20k packages → ~200 round-trips instead of 20k.
+    const BATCH_SIZE = 100;
+
     for (const [, channelPackages] of byChannel) {
-      for (const pkg of channelPackages) {
-        const result = await verifyMessageExists(
+      // Group packages by destChannelId (already done) — within each group,
+      // process in batches via getMessages (plural).
+      for (let i = 0; i < channelPackages.length; i += BATCH_SIZE) {
+        const batch = channelPackages.slice(i, i + BATCH_SIZE);
+        const batchResults = await verifyMessagesBatch(
           client,
           destChannel.telegramId,
-          pkg.destMessageId!
+          batch.map((p) => p.destMessageId!)
         );
 
-        if (result.state === "exists") {
-          verifiedCount++;
-        } else if (result.state === "deleted") {
+        for (let j = 0; j < batch.length; j++) {
+          const pkg = batch[j];
+          const result = batchResults[j];
+
+          if (result.state === "exists") {
+            verifiedCount++;
+          } else if (result.state === "deleted") {
           log.warn(
             {
               packageId: pkg.id,
@@ -130,6 +141,7 @@ export async function recoverIncompleteUploads(): Promise<void> {
             "Could not verify destination message — will retry on next startup"
           );
         }
+        }
       }
     }
 
@@ -159,6 +171,55 @@ type VerifyResult =
   | { state: "deleted" }
   | { state: "wrong-content"; contentType: string }
   | { state: "unknown"; reason: string };
+
+/**
+ * Batch version of verifyMessageExists. Calls TDLib's getMessages (plural)
+ * with up to ~100 message IDs at once. Returns one VerifyResult per input
+ * ID, in input order. Missing messages come back as null in TDLib's response
+ * — translated to {state: "deleted"} here.
+ *
+ * Falls back to per-message verification on any error so that one bad batch
+ * doesn't lose all verification for that chunk.
+ */
+async function verifyMessagesBatch(
+  client: Client,
+  chatTelegramId: bigint,
+  messageIds: bigint[]
+): Promise<VerifyResult[]> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = (await withFloodWait(
+      () =>
+        client.invoke({
+          _: "getMessages",
+          chat_id: Number(chatTelegramId),
+          message_ids: messageIds.map((id) => Number(id)),
+        }),
+      "getMessages:verify"
+    )) as { messages?: (null | { content?: { _: string } })[] };
+
+    const messages = result.messages ?? [];
+    return messageIds.map((_id, i) => {
+      const m = messages[i];
+      if (!m || !m.content) return { state: "deleted" };
+      if (m.content._ !== "messageDocument") {
+        return { state: "wrong-content", contentType: String(m.content._) };
+      }
+      return { state: "exists" };
+    });
+  } catch (err) {
+    // If the whole batch errors out, fall back to per-message verification.
+    log.warn(
+      { err, batchSize: messageIds.length, chatTelegramId: chatTelegramId.toString() },
+      "getMessages batch failed, falling back to per-message verification"
+    );
+    const out: VerifyResult[] = [];
+    for (const id of messageIds) {
+      out.push(await verifyMessageExists(client, chatTelegramId, id));
+    }
+    return out;
+  }
+}
 
 /**
  * Check whether a message exists in a Telegram chat and is the document we

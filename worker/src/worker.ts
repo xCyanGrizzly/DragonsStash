@@ -48,6 +48,7 @@ import { groupArchiveSets } from "./archive/multipart.js";
 import type { ArchiveSet } from "./archive/multipart.js";
 import { extractCreatorFromFileName, extractCreatorFromChannelTitle } from "./archive/creator.js";
 import { extractSlicerTags } from "./archive/slicer-tags.js";
+import { testArchiveIntegrity } from "./archive/integrity.js";
 import { hashParts } from "./archive/hash.js";
 import { readZipCentralDirectory } from "./archive/zip-reader.js";
 import { readRarContents } from "./archive/rar-reader.js";
@@ -1653,6 +1654,19 @@ async function processOneArchiveSet(
       );
     }
 
+      // ── Pre-upload integrity test ──
+      // Catch broken/encrypted archives before we burn upload bandwidth on
+      // them. Cheap (unzip -t / unrar t / 7z t) compared to a multi-GB upload.
+      // Skipped when we're reusing an existing upload — no point testing the
+      // file again.
+      const integrity = await testArchiveIntegrity(
+        archiveSet.type === "7Z" ? "SEVEN_Z" : archiveSet.type,
+        uploadPaths[0]
+      );
+      if (!integrity.ok) {
+        throw new Error(`Archive integrity check failed: ${integrity.reason}`);
+      }
+
       // ── Uploading ──
       // Check if a prior run already uploaded this file (orphaned upload scenario:
       // file reached Telegram but DB write failed or worker crashed before indexing)
@@ -1715,6 +1729,72 @@ async function processOneArchiveSet(
           }
         } catch {
           // Best-effort — don't fail the ingestion
+        }
+      }
+
+      // ── Destination read-back verification ──
+      // Telegram's updateMessageSendSucceeded fires when TG acknowledges the
+      // message, but that's separate from "the message is queryable and
+      // contains the file we sent". Fetch each destination message and
+      // confirm the document's size matches what we uploaded.
+      //
+      // Skipped when reusing an existing upload (we never sent anything).
+      // Failures here surface as a SystemNotification but DO NOT abort the
+      // ingestion — the Package will be created with whatever destMessageIds
+      // Telegram returned, and a future recovery run can reset it if needed.
+      if (!existingUpload && destResult.messageIds.length > 0) {
+        try {
+          const expectedSizes = uploadPaths.length === destResult.messageIds.length
+            ? await Promise.all(
+                uploadPaths.map(async (p) => (await import("fs/promises")).stat(p).then((s) => s.size))
+              )
+            : null;
+
+          for (let i = 0; i < destResult.messageIds.length; i++) {
+            const msgId = Number(destResult.messageIds[i]);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const tdMsg = (await client.invoke({
+              _: "getMessage",
+              chat_id: Number(destChannelTelegramId),
+              message_id: msgId,
+            }).catch(() => null)) as any;
+
+            const doc = tdMsg?.content?.document?.document;
+            const actualSize = doc?.size;
+            const expected = expectedSizes?.[i];
+
+            if (!actualSize) {
+              accountLog.warn(
+                { fileName: archiveName, destMessageId: msgId },
+                "Post-upload read-back: destination message has no document content"
+              );
+              await db.systemNotification.create({
+                data: {
+                  type: "UPLOAD_FAILED",
+                  severity: "WARNING",
+                  title: `Read-back failed: ${archiveName}`,
+                  message: `Destination message ${msgId} has no document content after upload. The upload may have failed silently.`,
+                  context: { fileName: archiveName, destMessageId: msgId, sourceChannelId: channel.id },
+                },
+              });
+            } else if (expected !== undefined && actualSize !== expected) {
+              accountLog.error(
+                { fileName: archiveName, destMessageId: msgId, expectedSize: expected, actualSize },
+                "Post-upload read-back: destination file size mismatch"
+              );
+              await db.systemNotification.create({
+                data: {
+                  type: "HASH_MISMATCH",
+                  severity: "ERROR",
+                  title: `Read-back size mismatch: ${archiveName}`,
+                  message: `Sent ${expected} bytes but destination message ${msgId} contains a ${actualSize}-byte file.`,
+                  context: { fileName: archiveName, destMessageId: msgId, expectedSize: expected, actualSize, sourceChannelId: channel.id },
+                },
+              });
+            }
+          }
+        } catch (readBackErr) {
+          accountLog.warn({ err: readBackErr, fileName: archiveName }, "Post-upload read-back failed (non-fatal)");
         }
       }
 
