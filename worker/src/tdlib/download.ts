@@ -39,7 +39,15 @@ interface TdMessage {
   id: number;
   date: number;
   media_album_id?: string;
+  // TDLib 1.8.50 exposed `reply_to_message_id` directly on the message.
+  // 1.8.64+ replaced it with a tagged-union `reply_to: MessageReplyTo`.
+  // Read both for resilience across versions.
   reply_to_message_id?: number;
+  reply_to?: {
+    _: string;
+    chat_id?: number;
+    message_id?: number;
+  };
   content: {
     _: string;
     document?: {
@@ -64,6 +72,24 @@ interface TdMessage {
       text?: string;
     };
   };
+}
+
+/**
+ * Pick the right "the message I'm replying to" ID across TDLib versions.
+ *  - 1.8.50 and earlier expose it directly as `reply_to_message_id`.
+ *  - 1.8.64+ expose `reply_to: MessageReplyTo` (tagged union); a reply to
+ *    a regular message has `_: "messageReplyToMessage"` with `message_id`.
+ *  - Story replies (`_: "messageReplyToStory"`) intentionally return null
+ *    here — they aren't useful for our reply-chain grouping.
+ */
+function extractReplyToMessageId(msg: TdMessage): bigint | undefined {
+  if (msg.reply_to_message_id) {
+    return BigInt(msg.reply_to_message_id);
+  }
+  if (msg.reply_to && msg.reply_to._ === "messageReplyToMessage" && msg.reply_to.message_id) {
+    return BigInt(msg.reply_to.message_id);
+  }
+  return undefined;
 }
 
 interface TdFile {
@@ -202,12 +228,14 @@ export async function getChannelMessages(
       const result = await invokeWithTimeout<{ messages: TdMessage[]; total_count?: number }>(client, {
         _: "searchChatMessages",
         chat_id: Number(chatId),
+        // No topic_id for a flat (non-forum) channel scan. TDLib 1.8.64+
+        // dropped the top-level `message_thread_id: 0` we used to pass; the
+        // type-narrow now is "omit the field entirely if not in a topic".
         query: "",
         from_message_id: fromMessageId,
         offset: 0,
         limit: Math.min(limit, 100),
         filter,
-        message_thread_id: 0,
       });
 
       if (!result.messages || result.messages.length === 0) break;
@@ -233,7 +261,7 @@ export async function getChannelMessages(
             fileSize: BigInt(doc.document.size),
             date: new Date(msg.date * 1000),
             mediaAlbumId: msg.media_album_id && msg.media_album_id !== "0" ? msg.media_album_id : undefined,
-            replyToMessageId: msg.reply_to_message_id ? BigInt(msg.reply_to_message_id) : undefined,
+            replyToMessageId: extractReplyToMessageId(msg),
             caption: msg.content?.caption?.text || undefined,
             remoteUniqueId: doc.document.remote?.unique_id || undefined,
           });

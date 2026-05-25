@@ -308,14 +308,15 @@ async function scanDestinationChannel(
     }>(client, {
       _: "searchChatMessages",
       chat_id: Number(chatId),
+      // No topic context for a flat destination scan. TDLib 1.8.64+ replaced
+      // `message_thread_id` / `saved_messages_topic_id` with a single
+      // optional `topic_id`; for a flat scan we just omit it.
       query: "",
       from_message_id: currentFromId,
       offset: 0,
       limit: 100,
       filter: { _: "searchMessagesFilterDocument" },
       sender_id: null,
-      message_thread_id: 0,
-      saved_messages_topic_id: 0,
     });
 
     if (!result.messages || result.messages.length === 0) break;

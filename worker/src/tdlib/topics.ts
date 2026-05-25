@@ -239,14 +239,20 @@ export async function getTopicMessages(
     }>(client, {
       _: "searchChatMessages",
       chat_id: Number(chatId),
+      // TDLib 1.8.64+ replaced the top-level `message_thread_id` and
+      // `saved_messages_topic_id` parameters with a single tagged-union
+      // `topic_id: MessageTopic$Input`. For a forum topic, use the
+      // messageTopicForum variant carrying the forum_topic_id.
+      topic_id: {
+        _: "messageTopicForum",
+        forum_topic_id: Number(topicId),
+      },
       query: "",
-      message_thread_id: Number(topicId),
       from_message_id: currentFromId,
       offset: 0,
       limit: Math.min(limit, 100),
       filter: null,
       sender_id: null,
-      saved_messages_topic_id: 0,
     });
 
     if (!result.messages || result.messages.length === 0) break;
