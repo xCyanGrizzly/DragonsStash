@@ -64,7 +64,11 @@ export async function getForumTopicList(
   const topics: ForumTopic[] = [];
   let offsetDate = 0;
   let offsetMessageId = 0;
-  let offsetMessageThreadId = 0;
+  // TDLib 1.8.64+ renamed `offset_message_thread_id` → `offset_forum_topic_id`
+  // in the getForumTopics request, and `next_offset_message_thread_id` →
+  // `next_offset_forum_topic_id` in the response. Individual topic infos
+  // also moved from `info.message_thread_id` → `info.forum_topic_id`.
+  let offsetForumTopicId = 0;
   let pageCount = 0;
 
   // eslint-disable-next-line no-constant-condition
@@ -80,12 +84,16 @@ export async function getForumTopicList(
 
     const prevOffsetDate = offsetDate;
     const prevOffsetMessageId = offsetMessageId;
-    const prevOffsetMessageThreadId = offsetMessageThreadId;
+    const prevOffsetForumTopicId = offsetForumTopicId;
 
     const result = await invokeWithTimeout<{
       topics?: {
         info?: {
+          // Both names — 1.8.50 used the first, 1.8.64+ uses the second.
+          // Read both so a future TDLib downgrade or transition build is
+          // still handled.
           message_thread_id?: number;
+          forum_topic_id?: number;
           name?: string;
           is_general?: boolean;
         };
@@ -93,45 +101,49 @@ export async function getForumTopicList(
       next_offset_date?: number;
       next_offset_message_id?: number;
       next_offset_message_thread_id?: number;
+      next_offset_forum_topic_id?: number;
     }>(client, {
       _: "getForumTopics",
       chat_id: Number(chatId),
       query: "",
       offset_date: offsetDate,
       offset_message_id: offsetMessageId,
-      offset_message_thread_id: offsetMessageThreadId,
+      offset_forum_topic_id: offsetForumTopicId,
       limit: 100,
     });
 
     if (!result.topics || result.topics.length === 0) break;
 
     for (const t of result.topics) {
-      if (!t.info?.message_thread_id) continue;
+      const topicId = t.info?.forum_topic_id ?? t.info?.message_thread_id;
+      if (!topicId) continue;
 
       topics.push({
-        topicId: BigInt(t.info.message_thread_id),
-        name: t.info.is_general ? "General" : (t.info.name ?? "Unnamed"),
+        topicId: BigInt(topicId),
+        name: t.info?.is_general ? "General" : (t.info?.name ?? "Unnamed"),
       });
     }
 
     // Check if there are more pages
+    const nextForumTopicId =
+      result.next_offset_forum_topic_id ?? result.next_offset_message_thread_id;
     if (
       !result.next_offset_date &&
       !result.next_offset_message_id &&
-      !result.next_offset_message_thread_id
+      !nextForumTopicId
     ) {
       break;
     }
 
     offsetDate = result.next_offset_date ?? 0;
     offsetMessageId = result.next_offset_message_id ?? 0;
-    offsetMessageThreadId = result.next_offset_message_thread_id ?? 0;
+    offsetForumTopicId = nextForumTopicId ?? 0;
 
     // Stuck detection: if offsets didn't advance, break
     if (
       offsetDate === prevOffsetDate &&
       offsetMessageId === prevOffsetMessageId &&
-      offsetMessageThreadId === prevOffsetMessageThreadId
+      offsetForumTopicId === prevOffsetForumTopicId
     ) {
       log.warn(
         { chatId: chatId.toString(), topicCount: topics.length },
