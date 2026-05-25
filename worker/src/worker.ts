@@ -563,6 +563,33 @@ export async function runWorkerForAccount(
                 (tp) => tp.topicId === topic.topicId
               );
 
+              // ── General-topic ID migration ──
+              // TDLib 1.8.50 reported `info.message_thread_id = 1048576` for
+              // the General topic (a magic constant). TDLib 1.8.64 reports
+              // `info.forum_topic_id = 1` for the same topic. Old DB rows
+              // therefore don't match the new numeric ID — fall back to a
+              // name match so we don't restart General from message 0. On
+              // the next watermark write, we'll save under the new ID and
+              // future runs hit the topicId match directly. The orphaned
+              // 1048576 row remains as harmless dead data.
+              if (!progress && topic.name === "General") {
+                const oldGeneral = topicProgressList.find(
+                  (tp) => tp.topicName === "General" && tp.topicId !== topic.topicId
+                );
+                if (oldGeneral) {
+                  accountLog.info(
+                    {
+                      channel: channel.title,
+                      oldTopicId: oldGeneral.topicId.toString(),
+                      newTopicId: topic.topicId.toString(),
+                      preservedWatermark: oldGeneral.lastProcessedMessageId?.toString() ?? null,
+                    },
+                    "Reusing old General-topic progress under new TDLib forum_topic_id"
+                  );
+                  progress = oldGeneral;
+                }
+              }
+
               // ── SkippedPackage retry pass ──
               // If we have failed messages in this topic with attemptCount
               // below the cap, pull the watermark back below the lowest of
