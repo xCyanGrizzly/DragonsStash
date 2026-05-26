@@ -450,6 +450,17 @@ model AccountChannelMap {
   channelId              String
   role                   ChannelRole @default(READER)
   lastProcessedMessageId BigInt?
+  /// When this channel was last scanned (any reason, including skipped scans
+  /// that bumped the timestamp). Used by the recency-skip guard.
+  lastScannedAt          DateTime?
+  /// True if the last scan found archives OR left retryable SkippedPackages
+  /// pending. Tracks "this channel has work I might need to revisit" — not
+  /// just "I uploaded something this cycle".
+  lastScanFoundArchives  Boolean     @default(false)
+  /// Number of consecutive cycles where this channel was trulyIdle (no
+  /// archives, no failures, no retryables). Drives the backoff that lets
+  /// cold channels skip cycles entirely.
+  consecutiveEmptyScans  Int         @default(0)
   createdAt              DateTime    @default(now())
 
   account        TelegramAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
@@ -587,6 +598,14 @@ model TopicProgress {
   topicId                BigInt
   topicName              String?
   lastProcessedMessageId BigInt?
+  /// When this topic was last scanned (any reason). Used by recency-skip.
+  lastScannedAt          DateTime?
+  /// True if the last scan found archives OR has retryable SkippedPackages
+  /// pending for this topic. See AccountChannelMap doc for details.
+  lastScanFoundArchives  Boolean   @default(false)
+  /// Number of consecutive cycles where this topic was trulyIdle. Drives
+  /// backoff for cold topics.
+  consecutiveEmptyScans  Int       @default(0)
 
   accountChannelMap AccountChannelMap @relation(fields: [accountChannelMapId], references: [id], onDelete: Cascade)
 
