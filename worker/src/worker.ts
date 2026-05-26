@@ -1681,28 +1681,56 @@ async function processOneArchiveSet(
       );
     }
 
-      // ── Pre-upload integrity test ──
-      // Catch broken/encrypted archives before we burn upload bandwidth.
+      // ── Pre-upload integrity test (advisory) ──
+      // Run unzip -t / unrar t / 7z t to look for corruption or encryption
+      // before we upload. This is ADVISORY only — failures get logged and
+      // emit a SystemNotification but never block upload, because:
       //
-      // Important nuance: ZIP multipart archives use byte-level chunk naming
-      // (`.zip.001`, `.zip.002`, ...). Individual chunks aren't valid ZIPs
-      // — the central directory only exists in the last chunk and unzip can't
-      // span the `.zip.001` naming convention. Testing the first chunk alone
-      // always fails with "no central directory found". Skip the test for
-      // those.
+      //  1. Multipart ZIPs (`.zip.001`, `.zip.002`, ...) aren't testable
+      //     chunk-by-chunk. Skip them entirely.
+      //  2. Large 7z archives can OOM-kill `7z t` (exit 137) during
+      //     decompression on memory-limited containers — that's a tool
+      //     limitation, not actual corruption.
+      //  3. p7zip can fail with unhelpful messages on newer 7z features.
       //
-      // RAR and 7z CLI tools auto-discover sibling parts when pointed at the
-      // first part, so `unrar t` / `7z t` work for multipart RAR/7z.
-      //
-      // Single-file archives (regardless of whether WE re-split them for
-      // upload size limits) are always testable on the original tempPaths[0]
-      // since that's the unsplit downloaded file.
+      // Hash verification + archive metadata parse already cover byte-level
+      // corruption and structural readability. The integrity test is a
+      // nice-to-have stronger signal; not worth losing uploads over false
+      // positives.
       const archType = archiveSet.type === "7Z" ? "SEVEN_Z" : archiveSet.type;
       const isMultipartZip = archType === "ZIP" && tempPaths.length > 1;
       if (!isMultipartZip) {
         const integrity = await testArchiveIntegrity(archType, tempPaths[0]);
         if (!integrity.ok) {
-          throw new Error(`Archive integrity check failed: ${integrity.reason}`);
+          // Detect encryption specifically — those won't extract for users
+          // even if we upload them. Surface clearly via notification but
+          // STILL proceed: the user can audit and decide what to do.
+          const isEncrypted = /encrypted/i.test(integrity.reason);
+          accountLog.warn(
+            { fileName: archiveName, reason: integrity.reason.slice(0, 200), isEncrypted },
+            "Archive integrity test failed — proceeding with upload anyway (advisory check)"
+          );
+          try {
+            await db.systemNotification.create({
+              data: {
+                type: isEncrypted ? "UPLOAD_FAILED" : "HASH_MISMATCH",
+                severity: "WARNING",
+                title: isEncrypted
+                  ? `Archive may be encrypted: ${archiveName}`
+                  : `Integrity test reported issues: ${archiveName}`,
+                message: integrity.reason.slice(0, 1000),
+                context: {
+                  fileName: archiveName,
+                  sourceChannelId: channel.id,
+                  sourceMessageId: Number(archiveSet.parts[0].id),
+                  archiveType: archType,
+                  advisory: true,
+                },
+              },
+            });
+          } catch {
+            // Best-effort notification
+          }
         }
       }
 
