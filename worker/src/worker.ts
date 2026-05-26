@@ -1682,16 +1682,28 @@ async function processOneArchiveSet(
     }
 
       // ── Pre-upload integrity test ──
-      // Catch broken/encrypted archives before we burn upload bandwidth on
-      // them. Cheap (unzip -t / unrar t / 7z t) compared to a multi-GB upload.
-      // Skipped when we're reusing an existing upload — no point testing the
-      // file again.
-      const integrity = await testArchiveIntegrity(
-        archiveSet.type === "7Z" ? "SEVEN_Z" : archiveSet.type,
-        uploadPaths[0]
-      );
-      if (!integrity.ok) {
-        throw new Error(`Archive integrity check failed: ${integrity.reason}`);
+      // Catch broken/encrypted archives before we burn upload bandwidth.
+      //
+      // Important nuance: ZIP multipart archives use byte-level chunk naming
+      // (`.zip.001`, `.zip.002`, ...). Individual chunks aren't valid ZIPs
+      // — the central directory only exists in the last chunk and unzip can't
+      // span the `.zip.001` naming convention. Testing the first chunk alone
+      // always fails with "no central directory found". Skip the test for
+      // those.
+      //
+      // RAR and 7z CLI tools auto-discover sibling parts when pointed at the
+      // first part, so `unrar t` / `7z t` work for multipart RAR/7z.
+      //
+      // Single-file archives (regardless of whether WE re-split them for
+      // upload size limits) are always testable on the original tempPaths[0]
+      // since that's the unsplit downloaded file.
+      const archType = archiveSet.type === "7Z" ? "SEVEN_Z" : archiveSet.type;
+      const isMultipartZip = archType === "ZIP" && tempPaths.length > 1;
+      if (!isMultipartZip) {
+        const integrity = await testArchiveIntegrity(archType, tempPaths[0]);
+        if (!integrity.ok) {
+          throw new Error(`Archive integrity check failed: ${integrity.reason}`);
+        }
       }
 
       // ── Uploading ──
