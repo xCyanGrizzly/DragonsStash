@@ -307,3 +307,63 @@ export async function searchPublicChat(
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+/**
+ * Return the chat's server-side last_message.id from TDLib's local cache.
+ * Used by the channel-scan-skip guard to short-circuit a paginated
+ * searchChatMessages when nothing has changed since our watermark.
+ *
+ * Returns null when the chat has no last_message (empty channel) or the
+ * call fails — callers must treat null as "unknown" and run the scan.
+ */
+export async function getChannelLastMessageId(
+  client: Client,
+  chatId: bigint
+): Promise<bigint | null> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const chat = (await client.invoke({
+      _: "getChat",
+      chat_id: Number(chatId),
+    })) as { last_message?: { id?: number } };
+    const id = chat.last_message?.id;
+    return id ? BigInt(id) : null;
+  } catch (err) {
+    log.debug({ err, chatId: chatId.toString() }, "getChannelLastMessageId failed");
+    return null;
+  }
+}
+
+/**
+ * Return the forum topic's last_message_id from TDLib. Same purpose as
+ * getChannelLastMessageId but scoped to a single topic in a forum
+ * supergroup. TDLib's `getForumTopic` returns a `forumTopic` whose `info`
+ * field contains the last_message_id.
+ *
+ * Returns null on failure or empty topic — caller treats as "unknown".
+ */
+export async function getForumTopicLastMessageId(
+  client: Client,
+  chatId: bigint,
+  topicId: bigint
+): Promise<bigint | null> {
+  try {
+    // TDLib 1.8.64 uses `forum_topic_id` (renamed from `message_thread_id`
+    // in the request) — consistent with the rest of the forum-topic API
+    // surface in this version.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const topic = (await client.invoke({
+      _: "getForumTopic",
+      chat_id: Number(chatId),
+      forum_topic_id: Number(topicId),
+    })) as { last_message?: { id?: number }; info?: { last_message_id?: number } };
+    const id = topic.last_message?.id ?? topic.info?.last_message_id;
+    return id ? BigInt(id) : null;
+  } catch (err) {
+    log.debug(
+      { err, chatId: chatId.toString(), topicId: topicId.toString() },
+      "getForumTopicLastMessageId failed"
+    );
+    return null;
+  }
+}
