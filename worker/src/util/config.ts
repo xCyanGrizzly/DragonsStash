@@ -24,4 +24,22 @@ export const config = {
    *  stops auto-retrying and lets the watermark advance past it. The user can
    *  manually retry via the UI to reset and try again. */
   maxSkipAttempts: parseInt(process.env.WORKER_MAX_SKIP_ATTEMPTS ?? "5", 10),
+  /** Window in which a recent successful empty scan lets us skip the next
+   *  scan entirely. Default 5 minutes. */
+  skipRecentScanWindowMs: parseInt(
+    process.env.WORKER_SKIP_RECENT_SCAN_WINDOW_MS ?? "300000",
+    10
+  ),
+  /** After this many consecutive empty scans, a channel/topic enters
+   *  backoff and is only scanned every Nth cycle. */
+  emptyScanBackoffThreshold: parseInt(
+    process.env.WORKER_EMPTY_SCAN_BACKOFF_THRESHOLD ?? "5",
+    10
+  ),
+  /** While in backoff, scan only every Nth cycle. Default 5 = scan every
+   *  fifth cycle = once every ~5 hours given the 60-min default interval. */
+  emptyScanBackoffEveryNth: parseInt(
+    process.env.WORKER_EMPTY_SCAN_BACKOFF_EVERY_NTH ?? "5",
+    10
+  ),
 } as const;
