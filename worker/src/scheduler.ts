@@ -19,6 +19,12 @@ let activeCyclePromise: Promise<void> | null = null;
  */
 const CYCLE_TIMEOUT_MS = (parseInt(process.env.WORKER_CYCLE_TIMEOUT_MINUTES ?? "240", 10)) * 60 * 1000;
 
+/** Read-only access to the current cycle counter for code that needs to
+ *  apply per-cycle modulo logic (e.g. the cold-channel backoff). */
+export function getCurrentCycle(): number {
+  return cycleCount;
+}
+
 /**
  * Run one ingestion cycle:
  * 1. Authenticate any PENDING accounts (triggers SMS code flow + auto-fetch channels)
