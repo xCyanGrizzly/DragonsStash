@@ -41,6 +41,7 @@ export async function listChannels() {
     telegramId: c.telegramId.toString(),
     title: c.title,
     type: c.type,
+    isForum: c.isForum,
     isActive: c.isActive,
     category: c.category,
     createdAt: c.createdAt.toISOString(),
@@ -140,3 +141,24 @@ export async function getUnlinkedChannels(accountId: string) {
     telegramId: c.telegramId.toString(),
   }));
 }
+
+// ── Channel topic queries ──
+
+export async function listChannelTopics(channelId: string) {
+  const rows = await prisma.topicProgress.findMany({
+    where: { accountChannelMap: { channelId } },
+    orderBy: [{ fetchEnabled: "desc" }, { topicName: "asc" }],
+  });
+
+  return rows.map((r) => ({
+    id: r.id,
+    topicId: r.topicId.toString(),
+    topicName: r.topicName,
+    fetchEnabled: r.fetchEnabled,
+    lastScannedAt: r.lastScannedAt?.toISOString() ?? null,
+  }));
+}
+
+export type ChannelTopicRow = Awaited<
+  ReturnType<typeof listChannelTopics>
+>[number];
