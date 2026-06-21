@@ -436,6 +436,32 @@ export async function rescanChannel(channelId: string): Promise<ActionResult> {
   }
 }
 
+// ── Topic fetch toggle ──
+
+export async function setTopicFetchEnabled(
+  topicProgressId: string,
+  enabled: boolean
+): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  if (!admin.success) return admin;
+
+  const existing = await prisma.topicProgress.findUnique({
+    where: { id: topicProgressId },
+  });
+  if (!existing) return { success: false, error: "Topic not found" };
+
+  try {
+    await prisma.topicProgress.update({
+      where: { id: topicProgressId },
+      data: { fetchEnabled: enabled },
+    });
+    revalidatePath(REVALIDATE_PATH);
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to update topic" };
+  }
+}
+
 // ── Account-Channel link actions ──
 
 export async function linkChannel(
