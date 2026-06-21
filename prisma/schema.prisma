@@ -597,6 +597,11 @@ model TopicProgress {
   accountChannelMapId    String
   topicId                BigInt
   topicName              String?
+  /// User-controlled fetch toggle. When false, the worker skips this topic
+  /// (no scanning, no fetching/transfer). Defaults true so every existing and
+  /// newly-discovered topic is fetched unless explicitly disabled. Disabling
+  /// is non-destructive — already-fetched packages are kept.
+  fetchEnabled           Boolean   @default(true)
   lastProcessedMessageId BigInt?
   /// When this topic was last scanned (any reason). Used by recency-skip.
   lastScannedAt          DateTime?
