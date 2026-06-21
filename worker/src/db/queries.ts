@@ -659,6 +659,45 @@ export async function upsertTopicProgress(
   });
 }
 
+/**
+ * Ensure a TopicProgress row exists for every discovered topic so the admin
+ * UI can list and toggle them — including brand-new topics. Inserts missing
+ * rows only (fetchEnabled defaults to true); never overwrites watermarks,
+ * scan-state, or the user's fetchEnabled choice on rows that already exist.
+ */
+export async function ensureTopicProgressRows(
+  mappingId: string,
+  topics: { topicId: bigint; name: string | null }[]
+): Promise<void> {
+  if (topics.length === 0) return;
+  await db.topicProgress.createMany({
+    data: topics.map((t) => ({
+      accountChannelMapId: mappingId,
+      topicId: t.topicId,
+      topicName: t.name,
+    })),
+    skipDuplicates: true,
+  });
+}
+
+/**
+ * Read the CURRENT per-topic fetch flag straight from the DB. Returns true
+ * when no row exists yet (default = enabled). Called fresh inside the topic
+ * loop so a mid-run toggle is honoured for topics not yet started.
+ */
+export async function isTopicFetchEnabled(
+  mappingId: string,
+  topicId: bigint
+): Promise<boolean> {
+  const row = await db.topicProgress.findUnique({
+    where: {
+      accountChannelMapId_topicId: { accountChannelMapId: mappingId, topicId },
+    },
+    select: { fetchEnabled: true },
+  });
+  return row?.fetchEnabled ?? true;
+}
+
 // ── Channel fetch requests (DB-mediated communication with web app) ──
 
 export async function getChannelFetchRequest(requestId: string) {
