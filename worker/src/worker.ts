@@ -37,6 +37,8 @@ import {
   updatePackageTopicContext,
   upsertChannelScanState,
   upsertTopicScanState,
+  ensureTopicProgressRows,
+  isTopicFetchEnabled,
 } from "./db/queries.js";
 import type { ActivityUpdate } from "./db/queries.js";
 import { createTdlibClient, closeTdlibClient } from "./tdlib/client.js";
@@ -548,6 +550,15 @@ export async function runWorkerForAccount(
           const rawTopics = await getForumTopicList(client, channel.telegramId);
           const topicProgressList = await getTopicProgress(mapping.id);
 
+          // Persist a TopicProgress row for every discovered topic so the
+          // admin UI can list and toggle them — including brand-new topics.
+          // Inserts missing rows only; existing watermarks / scan-state /
+          // fetchEnabled choices are left untouched.
+          await ensureTopicProgressRows(
+            mapping.id,
+            rawTopics.map((t) => ({ topicId: t.topicId, name: t.name }))
+          );
+
           // Process more-specific topics BEFORE "General" so the first
           // encounter of any file is in its most specific context. This makes
           // newly-created Packages carry useful topic info (e.g., a campaign
@@ -567,6 +578,18 @@ export async function runWorkerForAccount(
           for (let tIdx = 0; tIdx < topics.length; tIdx++) {
             const topic = topics[tIdx];
             try {
+              // ── Per-topic fetch toggle (live, mid-run honouring) ──
+              // Read the CURRENT enabled flag straight from the DB (not the
+              // run-start `topicProgressList` snapshot) so disabling a topic
+              // mid-run skips it for the remainder of this run.
+              if (!(await isTopicFetchEnabled(mapping.id, topic.topicId))) {
+                accountLog.info(
+                  { channel: channel.title, topic: topic.name },
+                  "Topic fetch disabled by user — skipping"
+                );
+                continue;
+              }
+
               let progress = topicProgressList.find(
                 (tp) => tp.topicId === topic.topicId
               );
