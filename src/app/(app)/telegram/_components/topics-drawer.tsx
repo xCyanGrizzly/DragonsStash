@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useTransition } from "react";
+import { useState, useEffect, useCallback, useMemo, useTransition } from "react";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, Search } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { setTopicFetchEnabled } from "../actions";
 
@@ -29,6 +29,10 @@ interface TopicsDrawerProps {
   onOpenChange: (open: boolean) => void;
 }
 
+function topicLabel(t: TopicRow): string {
+  return t.topicName ?? `Topic ${t.topicId}`;
+}
+
 export function TopicsDrawer({
   channelId,
   channelTitle,
@@ -37,6 +41,7 @@ export function TopicsDrawer({
 }: TopicsDrawerProps) {
   const [topics, setTopics] = useState<TopicRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [filter, setFilter] = useState("");
   const [, startTransition] = useTransition();
   const [pendingId, setPendingId] = useState<string | null>(null);
 
@@ -57,6 +62,13 @@ export function TopicsDrawer({
     if (open && channelId) fetchTopics();
   }, [open, channelId, fetchTopics]);
 
+  const handleOpenChange = (next: boolean) => {
+    // Reset the filter on close so the next open starts clean (the drawer is
+    // opened per-channel, so close-then-open is the normal channel switch).
+    if (!next) setFilter("");
+    onOpenChange(next);
+  };
+
   const handleToggle = (topic: TopicRow, enabled: boolean) => {
     // Optimistic update
     setTopics((prev) =>
@@ -66,7 +78,7 @@ export function TopicsDrawer({
     startTransition(async () => {
       const result = await setTopicFetchEnabled(topic.id, enabled);
       if (!result.success) {
-        toast.error(result.error);
+        toast.error(result.error ?? "Failed to update topic");
         // Revert on failure
         setTopics((prev) =>
           prev.map((t) =>
@@ -78,20 +90,43 @@ export function TopicsDrawer({
     });
   };
 
+  const filtered = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return topics;
+    return topics.filter((t) => topicLabel(t).toLowerCase().includes(q));
+  }, [topics, filter]);
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[80vh] flex flex-col gap-0 p-0">
-        <DialogHeader className="px-6 pt-6 pb-4 border-b border-border space-y-1">
-          <DialogTitle className="truncate pr-8">
-            Topics{channelTitle ? `: ${channelTitle}` : ""}
-          </DialogTitle>
-          <DialogDescription>
-            Enabled topics are scanned and their files fetched. Disable a topic to
-            stop fetching new files from it — already-fetched files are kept.
-          </DialogDescription>
+        <DialogHeader className="px-6 pt-6 pb-4 border-b border-border space-y-3">
+          <div className="space-y-1">
+            <DialogTitle className="truncate pr-8">
+              Topics{channelTitle ? `: ${channelTitle}` : ""}
+            </DialogTitle>
+            <DialogDescription>
+              Enabled topics are scanned and their files fetched. Disable a topic
+              to stop fetching new files from it — already-fetched files are kept.
+            </DialogDescription>
+          </div>
+          {topics.length > 0 && (
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Filter topics..."
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                className="pl-9 h-9"
+              />
+            </div>
+          )}
         </DialogHeader>
 
-        <ScrollArea className="flex-1 min-h-0">
+        {/* Native overflow scroll: the Radix ScrollArea viewport does not get a
+            bounded height inside this flex-column, max-h, vertically-centred
+            dialog, so the list overflowed instead of scrolling. flex-1 +
+            min-h-0 + overflow-y-auto is the canonical, touch-friendly fix. */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="px-6 py-4 space-y-2">
             {loading ? (
               <div className="flex items-center justify-center gap-2 py-12">
@@ -105,18 +140,24 @@ export function TopicsDrawer({
                 No topics discovered yet — they&apos;ll appear here after the next
                 scan.
               </p>
+            ) : filtered.length === 0 ? (
+              <p className="py-12 text-center text-sm text-muted-foreground">
+                No topics match &quot;{filter}&quot;.
+              </p>
             ) : (
-              topics.map((topic) => (
+              filtered.map((topic) => (
                 <div
                   key={topic.id}
                   className="flex items-center justify-between gap-3 rounded-md border p-3"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">
-                      {topic.topicName ?? `Topic ${topic.topicId}`}
+                      {topicLabel(topic)}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {topic.fetchEnabled ? "Fetching enabled" : "Fetching disabled"}
+                      {topic.fetchEnabled
+                        ? "Fetching enabled"
+                        : "Fetching disabled"}
                       {topic.lastScannedAt
                         ? ` · last scanned ${new Date(
                             topic.lastScannedAt
@@ -128,15 +169,13 @@ export function TopicsDrawer({
                     checked={topic.fetchEnabled}
                     disabled={pendingId === topic.id}
                     onCheckedChange={(checked) => handleToggle(topic, checked)}
-                    aria-label={`Toggle fetching for ${
-                      topic.topicName ?? topic.topicId
-                    }`}
+                    aria-label={`Toggle fetching for ${topicLabel(topic)}`}
                   />
                 </div>
               ))
             )}
           </div>
-        </ScrollArea>
+        </div>
       </DialogContent>
     </Dialog>
   );
