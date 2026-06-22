@@ -7,6 +7,7 @@ import {
   Check,
   AlertCircle,
   ImageOff,
+  Maximize2,
 } from "lucide-react";
 import {
   Dialog,
@@ -20,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { setPreviewFromExtract } from "../actions";
+import { ImageLightbox } from "./image-lightbox";
 
 interface ArchiveImage {
   id: string;
@@ -65,6 +67,7 @@ export function ArchivePreviewPicker({
   const [thumbnails, setThumbnails] = useState<Map<string, ThumbnailState>>(new Map());
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const pollTimers = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   // Track which paths have already been requested to avoid re-requesting
   const requestedPaths = useRef<Set<string>>(new Set());
@@ -290,71 +293,85 @@ export function ArchivePreviewPicker({
                   const isFailed = thumbState?.status === "failed";
 
                   return (
-                    <button
-                      key={img.id}
-                      type="button"
-                      className={cn(
-                        "relative aspect-square rounded-lg overflow-hidden border-2 transition-all",
-                        "hover:border-primary/50 cursor-pointer group",
-                        isSelected
-                          ? "border-primary ring-2 ring-primary/30"
-                          : "border-border",
-                        isFailed && "opacity-60"
+                    <div key={img.id} className="group relative">
+                      {isLoaded && thumbState?.imageUrl && (
+                        <button
+                          type="button"
+                          className="absolute top-1.5 left-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-md bg-black/60 text-white opacity-0 transition-opacity hover:bg-black/80 group-hover:opacity-100"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setLightboxSrc(thumbState.imageUrl!);
+                          }}
+                          title="Enlarge"
+                        >
+                          <Maximize2 className="h-3.5 w-3.5" />
+                        </button>
                       )}
-                      onClick={() => {
-                        if (isLoaded) {
-                          setSelectedPath(img.path);
-                        } else if (isFailed) {
-                          // Allow retry on failed
-                          requestedPaths.current.delete(img.path);
-                          requestThumbnail(img.path);
-                        } else if (!thumbState || thumbState.status === "idle") {
-                          requestThumbnail(img.path);
-                        }
-                      }}
-                      title={img.path}
-                    >
-                      {isLoaded && thumbState.imageUrl ? (
-                        <img
-                          src={thumbState.imageUrl}
-                          alt={img.fileName}
-                          className="h-full w-full object-cover"
-                          loading="lazy"
-                        />
-                      ) : isLoading ? (
-                        <div className="h-full w-full flex items-center justify-center bg-muted">
-                          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                        </div>
-                      ) : isFailed ? (
-                        <div className="h-full w-full flex flex-col items-center justify-center bg-muted gap-1">
-                          <AlertCircle className="h-4 w-4 text-destructive" />
-                          <span className="text-[10px] text-destructive px-1 text-center">
-                            Click to retry
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="h-full w-full flex items-center justify-center bg-muted">
-                          <ImageIcon className="h-5 w-5 text-muted-foreground" />
-                        </div>
-                      )}
+                      <button
+                        type="button"
+                        className={cn(
+                          "relative aspect-square w-full rounded-lg overflow-hidden border-2 transition-all",
+                          "hover:border-primary/50 cursor-pointer",
+                          isSelected
+                            ? "border-primary ring-2 ring-primary/30"
+                            : "border-border",
+                          isFailed && "opacity-60"
+                        )}
+                        onClick={() => {
+                          if (isLoaded) {
+                            setSelectedPath(img.path);
+                          } else if (isFailed) {
+                            // Allow retry on failed
+                            requestedPaths.current.delete(img.path);
+                            requestThumbnail(img.path);
+                          } else if (!thumbState || thumbState.status === "idle") {
+                            requestThumbnail(img.path);
+                          }
+                        }}
+                        title={img.path}
+                      >
+                        {isLoaded && thumbState.imageUrl ? (
+                          <img
+                            src={thumbState.imageUrl}
+                            alt={img.fileName}
+                            className="h-full w-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : isLoading ? (
+                          <div className="h-full w-full flex items-center justify-center bg-muted">
+                            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : isFailed ? (
+                          <div className="h-full w-full flex flex-col items-center justify-center bg-muted gap-1">
+                            <AlertCircle className="h-4 w-4 text-destructive" />
+                            <span className="text-[10px] text-destructive px-1 text-center">
+                              Click to retry
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="h-full w-full flex items-center justify-center bg-muted">
+                            <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                          </div>
+                        )}
 
-                      {/* Selection checkmark */}
-                      {isSelected && (
-                        <div className="absolute top-1.5 right-1.5 h-5 w-5 rounded-full bg-primary flex items-center justify-center">
-                          <Check className="h-3 w-3 text-primary-foreground" />
-                        </div>
-                      )}
+                        {/* Selection checkmark */}
+                        {isSelected && (
+                          <div className="absolute top-1.5 right-1.5 h-5 w-5 rounded-full bg-primary flex items-center justify-center">
+                            <Check className="h-3 w-3 text-primary-foreground" />
+                          </div>
+                        )}
 
-                      {/* File info overlay */}
-                      <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-1.5 py-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <p className="text-[10px] text-white truncate">
-                          {img.fileName}
-                        </p>
-                        <p className="text-[9px] text-white/70">
-                          {formatBytes(img.size)}
-                        </p>
-                      </div>
-                    </button>
+                        {/* File info overlay */}
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-1.5 py-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <p className="text-[10px] text-white truncate">
+                            {img.fileName}
+                          </p>
+                          <p className="text-[9px] text-white/70">
+                            {formatBytes(img.size)}
+                          </p>
+                        </div>
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -394,6 +411,13 @@ export function ArchivePreviewPicker({
           </div>
         )}
       </DialogContent>
+      <ImageLightbox
+        src={lightboxSrc}
+        open={!!lightboxSrc}
+        onOpenChange={(open) => {
+          if (!open) setLightboxSrc(null);
+        }}
+      />
     </Dialog>
   );
 }
