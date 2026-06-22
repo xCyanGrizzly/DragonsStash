@@ -13,6 +13,7 @@ import {
   Upload,
   ImagePlus,
   Images,
+  Maximize2,
 } from "lucide-react";
 import {
   Dialog,
@@ -30,6 +31,7 @@ import type { PackageRow } from "./package-columns";
 import { SendToTelegramButton } from "./send-to-telegram-button";
 import { uploadPackagePreview } from "../actions";
 import { ArchivePreviewPicker } from "./archive-preview-picker";
+import { ImageLightbox } from "./image-lightbox";
 
 interface FileItem {
   id: string;
@@ -264,6 +266,7 @@ export function PackageFilesDrawer({ pkg, open, onOpenChange, highlightTerm }: P
   const [uploading, setUploading] = useState(false);
   const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
   const [showPreviewPicker, setShowPreviewPicker] = useState(false);
+  const [previewLightboxOpen, setPreviewLightboxOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handlePreviewUpload = useCallback(
@@ -384,9 +387,8 @@ export function PackageFilesDrawer({ pkg, open, onOpenChange, highlightTerm }: P
               <button
                 type="button"
                 className="relative group h-20 w-20 shrink-0 rounded-lg overflow-hidden bg-muted"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                title="Click to replace preview image"
+                onClick={() => setPreviewLightboxOpen(true)}
+                title="Click to enlarge"
               >
                 <img
                   src={localPreviewUrl ?? `/api/zips/${pkg!.id}/preview`}
@@ -394,11 +396,7 @@ export function PackageFilesDrawer({ pkg, open, onOpenChange, highlightTerm }: P
                   className="h-full w-full object-cover"
                 />
                 <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                  {uploading ? (
-                    <Loader2 className="h-5 w-5 text-white animate-spin" />
-                  ) : (
-                    <Upload className="h-5 w-5 text-white" />
-                  )}
+                  <Maximize2 className="h-5 w-5 text-white" />
                 </div>
               </button>
             ) : (
@@ -582,6 +580,11 @@ export function PackageFilesDrawer({ pkg, open, onOpenChange, highlightTerm }: P
         }}
       />
     )}
+    <ImageLightbox
+      src={pkg ? (localPreviewUrl ?? `/api/zips/${pkg.id}/preview`) : null}
+      open={previewLightboxOpen}
+      onOpenChange={setPreviewLightboxOpen}
+    />
     </>
   );
 }
