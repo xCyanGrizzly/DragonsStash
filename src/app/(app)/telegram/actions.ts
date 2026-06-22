@@ -482,6 +482,11 @@ export async function disableActiveTopic(
   } catch {
     return { success: false, error: "Invalid topic id" };
   }
+  // BigInt("") / BigInt("0") don't throw — reject non-positive ids explicitly
+  // since this action is exported and admin-callable outside the UI button.
+  if (topicIdBig <= BigInt(0)) {
+    return { success: false, error: "Invalid topic id" };
+  }
 
   try {
     await prisma.topicProgress.upsert({
