@@ -550,6 +550,8 @@ export async function getIngestionStatus(): Promise<IngestionAccountStatus[]> {
             totalBytes: currentRun.totalBytes?.toString() ?? null,
             downloadPercent: currentRun.downloadPercent,
             lastActivityAt: currentRun.lastActivityAt?.toISOString() ?? null,
+            currentTopicId: currentRun.currentTopicId?.toString() ?? null,
+            currentAccountChannelMapId: currentRun.currentAccountChannelMapId,
           }
         : null,
     });

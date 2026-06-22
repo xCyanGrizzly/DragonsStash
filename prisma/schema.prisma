@@ -582,6 +582,8 @@ model IngestionRun {
   totalBytes      BigInt?         // Total size of current download
   downloadPercent Int?            // 0-100
   lastActivityAt  DateTime?       // When activity was last updated
+  currentTopicId             BigInt?  // Forum topic currently being processed (live "skip topic")
+  currentAccountChannelMapId String?  // AccountChannelMap owning the topic being processed
 
   account  TelegramAccount @relation(fields: [accountId], references: [id])
   packages Package[]

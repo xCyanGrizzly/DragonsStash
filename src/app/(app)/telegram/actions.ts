@@ -462,6 +462,49 @@ export async function setTopicFetchEnabled(
   }
 }
 
+/**
+ * Disable the topic currently being processed by the worker, identified by its
+ * account-channel mapping + Telegram topic id (as exposed on the live run
+ * status). Upserts so a disabled row exists even if the worker hasn't persisted
+ * the topic yet. The worker honours this live: it finishes the in-flight file
+ * then skips the rest of the topic, and future runs skip it entirely.
+ */
+export async function disableActiveTopic(
+  accountChannelMapId: string,
+  topicId: string
+): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  if (!admin.success) return admin;
+
+  let topicIdBig: bigint;
+  try {
+    topicIdBig = BigInt(topicId);
+  } catch {
+    return { success: false, error: "Invalid topic id" };
+  }
+
+  try {
+    await prisma.topicProgress.upsert({
+      where: {
+        accountChannelMapId_topicId: {
+          accountChannelMapId,
+          topicId: topicIdBig,
+        },
+      },
+      create: {
+        accountChannelMapId,
+        topicId: topicIdBig,
+        fetchEnabled: false,
+      },
+      update: { fetchEnabled: false },
+    });
+    revalidatePath(REVALIDATE_PATH);
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: "Failed to disable topic" };
+  }
+}
+
 // ── Account-Channel link actions ──
 
 export async function linkChannel(

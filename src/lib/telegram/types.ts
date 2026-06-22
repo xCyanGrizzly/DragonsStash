@@ -123,5 +123,7 @@ export interface IngestionAccountStatus {
     totalBytes: string | null; // BigInt serialized as string
     downloadPercent: number | null;
     lastActivityAt: string | null;
+    currentTopicId: string | null; // BigInt serialized as string
+    currentAccountChannelMapId: string | null;
   } | null;
 }

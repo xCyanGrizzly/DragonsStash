@@ -369,6 +369,8 @@ export interface ActivityUpdate {
   downloadedBytes?: bigint | null;
   totalBytes?: bigint | null;
   downloadPercent?: number | null;
+  currentTopicId?: bigint | null;
+  currentAccountChannelMapId?: string | null;
   messagesScanned?: number;
   zipsFound?: number;
   zipsDuplicate?: number;
@@ -396,6 +398,10 @@ export async function updateRunActivity(
       ...(activity.zipsFound !== undefined && { zipsFound: activity.zipsFound }),
       ...(activity.zipsDuplicate !== undefined && { zipsDuplicate: activity.zipsDuplicate }),
       ...(activity.zipsIngested !== undefined && { zipsIngested: activity.zipsIngested }),
+      ...(activity.currentTopicId !== undefined && { currentTopicId: activity.currentTopicId }),
+      ...(activity.currentAccountChannelMapId !== undefined && {
+        currentAccountChannelMapId: activity.currentAccountChannelMapId,
+      }),
     },
   });
 }
@@ -410,6 +416,8 @@ const CLEAR_ACTIVITY = {
   downloadedBytes: null,
   totalBytes: null,
   downloadPercent: null,
+  currentTopicId: null,
+  currentAccountChannelMapId: null,
   lastActivityAt: new Date(),
 };
 

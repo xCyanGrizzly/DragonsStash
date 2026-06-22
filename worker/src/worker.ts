@@ -538,6 +538,8 @@ export async function runWorkerForAccount(
             currentActivity: `Enumerating topics in "${channelLabel}"`,
             currentStep: "scanning",
             currentChannel: channelLabel,
+            currentTopicId: null,
+            currentAccountChannelMapId: null,
             currentFile: null,
             currentFileNum: null,
             totalFiles: null,
@@ -750,6 +752,8 @@ export async function runWorkerForAccount(
                 currentActivity: `Scanning "${topicLabel}"${topicProgress}`,
                 currentStep: "scanning",
                 currentChannel: channelLabel,
+                currentTopicId: topic.topicId,
+                currentAccountChannelMapId: mapping.id,
                 currentFile: null,
                 currentFileNum: null,
                 totalFiles: null,
@@ -830,7 +834,11 @@ export async function runWorkerForAccount(
                     topic.name,
                     messageId
                   );
-                }
+                },
+                // shouldStop: re-read the live fetch flag before each archive
+                // set. A mid-run "disable topic" lets the current file finish,
+                // then skips the rest of this topic's archives.
+                async () => !(await isTopicFetchEnabled(mapping.id, topic.topicId))
               );
               // Sync client back in case it was recreated during upload stall recovery
               client = pipelineCtx.client;
@@ -922,6 +930,8 @@ export async function runWorkerForAccount(
             currentActivity: `Scanning "${channelLabel}" for new archives`,
             currentStep: "scanning",
             currentChannel: channelLabel,
+            currentTopicId: null,
+            currentAccountChannelMapId: null,
             currentFile: null,
             currentFileNum: null,
             totalFiles: null,
@@ -1203,7 +1213,12 @@ async function processArchiveSets(
    *  below any failed message ID in this scan). Used by the caller to
    *  advance the channel/topic watermark incrementally — otherwise a long
    *  scan that gets killed by worker restart loses all progress. */
-  onWatermarkAdvance?: (messageId: bigint) => Promise<void>
+  onWatermarkAdvance?: (messageId: bigint) => Promise<void>,
+  /** Optional cancellation check, polled before each archive set. When it
+   *  resolves true, processing stops after the set currently in flight (that
+   *  one completes; remaining sets in this scan are skipped). Used by the
+   *  forum branch to honour a mid-run "disable topic". */
+  shouldStop?: () => Promise<boolean>
 ): Promise<{ maxProcessedId: bigint | null; minFailedId: bigint | null }> {
   const { client, runId, channelTitle, channel, throttled, counters, accountLog } = ctx;
 
@@ -1281,6 +1296,16 @@ async function processArchiveSets(
   const indexedPackageRefs: IndexedPackageRef[] = [];
 
   for (let setIdx = 0; setIdx < archiveSets.length; setIdx++) {
+    // Cooperative cancellation: if the caller signals stop (e.g. the topic was
+    // disabled mid-run), skip the remaining archive sets in this scan. The set
+    // processed in the previous iteration has already completed.
+    if (shouldStop && (await shouldStop())) {
+      accountLog.info(
+        { channel: channelTitle, processed: setIdx, total: archiveSets.length },
+        "Stop signal received (topic disabled) — skipping remaining archive sets in this scan"
+      );
+      break;
+    }
     try {
       const packageId = await processOneArchiveSet(
         ctx,

@@ -9,13 +9,14 @@ import {
   Radio,
   AlertTriangle,
   RefreshCw,
+  SkipForward,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { triggerIngestion } from "../actions";
+import { triggerIngestion, disableActiveTopic } from "../actions";
 import type { IngestionAccountStatus } from "@/lib/telegram/types";
 
 interface WorkerStatusPanelProps {
@@ -218,6 +219,24 @@ function RunningStatus({
 }: {
   run: NonNullable<IngestionAccountStatus["currentRun"]>;
 }) {
+  const [isDisabling, startDisable] = useTransition();
+
+  const handleSkipTopic = () => {
+    const acmId = run.currentAccountChannelMapId;
+    const topicId = run.currentTopicId;
+    if (!acmId || !topicId) return;
+    startDisable(async () => {
+      const result = await disableActiveTopic(acmId, topicId);
+      if (result.success) {
+        toast.success(
+          "Topic disabled — the current file finishes, then the rest is skipped"
+        );
+      } else {
+        toast.error(result.error ?? "Failed to disable topic");
+      }
+    });
+  };
+
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
@@ -273,6 +292,27 @@ function RunningStatus({
           </span>
         )}
       </div>
+
+      {/* Skip & disable the topic currently being processed */}
+      {run.currentTopicId && run.currentAccountChannelMapId && (
+        <div className="pl-6 pt-1">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 text-xs"
+            onClick={handleSkipTopic}
+            disabled={isDisabling}
+            title="Finish the current file, skip the rest of this topic, and don't fetch it in future runs"
+          >
+            {isDisabling ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <SkipForward className="h-3 w-3" />
+            )}
+            Skip &amp; disable this topic
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
