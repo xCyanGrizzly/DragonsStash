@@ -1,12 +1,14 @@
 "use client";
 
+import { useState } from "react";
 import { type ColumnDef } from "@tanstack/react-table";
-import { FileArchive, Eye, ChevronRight, Layers, Ungroup, Send, ImagePlus, GitMerge } from "lucide-react";
+import { FileArchive, Eye, ChevronRight, Layers, Ungroup, Send, ImagePlus, GitMerge, Maximize2 } from "lucide-react";
 import { DataTableColumnHeader } from "@/components/shared/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SendToTelegramButton } from "./send-to-telegram-button";
+import { ImageLightbox } from "./image-lightbox";
 
 export interface PackageRow {
   id: string;
@@ -84,14 +86,30 @@ export function formatBytes(bytesStr: string): string {
 }
 
 function PreviewCell({ pkg }: { pkg: PackageRow }) {
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
   if (pkg.hasPreview) {
+    const src = `/api/zips/${pkg.id}/preview`;
     return (
-      <img
-        src={`/api/zips/${pkg.id}/preview`}
-        alt=""
-        className="h-9 w-9 rounded-md object-cover bg-muted"
-        loading="lazy"
-      />
+      <>
+        <button
+          type="button"
+          className="group/preview relative h-9 w-9 overflow-hidden rounded-md bg-muted"
+          onClick={() => setLightboxOpen(true)}
+          title="Click to enlarge"
+        >
+          <img
+            src={src}
+            alt=""
+            className="h-9 w-9 object-cover"
+            loading="lazy"
+          />
+          <div className="absolute inset-0 flex items-center justify-center rounded-md bg-black/50 opacity-0 transition-opacity group-hover/preview:opacity-100">
+            <Maximize2 className="h-3.5 w-3.5 text-white" />
+          </div>
+        </button>
+        <ImageLightbox src={src} open={lightboxOpen} onOpenChange={setLightboxOpen} />
+      </>
     );
   }
   return (
