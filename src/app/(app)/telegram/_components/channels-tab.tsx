@@ -7,6 +7,7 @@ import { getChannelColumns } from "./channel-columns";
 import { DestinationCard } from "./destination-card";
 import { ChannelPickerDialog } from "./channel-picker-dialog";
 import { JoinChannelDialog } from "./join-channel-dialog";
+import { TopicsDrawer } from "./topics-drawer";
 import {
   deleteChannel,
   toggleChannelActive,
@@ -32,6 +33,7 @@ export function ChannelsTab({ channels, globalDestination, accounts }: ChannelsT
   const [rescanId, setRescanId] = useState<string | null>(null);
   const [fetchChannelsAccountId, setFetchChannelsAccountId] = useState<string | null>(null);
   const [joinDialogOpen, setJoinDialogOpen] = useState(false);
+  const [topicsChannelId, setTopicsChannelId] = useState<string | null>(null);
 
   // Find the first authenticated account for "Fetch Channels"
   const authenticatedAccounts = accounts.filter((a) => a.authState === "AUTHENTICATED" && a.isActive);
@@ -60,6 +62,7 @@ export function ChannelsTab({ channels, globalDestination, accounts }: ChannelsT
         else toast.error(result.error);
       });
     },
+    onManageTopics: (id) => setTopicsChannelId(id),
   });
 
   const { table } = useDataTable({
@@ -166,6 +169,17 @@ export function ChannelsTab({ channels, globalDestination, accounts }: ChannelsT
       <JoinChannelDialog
         open={joinDialogOpen}
         onOpenChange={setJoinDialogOpen}
+      />
+
+      <TopicsDrawer
+        channelId={topicsChannelId}
+        channelTitle={
+          channels.find((c) => c.id === topicsChannelId)?.title
+        }
+        open={!!topicsChannelId}
+        onOpenChange={(open) => {
+          if (!open) setTopicsChannelId(null);
+        }}
       />
     </div>
   );

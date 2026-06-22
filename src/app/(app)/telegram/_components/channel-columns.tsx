@@ -9,6 +9,7 @@ import {
   ArrowUpFromLine,
   RefreshCcw,
   Tag,
+  MessagesSquare,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ interface ChannelColumnsProps {
   onSetType: (id: string, type: "SOURCE" | "DESTINATION") => void;
   onRescan: (id: string) => void;
   onSetCategory: (id: string, category: string | null) => void;
+  onManageTopics: (id: string) => void;
 }
 
 export function getChannelColumns({
@@ -35,6 +37,7 @@ export function getChannelColumns({
   onSetType,
   onRescan,
   onSetCategory,
+  onManageTopics,
 }: ChannelColumnsProps): ColumnDef<ChannelRow, unknown>[] {
   return [
     {
@@ -145,6 +148,14 @@ export function getChannelColumns({
               >
                 <RefreshCcw className="mr-2 h-3.5 w-3.5" />
                 Rescan Channel
+              </DropdownMenuItem>
+            )}
+            {row.original.type === "SOURCE" && row.original.isForum && (
+              <DropdownMenuItem
+                onClick={() => onManageTopics(row.original.id)}
+              >
+                <MessagesSquare className="mr-2 h-3.5 w-3.5" />
+                Topics
               </DropdownMenuItem>
             )}
             <DropdownMenuItem
