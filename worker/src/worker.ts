@@ -1941,34 +1941,45 @@ async function processOneArchiveSet(
       if (!isMultipartZip) {
         const integrity = await testArchiveIntegrity(archType, tempPaths[0]);
         if (!integrity.ok) {
-          // Detect encryption specifically — those won't extract for users
-          // even if we upload them. Surface clearly via notification but
-          // STILL proceed: the user can audit and decide what to do.
-          const isEncrypted = /encrypted/i.test(integrity.reason);
-          accountLog.warn(
-            { fileName: archiveName, reason: integrity.reason.slice(0, 200), isEncrypted },
-            "Archive integrity test failed — proceeding with upload anyway (advisory check)"
-          );
-          try {
-            await db.systemNotification.create({
-              data: {
-                type: isEncrypted ? "UPLOAD_FAILED" : "HASH_MISMATCH",
-                severity: "WARNING",
-                title: isEncrypted
-                  ? `Archive may be encrypted: ${archiveName}`
-                  : `Integrity test reported issues: ${archiveName}`,
-                message: integrity.reason.slice(0, 1000),
-                context: {
-                  fileName: archiveName,
-                  sourceChannelId: channel.id,
-                  sourceMessageId: Number(archiveSet.parts[0].id),
-                  archiveType: archType,
-                  advisory: true,
+          if (integrity.kind === "inconclusive") {
+            // The test tool was killed (OOM) or timed out — typically a large
+            // 7z in a memory-limited container. This is a tool limitation, NOT
+            // corruption, so log quietly and DON'T raise a notification. The
+            // upload proceeds exactly as before.
+            accountLog.debug(
+              { fileName: archiveName, reason: integrity.reason.slice(0, 200) },
+              "Archive integrity test inconclusive — proceeding with upload (advisory check)"
+            );
+          } else {
+            // Encrypted (won't extract for users) or genuinely corrupt — surface
+            // clearly via notification but STILL proceed: the user can audit and
+            // decide what to do.
+            const isEncrypted = integrity.kind === "encrypted";
+            accountLog.warn(
+              { fileName: archiveName, reason: integrity.reason.slice(0, 200), kind: integrity.kind },
+              "Archive integrity test failed — proceeding with upload anyway (advisory check)"
+            );
+            try {
+              await db.systemNotification.create({
+                data: {
+                  type: isEncrypted ? "UPLOAD_FAILED" : "INTEGRITY_AUDIT",
+                  severity: "WARNING",
+                  title: isEncrypted
+                    ? `Archive may be encrypted: ${archiveName}`
+                    : `Integrity test reported issues: ${archiveName}`,
+                  message: integrity.reason.slice(0, 1000),
+                  context: {
+                    fileName: archiveName,
+                    sourceChannelId: channel.id,
+                    sourceMessageId: Number(archiveSet.parts[0].id),
+                    archiveType: archType,
+                    advisory: true,
+                  },
                 },
-              },
-            });
-          } catch {
-            // Best-effort notification
+              });
+            } catch {
+              // Best-effort notification
+            }
           }
         }
       }
