@@ -534,6 +534,15 @@ export async function getAllPackageTags(): Promise<string[]> {
   return result.map((r) => r.tag);
 }
 
+export async function getAllPackageCreators(): Promise<string[]> {
+  const result = await prisma.$queryRaw<{ creator: string }[]>`
+    SELECT DISTINCT creator FROM packages
+    WHERE creator IS NOT NULL AND creator <> ''
+    ORDER BY creator
+  `;
+  return result.map((r) => r.creator);
+}
+
 export async function getIngestionStatus(): Promise<IngestionAccountStatus[]> {
   const accounts = await prisma.telegramAccount.findMany({
     orderBy: { createdAt: "asc" },

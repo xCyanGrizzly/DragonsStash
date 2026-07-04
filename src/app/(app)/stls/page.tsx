@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { listDisplayItems, searchPackages, getIngestionStatus, getAllPackageTags, listSkippedPackages, countSkippedPackages, listUngroupedPackages, countUngroupedPackages } from "@/lib/telegram/queries";
+import { listDisplayItems, searchPackages, getIngestionStatus, getAllPackageTags, getAllPackageCreators, listSkippedPackages, countSkippedPackages, listUngroupedPackages, countUngroupedPackages } from "@/lib/telegram/queries";
 import { StlTable } from "./_components/stl-table";
 import type { DisplayItem, PackageListItem } from "@/lib/telegram/types";
 
@@ -24,7 +24,7 @@ export default async function StlFilesPage({ searchParams }: Props) {
   const tab = (params.tab as string) ?? "packages";
 
   // Fetch packages, ingestion status, tags, and skipped count in parallel
-  const [result, ingestionStatus, availableTags, skippedCount, ungroupedCount] = await Promise.all([
+  const [result, ingestionStatus, availableTags, availableCreators, skippedCount, ungroupedCount] = await Promise.all([
     search
       ? searchPackages({
           query: search,
@@ -42,6 +42,7 @@ export default async function StlFilesPage({ searchParams }: Props) {
         }),
     getIngestionStatus(),
     getAllPackageTags(),
+    getAllPackageCreators(),
     countSkippedPackages(),
     countUngroupedPackages(),
   ]);
@@ -68,6 +69,7 @@ export default async function StlFilesPage({ searchParams }: Props) {
       totalCount={result.pagination.total}
       ingestionStatus={ingestionStatus}
       availableTags={availableTags}
+      availableCreators={availableCreators}
       searchTerm={search}
       skippedData={skippedResult?.items ?? []}
       skippedPageCount={skippedResult?.pagination.totalPages ?? 0}
