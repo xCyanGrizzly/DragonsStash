@@ -241,6 +241,202 @@ git commit -m "feat(stls): add 'send all from creator' toolbar button"
 
 ---
 
+### Task 3: Searchable creator filter combobox (makes the filter reachable)
+
+**Why:** Discovered during execution — the `?creator=` filter that reveals the Task 2
+button had no UI trigger. The creator table cell click only opens the edit prompt
+(`package-columns.tsx:339` → `onSetCreator`). This task adds a searchable
+"All Creators" combobox to the packages-tab toolbar (like the existing Tags select,
+but type-to-filter since there can be many creators). The creator cell stays
+edit-only.
+
+**Files:**
+- Modify: `src/lib/telegram/queries.ts` — add `getAllPackageCreators()`.
+- Modify: `src/app/(app)/stls/page.tsx` — fetch + pass `availableCreators`.
+- Create: `src/app/(app)/stls/_components/creator-filter.tsx` — the combobox.
+- Modify: `src/app/(app)/stls/_components/stl-table.tsx` — new prop, handler, render.
+
+- [ ] **Step 1: Add the distinct-creators query**
+
+Append to `src/lib/telegram/queries.ts` (mirrors `getAllPackageTags` at line 530):
+
+```ts
+export async function getAllPackageCreators(): Promise<string[]> {
+  const result = await prisma.$queryRaw<{ creator: string }[]>`
+    SELECT DISTINCT creator FROM packages
+    WHERE creator IS NOT NULL AND creator <> ''
+    ORDER BY creator
+  `;
+  return result.map((r) => r.creator);
+}
+```
+
+- [ ] **Step 2: Create the combobox component**
+
+Create `src/app/(app)/stls/_components/creator-filter.tsx` (mirrors the
+Popover+Command pattern in `src/components/shared/data-table-faceted-filter.tsx`):
+
+```tsx
+"use client";
+
+import { useState } from "react";
+import { Check, ChevronsUpDown } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+
+interface CreatorFilterProps {
+  creators: string[];
+  value: string; // active creator, "" when none
+  onChange: (creator: string) => void; // "" clears the filter
+}
+
+export function CreatorFilter({ creators, value, onChange }: CreatorFilterProps) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          role="combobox"
+          aria-expanded={open}
+          className="h-9 w-[200px] justify-between"
+        >
+          <span className="truncate">{value || "All Creators"}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[240px] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search creators..." className="h-9" />
+          <CommandList>
+            <CommandEmpty>No creators found.</CommandEmpty>
+            <CommandGroup>
+              <CommandItem
+                value="__all__"
+                onSelect={() => {
+                  onChange("");
+                  setOpen(false);
+                }}
+              >
+                <Check
+                  className={cn("mr-2 h-4 w-4", value === "" ? "opacity-100" : "opacity-0")}
+                />
+                All Creators
+              </CommandItem>
+              {creators.map((creator) => (
+                <CommandItem
+                  key={creator}
+                  value={creator}
+                  onSelect={() => {
+                    onChange(creator);
+                    setOpen(false);
+                  }}
+                >
+                  <Check
+                    className={cn(
+                      "mr-2 h-4 w-4",
+                      value === creator ? "opacity-100" : "opacity-0"
+                    )}
+                  />
+                  <span className="truncate">{creator}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+```
+
+- [ ] **Step 3: Wire the query through the page**
+
+In `src/app/(app)/stls/page.tsx`:
+- Add `getAllPackageCreators` to the import from `@/lib/telegram/queries` (line 3).
+- Add `getAllPackageCreators()` to the `Promise.all` (line 27) and destructure
+  `availableCreators`:
+  ```ts
+  const [result, ingestionStatus, availableTags, availableCreators, skippedCount, ungroupedCount] =
+    await Promise.all([
+      // ...existing entries unchanged...
+      getIngestionStatus(),
+      getAllPackageTags(),
+      getAllPackageCreators(),
+      countSkippedPackages(),
+      countUngroupedPackages(),
+    ]);
+  ```
+  (Insert `getAllPackageCreators()` immediately after `getAllPackageTags()`, and add
+  `availableCreators` in the matching position of the destructure.)
+- Pass the prop to `<StlTable>`: `availableCreators={availableCreators}` (next to
+  `availableTags={availableTags}`).
+
+- [ ] **Step 4: Add prop + handler + render in the table**
+
+In `src/app/(app)/stls/_components/stl-table.tsx`:
+- Import the component: `import { CreatorFilter } from "./creator-filter";`
+- Add to `StlTableProps` (next to `availableTags: string[];`): `availableCreators: string[];`
+- Add to the destructured params (next to `availableTags,`): `availableCreators,`
+- Add the handler after `updateTagFilter` (ends ~line 210):
+  ```ts
+  const updateCreatorFilter = useCallback(
+    (value: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (value) {
+        params.set("creator", value);
+        params.set("page", "1");
+      } else {
+        params.delete("creator");
+      }
+      router.push(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [router, pathname, searchParams]
+  );
+  ```
+- Render it in the toolbar right after the Tags `Select` block (the
+  `{availableTags.length > 0 && (...)}` block, ~lines 507-522):
+  ```tsx
+  {availableCreators.length > 0 && (
+    <CreatorFilter
+      creators={availableCreators}
+      value={activeCreator}
+      onChange={updateCreatorFilter}
+    />
+  )}
+  ```
+
+- [ ] **Step 5: Verify + manual test**
+
+Run: `npx tsc --noEmit` (filter for the touched files — expect none new). Note: full
+`npm run build` fails on a pre-existing stale Prisma client issue in
+`src/lib/telegram/*` unrelated to this change; do not attempt to fix it.
+Manual: open `/stls`, use the "All Creators" combobox, type to filter, pick a
+creator → list filters and the "Send all from [Creator]" button appears; pick
+"All Creators" → filter clears and button disappears.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add "src/lib/telegram/queries.ts" "src/app/(app)/stls/page.tsx" \
+  "src/app/(app)/stls/_components/creator-filter.tsx" \
+  "src/app/(app)/stls/_components/stl-table.tsx"
+git commit -m "feat(stls): add searchable creator filter combobox to toolbar"
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage:**
