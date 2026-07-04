@@ -16,6 +16,7 @@ import {
 import { PackageFilesDrawer } from "./package-files-drawer";
 import { IngestionStatus } from "./ingestion-status";
 import { SkippedPackagesTab } from "./skipped-packages-tab";
+import { CreatorFilter } from "./creator-filter";
 import { DataTable } from "@/components/shared/data-table";
 import { DataTablePagination } from "@/components/shared/data-table-pagination";
 import { DataTableViewOptions } from "@/components/shared/data-table-view-options";
@@ -60,6 +61,7 @@ interface StlTableProps {
   totalCount: number;
   ingestionStatus: IngestionAccountStatus[];
   availableTags: string[];
+  availableCreators: string[];
   searchTerm: string;
   skippedData: SkippedRow[];
   skippedPageCount: number;
@@ -75,6 +77,7 @@ export function StlTable({
   totalCount,
   ingestionStatus,
   availableTags,
+  availableCreators,
   searchTerm,
   skippedData,
   skippedPageCount,
@@ -203,6 +206,20 @@ export function StlTable({
         params.set("page", "1");
       } else {
         params.delete("tag");
+      }
+      router.push(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [router, pathname, searchParams]
+  );
+
+  const updateCreatorFilter = useCallback(
+    (value: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (value) {
+        params.set("creator", value);
+        params.set("page", "1");
+      } else {
+        params.delete("creator");
       }
       router.push(`${pathname}?${params.toString()}`, { scroll: false });
     },
@@ -518,6 +535,13 @@ export function StlTable({
                   ))}
                 </SelectContent>
               </Select>
+            )}
+            {availableCreators.length > 0 && (
+              <CreatorFilter
+                creators={availableCreators}
+                value={activeCreator}
+                onChange={updateCreatorFilter}
+              />
             )}
             <DataTableViewOptions table={table} />
             <Button variant="outline" size="sm" className="h-9" onClick={() => setUploadOpen(true)}>
