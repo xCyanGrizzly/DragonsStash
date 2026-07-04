@@ -3,7 +3,7 @@
 import { useState, useCallback, useTransition, useMemo, useRef } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Search, Layers, Upload } from "lucide-react";
+import { Search, Layers, Upload, Send } from "lucide-react";
 import { UploadDialog } from "./upload-dialog";
 import { useDataTable } from "@/hooks/use-data-table";
 import {
@@ -49,6 +49,7 @@ import {
   createGroupAction,
   removeFromGroupAction,
   sendAllInGroupAction,
+  sendAllFromCreatorAction,
   updateGroupPreviewAction,
   mergeGroupsAction,
 } from "../actions";
@@ -85,6 +86,7 @@ export function StlTable({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const activeCreator = searchParams.get("creator") ?? "";
 
   const [searchValue, setSearchValue] = useState(searchParams.get("search") ?? "");
   const [viewPkg, setViewPkg] = useState<PackageRow | null>(null);
@@ -276,6 +278,23 @@ export function StlTable({
     },
     [router]
   );
+
+  const handleSendAllFromCreator = useCallback(() => {
+    if (!confirm(`Send all packages from "${activeCreator}" to your Telegram?`)) return;
+    startTransition(async () => {
+      const result = await sendAllFromCreatorAction(activeCreator);
+      if (result.success) {
+        const { queued, skipped } = result.data;
+        toast.success(
+          `Queued ${queued} package${queued === 1 ? "" : "s"} from ${activeCreator}` +
+            (skipped ? ` (${skipped} already queued)` : "")
+        );
+        router.refresh();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }, [activeCreator, router]);
 
   const handleRemoveFromGroup = useCallback(
     (packageId: string) => {
@@ -505,6 +524,17 @@ export function StlTable({
               <Upload className="mr-2 h-4 w-4" />
               Upload Files
             </Button>
+            {activeCreator && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5"
+                onClick={handleSendAllFromCreator}
+              >
+                <Send className="h-3.5 w-3.5" />
+                Send all from {activeCreator}
+              </Button>
+            )}
             {selectedPackages.size >= 2 && (
               <Button
                 variant="outline"
