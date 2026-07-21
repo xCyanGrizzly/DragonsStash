@@ -97,6 +97,31 @@ services:
     networks:
       - backend
 
+  backup:
+    profiles: ["backup"]
+    build:
+      context: .
+      dockerfile: backup/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-dragons}:${POSTGRES_PASSWORD:-stash}@db:5432/${POSTGRES_DB:-dragonsstash}
+      RESTIC_REPOSITORY: ${BACKUP_REPOSITORY:-/backup/restic}
+      RESTIC_PASSWORD_FILE: /run/secrets/restic-password
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      BACKUP_APP_VERSION: ${BACKUP_APP_VERSION:-unknown}
+    user: "0:0"
+    volumes:
+      - manual_uploads:/data/uploads:ro
+      - tdlib_state:/data/tdlib-worker:ro
+      - tdlib_bot_state:/data/tdlib-bot:ro
+      - ${BACKUP_MOUNT_PATH:?Set BACKUP_MOUNT_PATH to the mounted Synology share}:/backup:rw
+      - ${BACKUP_STAGING_PATH:?Set BACKUP_STAGING_PATH to a local staging directory}:/staging:rw
+      - ${BACKUP_RESTIC_PASSWORD_FILE:?Set BACKUP_RESTIC_PASSWORD_FILE to a root-readable secret file}:/run/secrets/restic-password:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+
   db:
     image: postgres:16-alpine
     environment:
