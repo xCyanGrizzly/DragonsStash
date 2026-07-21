@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly Dragon's Stash off-host backup
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=dragons-stash-backup.service
+
+[Install]
+WantedBy=timers.target

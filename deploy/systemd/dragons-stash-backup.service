@@ -1,0 +1,13 @@
+[Unit]
+Description=Dragon's Stash off-host backup
+After=network-online.target docker.service
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=-/etc/dragons-stash/backup.env
+WorkingDirectory=/opt/stacks/DragonsStash
+ExecStart=/opt/stacks/DragonsStash/scripts/backup/run-backup.sh
+TimeoutStartSec=infinity
