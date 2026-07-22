@@ -196,11 +196,14 @@ do not run `docker compose down -v` without the explicit rehearsal
 `--project-name` shown below.
 
 Run these commands from the production Compose checkout as an operator allowed
-to read `/etc/dragons-stash/backup.env`. They use production secrets only to
-start a separate application stack; do not expose its published port beyond the
-host. First select a snapshot and set the expected values for a known retained
-STL that was recorded when the backup was made. `EXPECTED_FILE_PATH` must be
-the database value under `/data/uploads`, and `EXPECTED_FILE_SIZE` is bytes.
+to read `/etc/dragons-stash/backup.env`. They use the configuration required
+for a separate application stack; do not expose its published port beyond the
+host. The worker and bot are deliberately replaced with inert processes, so
+this validates their restored images and volumes without executing Telegram
+clients or using production Telegram credentials. First select a snapshot and
+set the expected values for a known retained STL that was recorded when the
+backup was made. `EXPECTED_FILE_PATH` must be the database value under
+`/data/uploads`, and `EXPECTED_FILE_SIZE` is bytes.
 
 ```bash
 set -Eeuo pipefail
@@ -214,6 +217,7 @@ REHEARSAL_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 REHEARSAL_PROJECT="dragonsstash-rehearsal-$REHEARSAL_ID"
 REHEARSAL_DIR="$BACKUP_STAGING_PATH/monthly-rehearsal-$REHEARSAL_ID"
 REHEARSAL_ENV="$REHEARSAL_DIR/compose.env"
+REHEARSAL_OVERRIDE="$REHEARSAL_DIR/compose.rehearsal.override.yml"
 REHEARSAL_APP_PORT=13000  # Choose an unused host-local port.
 
 EXPECTED_UPLOAD_ID=RECORDED_UPLOAD_ID
@@ -232,6 +236,23 @@ umask 077
 cp .env "$REHEARSAL_ENV"
 printf '\nAPP_PORT=%s\nNEXT_PUBLIC_APP_URL=http://localhost:%s\n' \
   "$REHEARSAL_APP_PORT" "$REHEARSAL_APP_PORT" >> "$REHEARSAL_ENV"
+
+cat > "$REHEARSAL_OVERRIDE" <<'EOF'
+services:
+  worker:
+    environment:
+      TELEGRAM_API_ID: ""
+      TELEGRAM_API_HASH: ""
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["exec sleep infinity"]
+  bot:
+    environment:
+      BOT_TOKEN: ""
+      TELEGRAM_API_ID: ""
+      TELEGRAM_API_HASH: ""
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["exec sleep infinity"]
+EOF
 ```
 
 Confirm that `RESTORE_ROOT` names exactly one `backup-*` directory before
@@ -239,12 +260,16 @@ continuing. The staging restore has already verified the custom PostgreSQL dump
 and restored `data/uploads`, `data/tdlib-worker`, and `data/tdlib-bot`.
 
 Create the isolated project and volumes, start only its database, then import
-the dump. The `create` command makes the project-scoped application volumes
-without starting app, worker, or bot.
+the dump. `compose_rehearsal()` always applies the disposable override created
+above: worker and bot retain their restored images and volumes but have their
+Telegram credential variables blanked and run only `sleep infinity`, never
+Telegram clients. The `create` command makes the project-scoped application
+volumes without starting app, worker, or bot.
 
 ```bash
 compose_rehearsal() {
-  docker compose --project-name "$REHEARSAL_PROJECT" --env-file "$REHEARSAL_ENV" "$@"
+  docker compose --project-name "$REHEARSAL_PROJECT" --env-file "$REHEARSAL_ENV" \
+    -f docker-compose.yml -f "$REHEARSAL_OVERRIDE" "$@"
 }
 rehearsal_volume() {
   docker volume ls \
@@ -287,9 +312,11 @@ restore_rehearsal_volume tdlib_state "$REHEARSAL_DIR/data/tdlib-worker"
 restore_rehearsal_volume tdlib_bot_state "$REHEARSAL_DIR/data/tdlib-bot"
 ```
 
-Start the disposable app, worker, and bot services. Check the health endpoint,
-then retain the `ps` and log output as rehearsal evidence. Do not use the bot
-to send messages during this check.
+Start the disposable app, worker, and bot containers. The app and database
+perform their normal health and restored-data checks; the worker and bot remain
+inert `sleep infinity` processes, so this does not execute Telegram clients or
+send messages. Check the health endpoint, then retain the `ps` and log output
+as rehearsal evidence.
 
 ```bash
 compose_rehearsal --profile full up -d app worker bot
@@ -331,16 +358,7 @@ metadata_rows="$(compose_rehearsal exec -T db psql --no-psqlrc --tuples-only \
   --dbname "${POSTGRES_DB:-dragonsstash}" \
   --set="upload_id=$EXPECTED_UPLOAD_ID" --set="upload_status=$EXPECTED_UPLOAD_STATUS" \
   --set="file_name=$EXPECTED_FILE_NAME" --set="file_path=$EXPECTED_FILE_PATH" \
-  --set="file_size=$EXPECTED_FILE_SIZE" --command '
-    SELECT count(*) FROM "manual_uploads" u
-    JOIN "manual_upload_files" f ON f."uploadId" = u.id
-    WHERE u.id = :'upload_id'
-      AND u.status::text = :'upload_status'
-      AND f."fileName" = :'file_name'
-      AND f."filePath" = :'file_path'
-      AND f."fileSize" = :'file_size'::bigint
-      AND f."retainedAt" IS NOT NULL;
-  ')"
+  --set="file_size=$EXPECTED_FILE_SIZE" --command "SELECT count(*) FROM \"manual_uploads\" u JOIN \"manual_upload_files\" f ON f.\"uploadId\" = u.id WHERE u.id = :'upload_id' AND u.status::text = :'upload_status' AND f.\"fileName\" = :'file_name' AND f.\"filePath\" = :'file_path' AND f.\"fileSize\" = :'file_size'::bigint AND f.\"retainedAt\" IS NOT NULL;")"
 test "$metadata_rows" = 1
 ```
 
