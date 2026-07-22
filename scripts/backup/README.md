@@ -186,21 +186,200 @@ At least monthly, perform a full repository read check:
 docker compose --profile backup run --rm backup check --read-data
 ```
 
-Also rehearse recovery using a disposable staging directory and verify the
-database dump checksum before deleting the rehearsal directory:
+### Monthly disposable recovery rehearsal
+
+Perform the following procedure at least monthly. It restores one snapshot into
+a unique, disposable Compose project, so the database and all Compose volumes
+are isolated from production. **Never use the production Compose project name,
+production volume names, or `restore-live` for this rehearsal.** In particular,
+do not run `docker compose down -v` without the explicit rehearsal
+`--project-name` shown below.
+
+Run these commands from the production Compose checkout as an operator allowed
+to read `/etc/dragons-stash/backup.env`. They use production secrets only to
+start a separate application stack; do not expose its published port beyond the
+host. First select a snapshot and set the expected values for a known retained
+STL that was recorded when the backup was made. `EXPECTED_FILE_PATH` must be
+the database value under `/data/uploads`, and `EXPECTED_FILE_SIZE` is bytes.
 
 ```bash
-REHEARSAL_DIR=/var/lib/dragons-stash/backup-staging/monthly-rehearsal-SNAPSHOT_ID
-./scripts/backup/restore.sh restore-to-staging SNAPSHOT_ID "$REHEARSAL_DIR"
-(
-  cd "$REHEARSAL_DIR"/staging/backup-*
-  sha256sum --check manifest/database.dump.sha256
-)
+set -Eeuo pipefail
+set -a
+. /etc/dragons-stash/backup.env
+set +a
+
+./scripts/backup/restore.sh list
+SNAPSHOT_ID=SNAPSHOT_ID_FROM_LIST
+REHEARSAL_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+REHEARSAL_PROJECT="dragonsstash-rehearsal-$REHEARSAL_ID"
+REHEARSAL_DIR="$BACKUP_STAGING_PATH/monthly-rehearsal-$REHEARSAL_ID"
+REHEARSAL_ENV="$REHEARSAL_DIR/compose.env"
+REHEARSAL_APP_PORT=13000  # Choose an unused host-local port.
+
+EXPECTED_UPLOAD_ID=RECORDED_UPLOAD_ID
+EXPECTED_UPLOAD_STATUS=COMPLETED
+EXPECTED_FILE_NAME=RECORDED_FILENAME.stl
+EXPECTED_FILE_PATH=/data/uploads/RECORDED_RELATIVE_PATH.stl
+EXPECTED_FILE_SIZE=RECORDED_SIZE_IN_BYTES
+EXPECTED_SHA256=RECORDED_SHA256
+
+./scripts/backup/restore.sh verify "$SNAPSHOT_ID"
+./scripts/backup/restore.sh restore-to-staging "$SNAPSHOT_ID" "$REHEARSAL_DIR"
+RESTORE_ROOT="$(printf '%s\n' "$REHEARSAL_DIR"/staging/backup-*)"
+sha256sum --check "$RESTORE_ROOT/manifest/database.dump.sha256"
+
+umask 077
+cp .env "$REHEARSAL_ENV"
+printf '\nAPP_PORT=%s\nNEXT_PUBLIC_APP_URL=http://localhost:%s\n' \
+  "$REHEARSAL_APP_PORT" "$REHEARSAL_APP_PORT" >> "$REHEARSAL_ENV"
 ```
 
-The staging restore also verifies the custom PostgreSQL dump and required data
-directories. Inspect the restored data as appropriate, then remove the
-disposable directory using your approved host cleanup procedure.
+Confirm that `RESTORE_ROOT` names exactly one `backup-*` directory before
+continuing. The staging restore has already verified the custom PostgreSQL dump
+and restored `data/uploads`, `data/tdlib-worker`, and `data/tdlib-bot`.
+
+Create the isolated project and volumes, start only its database, then import
+the dump. The `create` command makes the project-scoped application volumes
+without starting app, worker, or bot.
+
+```bash
+compose_rehearsal() {
+  docker compose --project-name "$REHEARSAL_PROJECT" --env-file "$REHEARSAL_ENV" "$@"
+}
+rehearsal_volume() {
+  docker volume ls \
+    --filter "label=com.docker.compose.project=$REHEARSAL_PROJECT" \
+    --filter "label=com.docker.compose.volume=$1" \
+    --format '{{.Name}}'
+}
+
+compose_rehearsal --profile full create app worker bot
+compose_rehearsal --profile full up -d db
+compose_rehearsal exec -T db dropdb --if-exists --force \
+  --username "${POSTGRES_USER:-dragons}" "${POSTGRES_DB:-dragonsstash}"
+compose_rehearsal exec -T db createdb --username "${POSTGRES_USER:-dragons}" \
+  "${POSTGRES_DB:-dragonsstash}"
+compose_rehearsal exec -T db pg_restore --no-owner --exit-on-error \
+  --username "${POSTGRES_USER:-dragons}" --dbname "${POSTGRES_DB:-dragonsstash}" \
+  < "$RESTORE_ROOT/database.dump"
+```
+
+Copy each restored file tree into its matching **rehearsal** volume. Each
+target is new and empty; the function rejects an ambiguous volume lookup.
+
+```bash
+restore_rehearsal_volume() {
+  local logical_name="$1"
+  local source_dir="$2"
+  local volume_name
+  volume_name="$(rehearsal_volume "$logical_name")"
+  test -n "$volume_name"
+  test "$(printf '%s\n' "$volume_name" | wc -l)" -eq 1
+  compose_rehearsal --profile backup run --rm --no-deps \
+    --entrypoint bash \
+    -v "$source_dir:/restore-source:ro" \
+    -v "$volume_name:/restore-target" \
+    backup -ceu 'cp -a /restore-source/. /restore-target/'
+}
+
+restore_rehearsal_volume manual_uploads "$REHEARSAL_DIR/data/uploads"
+restore_rehearsal_volume tdlib_state "$REHEARSAL_DIR/data/tdlib-worker"
+restore_rehearsal_volume tdlib_bot_state "$REHEARSAL_DIR/data/tdlib-bot"
+```
+
+Start the disposable app, worker, and bot services. Check the health endpoint,
+then retain the `ps` and log output as rehearsal evidence. Do not use the bot
+to send messages during this check.
+
+```bash
+compose_rehearsal --profile full up -d app worker bot
+curl --fail --silent --show-error \
+  "http://localhost:$REHEARSAL_APP_PORT/api/health"
+compose_rehearsal --profile full ps
+compose_rehearsal --profile full logs --tail=100 app worker bot
+```
+
+Validate that every retained database file reference has a restored file. Rows
+whose `retainedAt` is `NULL` are legacy references and are warnings, not
+failures. Then compare the recorded STL checksum and metadata with the
+disposable database and volume; both commands must succeed.
+
+```bash
+compose_rehearsal exec -T db psql --no-psqlrc --tuples-only --no-align --quiet \
+  --field-separator=$'\t' --username "${POSTGRES_USER:-dragons}" \
+  --dbname "${POSTGRES_DB:-dragonsstash}" \
+  --command "SELECT CASE WHEN \"retainedAt\" IS NULL THEN 'legacy' ELSE 'retained' END, \"filePath\" FROM \"manual_upload_files\" ORDER BY 2" |
+  compose_rehearsal --profile backup run --rm --no-deps -T --entrypoint bash backup -ceu '
+    missing=0
+    while IFS="$(printf "\\t")" read -r retention file_path; do
+      if [[ "$retention" == legacy ]]; then
+        printf "Warning: legacy reference is not required: %s\\n" "$file_path" >&2
+      elif [[ "$retention" != retained || "$file_path" != /data/uploads/* || ! -f "/data/uploads/${file_path#/data/uploads/}" ]]; then
+        printf "Missing or invalid retained upload: %s\\n" "$file_path" >&2
+        missing=1
+      fi
+    done
+    exit "$missing"
+  '
+
+actual_sha256="$(compose_rehearsal --profile backup run --rm --no-deps \
+  --entrypoint sha256sum backup "$EXPECTED_FILE_PATH" | awk '{print $1}')"
+test "$actual_sha256" = "$EXPECTED_SHA256"
+
+metadata_rows="$(compose_rehearsal exec -T db psql --no-psqlrc --tuples-only \
+  --no-align --quiet --username "${POSTGRES_USER:-dragons}" \
+  --dbname "${POSTGRES_DB:-dragonsstash}" \
+  --set="upload_id=$EXPECTED_UPLOAD_ID" --set="upload_status=$EXPECTED_UPLOAD_STATUS" \
+  --set="file_name=$EXPECTED_FILE_NAME" --set="file_path=$EXPECTED_FILE_PATH" \
+  --set="file_size=$EXPECTED_FILE_SIZE" --command '
+    SELECT count(*) FROM "manual_uploads" u
+    JOIN "manual_upload_files" f ON f."uploadId" = u.id
+    WHERE u.id = :'upload_id'
+      AND u.status::text = :'upload_status'
+      AND f."fileName" = :'file_name'
+      AND f."filePath" = :'file_path'
+      AND f."fileSize" = :'file_size'::bigint
+      AND f."retainedAt" IS NOT NULL;
+  ')"
+test "$metadata_rows" = 1
+```
+
+After recording the evidence, destroy only the explicitly named disposable
+project and its project-labeled volumes. Do not remove `REHEARSAL_DIR` until
+the evidence is recorded; then remove only that generated child directory by
+your approved host cleanup procedure. Production services, volumes, and backup
+snapshots must remain untouched.
+
+```bash
+compose_rehearsal --profile full down --volumes --remove-orphans
+docker volume ls --filter "label=com.docker.compose.project=$REHEARSAL_PROJECT"
+test -z "$(docker volume ls --quiet --filter "label=com.docker.compose.project=$REHEARSAL_PROJECT")"
+```
+
+Record this evidence for every rehearsal; do not include secrets, database
+dumps, Telegram session contents, or private NAS details.
+
+```text
+Disposable restore rehearsal
+Date/time (UTC):
+Operator:
+Snapshot ID:
+Snapshot backup date:
+Disposable Compose project:
+Health endpoint result (HTTP/body):
+docker compose ps result:
+app/worker/bot log review result:
+Retained-file reference validation result:
+Known retained STL upload ID/path:
+Expected SHA-256 / restored SHA-256:
+Expected metadata (status, filename, size, retainedAt) / restored result:
+Database dump manifest checksum result:
+Cleanup result (project and rehearsal volumes absent):
+Notes/caveats:
+```
+
+This document describes the procedure only; it has not been run by this
+documentation update.
 
 ## 6. Restore modes
 
