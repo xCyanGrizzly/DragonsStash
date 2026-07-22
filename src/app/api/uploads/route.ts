@@ -55,7 +55,6 @@ export async function POST(request: Request) {
           fileName: file.name,
           filePath,
           fileSize: BigInt(file.size),
-          retainedAt: new Date(),
         },
       });
     }

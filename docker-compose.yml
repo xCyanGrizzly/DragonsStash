@@ -110,7 +110,6 @@ services:
       BACKUP_APP_VERSION: ${BACKUP_APP_VERSION:-unknown}
     user: "0:0"
     volumes:
-      - manual_uploads:/data/uploads:ro
       - tdlib_state:/data/tdlib-worker:ro
       - tdlib_bot_state:/data/tdlib-bot:ro
       - ${BACKUP_MOUNT_PATH:?Set BACKUP_MOUNT_PATH to the mounted Synology share}:/backup:rw

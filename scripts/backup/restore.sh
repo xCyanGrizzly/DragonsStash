@@ -7,15 +7,12 @@ readonly BACKUP_CONTAINER_ROOT="/backup"
 readonly -a LIVE_SERVICES=(app worker bot)
 
 RESTORED_DUMP=""
-RESTORED_UPLOADS=""
 RESTORED_TDLIB_WORKER=""
 RESTORED_TDLIB_BOT=""
 LIVE_STAGING_DIR=""
 SAFETY_DUMP=""
 LIVE_RESTORE_ACTIVE=0
 LIVE_REPLACEMENT_STARTED=0
-TEMP_VERIFY_DATABASE=""
-LIVE_UPLOADS_VOLUME=""
 LIVE_WORKER_VOLUME=""
 LIVE_BOT_VOLUME=""
 
@@ -147,11 +144,10 @@ validate_restored_tree() {
   backup_directory="${backup_directories[0]}"
   RESTORED_DUMP="$backup_directory/database.dump"
   manifest="$backup_directory/manifest/backup-manifest.json"
-  RESTORED_UPLOADS="$staging_dir/data/uploads"
   RESTORED_TDLIB_WORKER="$staging_dir/data/tdlib-worker"
   RESTORED_TDLIB_BOT="$staging_dir/data/tdlib-bot"
-  if [[ ! -s "$RESTORED_DUMP" || ! -s "$manifest" || ! -d "$RESTORED_UPLOADS" || ! -d "$RESTORED_TDLIB_WORKER" || ! -d "$RESTORED_TDLIB_BOT" ]]; then
-    printf 'Restored tree %s is incomplete; require staging/backup-*/database.dump, its manifest, data/uploads, data/tdlib-worker, and data/tdlib-bot.\n' "$staging_dir" >&2
+  if [[ ! -s "$RESTORED_DUMP" || ! -s "$manifest" || ! -d "$RESTORED_TDLIB_WORKER" || ! -d "$RESTORED_TDLIB_BOT" ]]; then
+    printf 'Restored tree %s is incomplete; require staging/backup-*/database.dump, its manifest, data/tdlib-worker, and data/tdlib-bot.\n' "$staging_dir" >&2
     return 1
   fi
   verify_custom_dump "$RESTORED_DUMP"
@@ -242,71 +238,6 @@ restore_database() {
   restore_database_dump "$RESTORED_DUMP"
 }
 
-verify_file_references() {
-  local database_name="$1"
-  local uploads_source="$2"
-  local database_user="${POSTGRES_USER:-dragons}"
-  docker compose exec -T db psql --no-psqlrc --tuples-only --no-align --quiet \
-    --field-separator=$'\t' \
-    --username "$database_user" --dbname "$database_name" \
-    --command "SELECT 'legacy', \"filePath\" FROM \"manual_upload_files\" WHERE \"retainedAt\" IS NULL
-      UNION ALL
-      SELECT 'retained', \"filePath\" FROM \"manual_upload_files\" WHERE \"retainedAt\" IS NOT NULL
-      ORDER BY 2" |
-    docker compose --profile backup run --rm --no-deps -T --entrypoint bash \
-      -v "$uploads_source:/data/uploads:ro" backup -ceu '
-        missing=0
-        while IFS="$(printf "\t")" read -r retention file_path; do
-          if [[ "$retention" == "legacy" ]]; then
-            printf "Warning: legacy manual-upload file reference is not required because retainedAt is NULL: %s\\n" "$file_path" >&2
-            continue
-          fi
-          if [[ "$retention" != "retained" ]]; then
-            printf "Unexpected retention status for database reference: %s\\n" "$file_path" >&2
-            missing=1
-            continue
-          fi
-          case "$file_path" in
-            /data/uploads/*) relative_path="${file_path#/data/uploads/}" ;;
-            *)
-              printf "Database reference is outside /data/uploads: %s\\n" "$file_path" >&2
-              missing=1
-              continue
-              ;;
-          esac
-          if [[ -z "$relative_path" || "$relative_path" == .. || "$relative_path" == ../* || "$relative_path" == */../* ]]; then
-            printf "Database reference has an invalid uploads path: %s\\n" "$file_path" >&2
-            missing=1
-          elif [[ ! -f "/data/uploads/$relative_path" ]]; then
-            printf "Missing restored upload for database reference: %s\\n" "$file_path" >&2
-            missing=1
-          fi
-        done
-        exit "$missing"
-      '
-}
-
-drop_temporary_verification_database() {
-  local database_user="${POSTGRES_USER:-dragons}"
-
-  if [[ -n "$TEMP_VERIFY_DATABASE" ]]; then
-    docker compose exec -T db dropdb --if-exists --force --username "$database_user" "$TEMP_VERIFY_DATABASE"
-    TEMP_VERIFY_DATABASE=""
-  fi
-}
-
-verify_staged_snapshot_file_references() {
-  local database_user="${POSTGRES_USER:-dragons}"
-
-  TEMP_VERIFY_DATABASE="dragons_restore_verify_$$_$(date +%s)"
-  docker compose exec -T db dropdb --if-exists --force --username "$database_user" "$TEMP_VERIFY_DATABASE"
-  docker compose exec -T db createdb --username "$database_user" "$TEMP_VERIFY_DATABASE"
-  docker compose exec -T db pg_restore --no-owner --exit-on-error \
-    --username "$database_user" --dbname "$TEMP_VERIFY_DATABASE" < "$RESTORED_DUMP"
-  verify_file_references "$TEMP_VERIFY_DATABASE" "$RESTORED_UPLOADS"
-  drop_temporary_verification_database
-}
-
 archive_live_volume() {
   local volume_name="$1"
   local logical_name="$2"
@@ -358,14 +289,12 @@ live_restore_failure() {
   trap - EXIT
   if ((LIVE_RESTORE_ACTIVE)); then
     docker compose --profile full stop "${LIVE_SERVICES[@]}" || true
-    drop_temporary_verification_database || true
     if ((LIVE_REPLACEMENT_STARTED)); then
-      restore_live_volume_archive "$LIVE_UPLOADS_VOLUME" manual_uploads || rollback_ok=0
       restore_live_volume_archive "$LIVE_WORKER_VOLUME" tdlib_state || rollback_ok=0
       restore_live_volume_archive "$LIVE_BOT_VOLUME" tdlib_bot_state || rollback_ok=0
       restore_database_dump "$SAFETY_DUMP" || rollback_ok=0
       if ((rollback_ok)); then
-        printf 'Rollback restored the pre-restore database and all three Docker volumes. Services remain stopped.\n' >&2
+        printf 'Rollback restored the pre-restore database and both TDLib Docker volumes. Services remain stopped.\n' >&2
       else
         printf 'Rollback failed; services remain stopped. Restore the safety archives and database dump manually.\n' >&2
       fi
@@ -379,7 +308,6 @@ live_restore_failure() {
 restore_live() {
   local snapshot_id="$1"
   local project_name
-  local uploads_volume
   local worker_volume
   local bot_volume
   local timestamp
@@ -401,18 +329,13 @@ restore_live() {
   create_safety_dump
   backup_restic restore "$snapshot_id" --target "$container_staging_dir"
   validate_restored_tree "$LIVE_STAGING_DIR"
-  uploads_volume="$(compose_volume_name "$project_name" manual_uploads)"
   worker_volume="$(compose_volume_name "$project_name" tdlib_state)"
   bot_volume="$(compose_volume_name "$project_name" tdlib_bot_state)"
-  LIVE_UPLOADS_VOLUME="$uploads_volume"
   LIVE_WORKER_VOLUME="$worker_volume"
   LIVE_BOT_VOLUME="$bot_volume"
-  archive_live_volume "$uploads_volume" manual_uploads
   archive_live_volume "$worker_volume" tdlib_state
   archive_live_volume "$bot_volume" tdlib_bot_state
-  verify_staged_snapshot_file_references
   LIVE_REPLACEMENT_STARTED=1
-  replace_volume "$RESTORED_UPLOADS" "$uploads_volume"
   replace_volume "$RESTORED_TDLIB_WORKER" "$worker_volume"
   replace_volume "$RESTORED_TDLIB_BOT" "$bot_volume"
   restore_database

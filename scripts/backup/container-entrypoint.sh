@@ -3,7 +3,6 @@ set -Eeuo pipefail
 
 readonly BACKUP_ROOT="/backup"
 readonly STAGING_ROOT="/staging"
-readonly UPLOADS_PATH="/data/uploads"
 readonly TDLIB_WORKER_PATH="/data/tdlib-worker"
 readonly TDLIB_BOT_PATH="/data/tdlib-bot"
 
@@ -112,7 +111,6 @@ run_backup() {
   require_value BACKUP_RETENTION_DAYS
   validate_restic_configuration
   require_directory "$STAGING_ROOT"
-  require_directory "$UPLOADS_PATH"
   require_directory "$TDLIB_WORKER_PATH"
   require_directory "$TDLIB_BOT_PATH"
   ensure_repository_initialized
@@ -166,7 +164,6 @@ SQL
     "sha256": "$(json_escape "$checksum")"
   },
   "volumePaths": [
-    "$(json_escape "$UPLOADS_PATH")",
     "$(json_escape "$TDLIB_WORKER_PATH")",
     "$(json_escape "$TDLIB_BOT_PATH")"
   ]
@@ -176,12 +173,10 @@ EOF
   restic backup \
     --tag "application:dragons-stash" \
     --tag "source:database" \
-    --tag "source:uploads" \
     --tag "source:tdlib-worker" \
     --tag "source:tdlib-bot" \
     "$RUN_DIR/database.dump" \
     "$RUN_DIR/manifest" \
-    "$UPLOADS_PATH" \
     "$TDLIB_WORKER_PATH" \
     "$TDLIB_BOT_PATH"
   restic snapshots --latest 1

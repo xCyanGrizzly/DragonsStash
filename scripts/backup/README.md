@@ -1,9 +1,9 @@
 # Production backup and recovery
 
-Dragon's Stash backs up its PostgreSQL database, durable STL uploads, and the
-worker and bot Telegram (TDLib) session volumes to an encrypted Restic
-repository on a Synology NFS share. Docker volumes are local runtime storage;
-they are not, by themselves, backups.
+Dragon's Stash backs up its PostgreSQL database and the worker/bot Telegram
+(TDLib) session volumes to an encrypted Restic repository on a Synology NFS
+share. Docker volumes are local runtime storage; they are not, by themselves,
+backups.
 
 The backup job runs as `root` because it reads the Restic password file and
 mounts host paths into the backup container. Keep the Synology share on the
@@ -14,16 +14,19 @@ private network. Do **not** expose NFS to the Internet.
 Each snapshot contains:
 
 - a custom-format PostgreSQL dump;
-- the `manual_uploads` volume at `/data/uploads` (including newly completed
-  manual STL uploads);
+- a backup manifest with dump checksum, migration metadata, version metadata,
+  and captured source paths;
 - the worker TDLib session volume; and
 - the bot TDLib session volume.
 
-New manual-upload STL files are retained in `manual_uploads` and can therefore
-be included in future backups. STL files that an older worker run already
-deleted cannot be recovered by this backup feature. Their legacy database rows
-are reported as warnings during restore validation; only files marked as
-retained must be present in a restored snapshot.
+The `manual_uploads` and `tmp_zips` volumes are excluded. Completed STL
+binaries are not retained as a local recovery set by this backup feature; they
+remain in Telegram. Recovery preserves the PostgreSQL archive, message,
+package, file, Telegram channel, and Telegram message ID mappings needed for
+normal lookup and delivery after restore.
+
+Future Telegram channel-forwarding behavior and archive/STL-content integrity
+auditing are intentionally outside this backup and restore procedure.
 
 ## 1. Configure the Synology NFS share
 
@@ -36,8 +39,8 @@ On the Synology DSM host:
    Docker host's fixed private-network IP address. Grant read/write access.
    Use the least permissive squash and authentication settings that work for
    the root-run backup job, and do not use a broad subnet or public address.
-4. Record the NFS export path shown by DSM (for example,
-   `/volume1/dragonsstash-backups`).
+4. Record the NFS export path shown by DSM, for example
+   `/volume1/dragonsstash-backups`.
 
 On the Docker host, install the NFS client package for its distribution, create
 the mountpoint, and mount the export. Replace `NAS_IP` and the export path with
@@ -95,8 +98,7 @@ sudo install -m 0600 -o root -g root /dev/null /etc/dragons-stash/backup.env
 sudoedit /etc/dragons-stash/backup.env
 ```
 
-Set these production values (replace the example paths and retention period as
-needed):
+Set these production values, replacing paths and retention as needed:
 
 ```dotenv
 BACKUP_MOUNT_PATH=/mnt/dragonsstash-backups
@@ -111,7 +113,7 @@ BACKUP_APP_VERSION=unknown
 share is mounted at `/backup`; `/backup/restic` keeps the Restic repository in
 the Synology share. `BACKUP_APP_VERSION` is optional metadata. The production
 Compose environment must also retain its existing database and application
-secrets; do not add any secrets to Git.
+secrets; do not add secrets to Git.
 
 ## 3. Initialize the Restic repository once
 
@@ -145,9 +147,9 @@ sudo journalctl -u dragons-stash-backup.service -n 100 --no-pager
 ```
 
 The timer runs nightly at 03:00 with up to 15 minutes of randomized delay and
-catches up after downtime. The first run can take a long time because it uploads
-all existing STL and session data. Later Restic snapshots deduplicate unchanged
-data.
+catches up after downtime. The first run captures PostgreSQL and both TDLib
+session volumes. Later Restic snapshots deduplicate unchanged session state and
+database dump content.
 
 ## 5. Monitor and maintain backups
 
@@ -161,7 +163,7 @@ sudo journalctl -u dragons-stash-backup.service -n 100 --no-pager
 sudo systemctl --failed
 ```
 
-List the snapshots through the configured backup container:
+List snapshots through the configured backup container:
 
 ```bash
 ./scripts/backup/restore.sh list
@@ -186,24 +188,21 @@ At least monthly, perform a full repository read check:
 docker compose --profile backup run --rm backup check --read-data
 ```
 
-### Monthly disposable recovery rehearsal
+## 6. Monthly disposable recovery rehearsal
 
 Perform the following procedure at least monthly. It restores one snapshot into
-a unique, disposable Compose project, so the database and all Compose volumes
-are isolated from production. **Never use the production Compose project name,
-production volume names, or `restore-live` for this rehearsal.** In particular,
-do not run `docker compose down -v` without the explicit rehearsal
-`--project-name` shown below.
+a unique, disposable Compose project, so the database and Compose volumes are
+isolated from production. **Never use the production Compose project name,
+production volume names, or `restore-live` for this rehearsal.** Do not run
+`docker compose down -v` without the explicit rehearsal `--project-name` shown
+below.
 
 Run these commands from the production Compose checkout as an operator allowed
-to read `/etc/dragons-stash/backup.env`. They use the configuration required
-for a separate application stack; do not expose its published port beyond the
-host. The worker and bot are deliberately replaced with inert processes, so
-this validates their restored images and volumes without executing Telegram
-clients or using production Telegram credentials. First select a snapshot and
-set the expected values for a known retained STL that was recorded when the
-backup was made. `EXPECTED_FILE_PATH` must be the database value under
-`/data/uploads`, and `EXPECTED_FILE_SIZE` is bytes.
+to read `/etc/dragons-stash/backup.env`. They use a separate application stack;
+do not expose its published port beyond the host. The worker and bot are
+deliberately replaced with inert processes, so this validates restored images,
+database state, and TDLib volume layout without executing Telegram clients or
+using production Telegram credentials.
 
 ```bash
 set -Eeuo pipefail
@@ -220,17 +219,15 @@ REHEARSAL_ENV="$REHEARSAL_DIR/compose.env"
 REHEARSAL_OVERRIDE="$REHEARSAL_DIR/compose.rehearsal.override.yml"
 REHEARSAL_APP_PORT=13000  # Choose an unused host-local port.
 
-EXPECTED_UPLOAD_ID=RECORDED_UPLOAD_ID
-EXPECTED_UPLOAD_STATUS=COMPLETED
-EXPECTED_FILE_NAME=RECORDED_FILENAME.stl
-EXPECTED_FILE_PATH=/data/uploads/RECORDED_RELATIVE_PATH.stl
-EXPECTED_FILE_SIZE=RECORDED_SIZE_IN_BYTES
-EXPECTED_SHA256=RECORDED_SHA256
-
 ./scripts/backup/restore.sh verify "$SNAPSHOT_ID"
 ./scripts/backup/restore.sh restore-to-staging "$SNAPSHOT_ID" "$REHEARSAL_DIR"
 RESTORE_ROOT="$(printf '%s\n' "$REHEARSAL_DIR"/staging/backup-*)"
 sha256sum --check "$RESTORE_ROOT/manifest/database.dump.sha256"
+
+test -s "$RESTORE_ROOT/database.dump"
+test -s "$RESTORE_ROOT/manifest/backup-manifest.json"
+test -d "$REHEARSAL_DIR/data/tdlib-worker"
+test -d "$REHEARSAL_DIR/data/tdlib-bot"
 
 umask 077
 cp .env "$REHEARSAL_ENV"
@@ -257,13 +254,13 @@ EOF
 
 Confirm that `RESTORE_ROOT` names exactly one `backup-*` directory before
 continuing. The staging restore has already verified the custom PostgreSQL dump
-and restored `data/uploads`, `data/tdlib-worker`, and `data/tdlib-bot`.
+and restored `data/tdlib-worker` and `data/tdlib-bot`.
 
 Create the isolated project and volumes, start only its database, then import
 the dump. `compose_rehearsal()` always applies the disposable override created
 above: worker and bot retain their restored images and volumes but have their
 Telegram credential variables blanked and run only `sleep infinity`, never
-Telegram clients. The `create` command makes the project-scoped application
+Telegram clients. The `create` command makes project-scoped application
 volumes without starting app, worker, or bot.
 
 ```bash
@@ -289,7 +286,7 @@ compose_rehearsal exec -T db pg_restore --no-owner --exit-on-error \
   < "$RESTORE_ROOT/database.dump"
 ```
 
-Copy each restored file tree into its matching **rehearsal** volume. Each
+Copy each restored TDLib tree into its matching **rehearsal** volume. Each
 target is new and empty; the function rejects an ambiguous volume lookup.
 
 ```bash
@@ -307,16 +304,15 @@ restore_rehearsal_volume() {
     backup -ceu 'cp -a /restore-source/. /restore-target/'
 }
 
-restore_rehearsal_volume manual_uploads "$REHEARSAL_DIR/data/uploads"
 restore_rehearsal_volume tdlib_state "$REHEARSAL_DIR/data/tdlib-worker"
 restore_rehearsal_volume tdlib_bot_state "$REHEARSAL_DIR/data/tdlib-bot"
 ```
 
 Start the disposable app, worker, and bot containers. The app and database
-perform their normal health and restored-data checks; the worker and bot remain
-inert `sleep infinity` processes, so this does not execute Telegram clients or
-send messages. Check the health endpoint, then retain the `ps` and log output
-as rehearsal evidence.
+perform their normal health checks; the worker and bot remain inert `sleep
+infinity` processes, so this does not execute Telegram clients or send
+messages. Check the health endpoint, then retain the `ps` and log output as
+rehearsal evidence.
 
 ```bash
 compose_rehearsal --profile full up -d app worker bot
@@ -326,40 +322,16 @@ compose_rehearsal --profile full ps
 compose_rehearsal --profile full logs --tail=100 app worker bot
 ```
 
-Validate that every retained database file reference has a restored file. Rows
-whose `retainedAt` is `NULL` are legacy references and are warnings, not
-failures. Then compare the recorded STL checksum and metadata with the
-disposable database and volume; both commands must succeed.
+Optionally spot-check the restored database metadata that lets Dragon's Stash
+locate Telegram-hosted STL binaries after restore. This checks database
+metadata and Telegram IDs only; it does not assert local STL file presence,
+STL checksums, Telegram forwarding behavior, or archive/STL binary integrity.
 
 ```bash
 compose_rehearsal exec -T db psql --no-psqlrc --tuples-only --no-align --quiet \
-  --field-separator=$'\t' --username "${POSTGRES_USER:-dragons}" \
+  --username "${POSTGRES_USER:-dragons}" \
   --dbname "${POSTGRES_DB:-dragonsstash}" \
-  --command "SELECT CASE WHEN \"retainedAt\" IS NULL THEN 'legacy' ELSE 'retained' END, \"filePath\" FROM \"manual_upload_files\" ORDER BY 2" |
-  compose_rehearsal --profile backup run --rm --no-deps -T --entrypoint bash backup -ceu '
-    missing=0
-    while IFS="$(printf "\\t")" read -r retention file_path; do
-      if [[ "$retention" == legacy ]]; then
-        printf "Warning: legacy reference is not required: %s\\n" "$file_path" >&2
-      elif [[ "$retention" != retained || "$file_path" != /data/uploads/* || ! -f "/data/uploads/${file_path#/data/uploads/}" ]]; then
-        printf "Missing or invalid retained upload: %s\\n" "$file_path" >&2
-        missing=1
-      fi
-    done
-    exit "$missing"
-  '
-
-actual_sha256="$(compose_rehearsal --profile backup run --rm --no-deps \
-  --entrypoint sha256sum backup "$EXPECTED_FILE_PATH" | awk '{print $1}')"
-test "$actual_sha256" = "$EXPECTED_SHA256"
-
-metadata_rows="$(compose_rehearsal exec -T db psql --no-psqlrc --tuples-only \
-  --no-align --quiet --username "${POSTGRES_USER:-dragons}" \
-  --dbname "${POSTGRES_DB:-dragonsstash}" \
-  --set="upload_id=$EXPECTED_UPLOAD_ID" --set="upload_status=$EXPECTED_UPLOAD_STATUS" \
-  --set="file_name=$EXPECTED_FILE_NAME" --set="file_path=$EXPECTED_FILE_PATH" \
-  --set="file_size=$EXPECTED_FILE_SIZE" --command "SELECT count(*) FROM \"manual_uploads\" u JOIN \"manual_upload_files\" f ON f.\"uploadId\" = u.id WHERE u.id = :'upload_id' AND u.status::text = :'upload_status' AND f.\"fileName\" = :'file_name' AND f.\"filePath\" = :'file_path' AND f.\"fileSize\" = :'file_size'::bigint AND f.\"retainedAt\" IS NOT NULL;")"
-test "$metadata_rows" = 1
+  --command 'SELECT count(*) FROM "packages" WHERE "destChannelId" IS NOT NULL AND "destMessageId" IS NOT NULL;'
 ```
 
 After recording the evidence, destroy only the explicitly named disposable
@@ -384,14 +356,14 @@ Operator:
 Snapshot ID:
 Snapshot backup date:
 Disposable Compose project:
+Full restic check --read-data result:
+Database dump manifest checksum result:
+TDLib worker tree restored:
+TDLib bot tree restored:
 Health endpoint result (HTTP/body):
 docker compose ps result:
 app/worker/bot log review result:
-Retained-file reference validation result:
-Known retained STL upload ID/path:
-Expected SHA-256 / restored SHA-256:
-Expected metadata (status, filename, size, retainedAt) / restored result:
-Database dump manifest checksum result:
+Database Telegram metadata/mapping spot-check result:
 Cleanup result (project and rehearsal volumes absent):
 Notes/caveats:
 ```
@@ -399,11 +371,11 @@ Notes/caveats:
 This document describes the procedure only; it has not been run by this
 documentation update.
 
-## 6. Restore modes
+## 7. Restore modes
 
 Run restore commands from the production Compose checkout after loading the
-same backup environment used by systemd (for example, as root with
-`/etc/dragons-stash/backup.env` exported). All restore staging directories must
+same backup environment used by systemd, for example as root with
+`/etc/dragons-stash/backup.env` exported. All restore staging directories must
 be children of `BACKUP_STAGING_PATH`.
 
 | Mode | Command | Effect |
@@ -411,13 +383,13 @@ be children of `BACKUP_STAGING_PATH`.
 | List snapshots | `./scripts/backup/restore.sh list` | Lists available Restic snapshots. Does not stop services or change volumes. |
 | Verify a snapshot | `./scripts/backup/restore.sh verify SNAPSHOT_ID` | Confirms the snapshot exists and runs a Restic repository check. Does not change live data. |
 | Restore to staging | `./scripts/backup/restore.sh restore-to-staging SNAPSHOT_ID STAGING_DIR` | Restores and validates a snapshot in a new or empty child directory of `BACKUP_STAGING_PATH`. Does not stop services or change volumes. |
-| Replace live data | `./scripts/backup/restore.sh restore-live SNAPSHOT_ID --confirm-replace-live-data` | Stops application services and replaces the PostgreSQL database plus all protected volumes after validation. |
+| Replace live data | `./scripts/backup/restore.sh restore-live SNAPSHOT_ID --confirm-replace-live-data` | Stops application services and replaces the PostgreSQL database plus both TDLib session volumes after validation. |
 
 `restore-live` is destructive. It requires the exact
 `--confirm-replace-live-data` flag and should be used only after a successful
 staging restore has been inspected. It creates a safety database dump and
-archives of the current protected volumes in local staging before replacement.
-If a live restore fails, it leaves the application services stopped, retains the
+archives of the current TDLib volumes in local staging before replacement. If a
+live restore fails, it leaves the application services stopped, retains the
 safety artifacts and staging directory, and attempts rollback after replacement
 has begun. Review the reported paths and service health before manually
 starting services.
@@ -438,6 +410,6 @@ restore it to a fresh staging directory, for example:
 ```
 
 The restored tree must contain a non-empty PostgreSQL dump, its manifest,
-uploads, worker TDLib state, and bot TDLib state. Live restore additionally
-checks every retained manual-upload file reference against the staged uploads
-before replacing any live volume.
+worker TDLib state, and bot TDLib state. STL binaries remain in Telegram, and
+the restored database mappings and Telegram IDs are what recovery preserves for
+normal lookup and delivery.

@@ -1,3 +1,4 @@
+import path from "path";
 import { rm } from "fs/promises";
 import { db } from "./db/client.js";
 import { childLogger } from "./util/logger.js";
@@ -198,5 +199,13 @@ export async function processManualUpload(uploadId: string): Promise<void> {
       where: { id: uploadId },
       data: { status: "FAILED", errorMessage: message },
     });
+  }
+
+  // Clean up uploaded files
+  try {
+    const uploadDir = path.join("/data/uploads", uploadId);
+    await rm(uploadDir, { recursive: true, force: true });
+  } catch {
+    // Best-effort cleanup
   }
 }
