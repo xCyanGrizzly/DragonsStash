@@ -937,6 +937,7 @@ model ManualUploadFile {
   filePath        String       // Path on shared volume
   fileSize        BigInt
   packageId       String?      // Set after processing
+  retainedAt      DateTime?
 
   upload          ManualUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
 

@@ -180,12 +180,25 @@ verify_file_references() {
   local database_user="${POSTGRES_USER:-dragons}"
   local database_name="${POSTGRES_DB:-dragonsstash}"
   docker compose exec -T db psql --no-psqlrc --tuples-only --no-align --quiet \
+    --field-separator=$'\t' \
     --username "$database_user" --dbname "$database_name" \
-    --command 'SELECT "filePath" FROM "manual_upload_files" ORDER BY "filePath"' |
+    --command "SELECT 'legacy', \"filePath\" FROM \"manual_upload_files\" WHERE \"retainedAt\" IS NULL
+      UNION ALL
+      SELECT 'retained', \"filePath\" FROM \"manual_upload_files\" WHERE \"retainedAt\" IS NOT NULL
+      ORDER BY 2" |
     docker compose --profile backup run --rm --no-deps -T --entrypoint bash \
       -v "$uploads_volume:/data/uploads:ro" backup -ceu '
         missing=0
-        while IFS= read -r file_path; do
+        while IFS="$(printf "\t")" read -r retention file_path; do
+          if [[ "$retention" == "legacy" ]]; then
+            printf "Warning: legacy manual-upload file reference is not required because retainedAt is NULL: %s\\n" "$file_path" >&2
+            continue
+          fi
+          if [[ "$retention" != "retained" ]]; then
+            printf "Unexpected retention status for database reference: %s\\n" "$file_path" >&2
+            missing=1
+            continue
+          fi
           case "$file_path" in
             /data/uploads/*) relative_path="${file_path#/data/uploads/}" ;;
             *)
