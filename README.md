@@ -140,6 +140,14 @@ docker compose --profile bot up -d
 > **Tip:** Create a bot token via [@BotFather](https://t.me/BotFather) on Telegram and set `BOT_TOKEN` in `.env`.
 > Get Telegram API credentials from [my.telegram.org/apps](https://my.telegram.org/apps).
 
+### Production Backups
+
+Docker volumes are not backups. Production backups protect PostgreSQL, durable
+STL uploads, and the worker and bot Telegram session volumes in an encrypted
+Restic repository on a Synology NFS share. See the [backup and recovery
+guide](scripts/backup/README.md) for Synology setup, secrets, systemd
+installation, monitoring, retention, and guarded restore procedures.
+
 ### Seeding the Database
 
 To seed the database with sample data on first run:
