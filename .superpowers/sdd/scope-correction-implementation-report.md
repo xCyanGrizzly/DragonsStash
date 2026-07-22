@@ -165,3 +165,76 @@ future work outside the backup scope.
 - None for implementation scope.
 - Git Bash was available and used for shell syntax/assertion checks, so Docker
   fallback was not needed for the final syntax verification.
+
+---
+
+# Important Operational Findings Fix
+
+**Date:** 2026-07-22
+
+## Fix
+
+Addressed the two Important operational findings from final review:
+
+- `scripts/backup/run-backup.sh`
+  - Backup wrapper restart failures now make an otherwise successful backup
+    exit non-zero.
+  - Existing non-zero backup failures remain preserved if service restart also
+    fails.
+  - Added `scripts/backup/run-backup-assertions.sh` to assert both exit-code
+    cases with a fake Docker/Compose environment.
+
+- `scripts/backup/restore.sh`
+  - `restore-live` now captures the managed services that were running before
+    live restore using `docker compose --profile full ps --status running`.
+  - Live restore stops only those previously running managed services.
+  - Successful live restore starts only those previously running services, so
+    the profile-gated optional `bot` is not started if it was not running.
+  - Failure handling leaves services stopped and still rolls back only the
+    PostgreSQL database plus both TDLib volumes.
+  - App health wait now runs only when `app` was previously running.
+  - Extended `scripts/backup/restore-path-assertions.sh` to assert subset
+    stop/start behavior and skipped health checks when `app` was not running.
+
+Addressed the Minor staging-path documentation mismatch by aligning
+`.env.example` with the backup README example:
+`/var/lib/dragons-stash/backup-staging`.
+
+## Verification
+
+- Red checks before implementation:
+  - `docker run --rm -v "${PWD}:/work" -w /work ubuntu:24.04 bash scripts/backup/run-backup-assertions.sh`
+    - Failed as expected: backup reported success when restart failed.
+  - `docker run --rm -v "${PWD}:/work" -w /work ubuntu:24.04 bash scripts/backup/restore-path-assertions.sh`
+    - Failed as expected: restore-live stopped the fixed `app worker bot`
+      service set instead of the running subset.
+
+- Focused assertions after implementation:
+  - `docker run --rm -v "${PWD}:/work" -w /work ubuntu:24.04 bash scripts/backup/run-backup-assertions.sh`
+    - Passed.
+  - `docker run --rm -v "${PWD}:/work" -w /work ubuntu:24.04 bash scripts/backup/restore-path-assertions.sh`
+    - Passed.
+
+- `git diff --check`
+  - Passed.
+
+- Docker Bash syntax check:
+  - `docker run --rm -v "${PWD}:/work" -w /work ubuntu:24.04 bash -n scripts/backup/run-backup.sh scripts/backup/restore.sh scripts/backup/container-entrypoint.sh scripts/backup/restore-path-assertions.sh scripts/backup/run-backup-assertions.sh`
+  - Passed.
+
+- `npx prisma validate`
+  - Passed.
+
+- `npm run build`
+  - Passed.
+
+- `npm run lint`
+  - Failed on unrelated existing React lint issues in `src/` and mirrored
+    `.worktrees/worker-improvements` files; no failures were in touched backup
+    files.
+
+## Concerns
+
+- Local `bash` is unavailable because the Windows `bash` command resolves to a
+  WSL shim with no installed distribution; shell checks used Docker fallback.
+- Full `npm run lint` remains blocked by pre-existing unrelated lint errors.

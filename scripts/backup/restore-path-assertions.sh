@@ -51,6 +51,13 @@ if [[ "${1:-}" == "compose" && "${2:-}" == "config" && "${3:-}" == "--format" &&
   exit 0
 fi
 
+if [[ "${1:-}" == "compose" && "${2:-}" == "--profile" && "${3:-}" == "full" && "${4:-}" == "ps" && "${5:-}" == "--status" && "${6:-}" == "running" && "${7:-}" == "-q" ]]; then
+  case " ${RESTORE_ASSERT_RUNNING_SERVICES:-app worker bot} " in
+    *" ${8:-} "*) printf '%s-container\n' "${8:-}" ;;
+  esac
+  exit 0
+fi
+
 if [[ "${1:-}" == "volume" && "${2:-}" == "ls" ]]; then
   if [[ " $* " == *"com.docker.compose.volume=tdlib_state"* ]]; then
     printf 'dragonsstash_tdlib_state\n'
@@ -102,6 +109,8 @@ EOF
   cat > "$fake_bin/curl" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+printf '%s\t' "$@" >> "$DRAGONS_STASH_CURL_CALLS"
+printf '\n' >> "$DRAGONS_STASH_CURL_CALLS"
 exit 0
 EOF
   chmod +x "$fake_bin/curl"
@@ -126,6 +135,7 @@ run_restore_live() {
   shift
 
   DRAGONS_STASH_DOCKER_CALLS="$TMP_ROOT/docker-calls-$name.log" \
+  DRAGONS_STASH_CURL_CALLS="$TMP_ROOT/curl-calls-$name.log" \
     "$@" "$RESTORE_SCRIPT" restore-live snapshot-scope --confirm-replace-live-data
 }
 
@@ -163,6 +173,32 @@ assert_live_restore_uses_include_filters() {
   assert_restore_call_is_filtered "$calls"
 }
 
+assert_live_restore_restarts_only_previously_running_services() {
+  local calls="$TMP_ROOT/docker-calls-live-running-subset.log"
+  local stop_call
+  local start_call
+
+  setup_fake_environment
+  RESTORE_ASSERT_RUNNING_SERVICES="app worker" run_restore_live live-running-subset bash >/dev/null
+
+  stop_call="$(grep $'compose\t--profile\tfull\tstop' "$calls" || true)"
+  start_call="$(grep $'compose\t--profile\tfull\tup\t-d' "$calls" || true)"
+
+  [[ "$stop_call" == $'compose\t--profile\tfull\tstop\tapp\tworker\t' ]] \
+    || fail "restore-live stopped services other than the running app/worker subset: $stop_call"
+  [[ "$start_call" == $'compose\t--profile\tfull\tup\t-d\tapp\tworker\t' ]] \
+    || fail "restore-live started services other than the running app/worker subset: $start_call"
+}
+
+assert_live_restore_skips_health_when_app_was_not_running() {
+  local calls="$TMP_ROOT/curl-calls-live-without-app.log"
+
+  setup_fake_environment
+  RESTORE_ASSERT_RUNNING_SERVICES="worker" run_restore_live live-without-app bash >/dev/null
+
+  [[ ! -s "$calls" ]] || fail "restore-live waited for app health even though app was not previously running"
+}
+
 assert_unexpected_volume_content_is_rejected() {
   local output="$TMP_ROOT/unexpected-output.log"
 
@@ -176,6 +212,8 @@ assert_unexpected_volume_content_is_rejected() {
 
 assert_restore_uses_include_filters
 assert_live_restore_uses_include_filters
+assert_live_restore_restarts_only_previously_running_services
+assert_live_restore_skips_health_when_app_was_not_running
 assert_unexpected_volume_content_is_rejected
 
 printf 'restore-path assertions passed\n'

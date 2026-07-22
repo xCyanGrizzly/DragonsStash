@@ -24,6 +24,7 @@ LIVE_RESTORE_ACTIVE=0
 LIVE_REPLACEMENT_STARTED=0
 LIVE_WORKER_VOLUME=""
 LIVE_BOT_VOLUME=""
+declare -a RUNNING_LIVE_SERVICES=()
 
 usage() {
   cat <<'EOF'
@@ -258,6 +259,33 @@ compose_volume_name() {
   printf '%s\n' "${matches[0]}"
 }
 
+capture_running_live_services() {
+  local service
+  local container_ids
+
+  RUNNING_LIVE_SERVICES=()
+  for service in "${LIVE_SERVICES[@]}"; do
+    if ! container_ids="$(docker compose --profile full ps --status running -q "$service")"; then
+      printf 'Unable to determine whether Compose service %s is running.\n' "$service" >&2
+      return 1
+    fi
+
+    if [[ -n "$container_ids" ]]; then
+      RUNNING_LIVE_SERVICES+=("$service")
+    fi
+  done
+}
+
+live_service_was_running() {
+  local requested_service="$1"
+  local service
+
+  for service in "${RUNNING_LIVE_SERVICES[@]}"; do
+    [[ "$service" == "$requested_service" ]] && return 0
+  done
+  return 1
+}
+
 replace_volume() {
   local source_dir="$1"
   local volume_name="$2"
@@ -347,7 +375,9 @@ live_restore_failure() {
   local rollback_ok=1
   trap - EXIT
   if ((LIVE_RESTORE_ACTIVE)); then
-    docker compose --profile full stop "${LIVE_SERVICES[@]}" || true
+    if ((${#RUNNING_LIVE_SERVICES[@]} > 0)); then
+      docker compose --profile full stop "${RUNNING_LIVE_SERVICES[@]}" || true
+    fi
     if ((LIVE_REPLACEMENT_STARTED)); then
       restore_live_volume_archive "$LIVE_WORKER_VOLUME" tdlib_state || rollback_ok=0
       restore_live_volume_archive "$LIVE_BOT_VOLUME" tdlib_bot_state || rollback_ok=0
@@ -384,7 +414,10 @@ restore_live() {
   SAFETY_DUMP="$LIVE_STAGING_DIR/pre-restore-database.dump"
   trap live_restore_failure EXIT
   LIVE_RESTORE_ACTIVE=1
-  docker compose --profile full stop "${LIVE_SERVICES[@]}"
+  capture_running_live_services
+  if ((${#RUNNING_LIVE_SERVICES[@]} > 0)); then
+    docker compose --profile full stop "${RUNNING_LIVE_SERVICES[@]}"
+  fi
   create_safety_dump
   restore_snapshot_subset "$snapshot_id" "$container_staging_dir"
   validate_restored_tree "$LIVE_STAGING_DIR"
@@ -398,8 +431,12 @@ restore_live() {
   replace_volume "$RESTORED_TDLIB_WORKER" "$worker_volume"
   replace_volume "$RESTORED_TDLIB_BOT" "$bot_volume"
   restore_database
-  docker compose --profile full up -d "${LIVE_SERVICES[@]}"
-  wait_for_health
+  if ((${#RUNNING_LIVE_SERVICES[@]} > 0)); then
+    docker compose --profile full up -d "${RUNNING_LIVE_SERVICES[@]}"
+  fi
+  if live_service_was_running app; then
+    wait_for_health
+  fi
   LIVE_RESTORE_ACTIVE=0
   trap - EXIT
   printf 'Live restore completed. Staging directory retained at: %s\n' "$LIVE_STAGING_DIR"

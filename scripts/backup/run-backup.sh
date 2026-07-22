@@ -71,12 +71,17 @@ capture_running_services() {
 
 restart_running_services() {
   local exit_code=$?
+  local restart_exit=0
 
   trap - EXIT
 
   if ((${#RUNNING_SERVICES[@]} > 0)); then
-    if ! docker compose start "${RUNNING_SERVICES[@]}"; then
+    docker compose start "${RUNNING_SERVICES[@]}" || restart_exit=$?
+    if ((restart_exit != 0)); then
       printf 'Failed to restart one or more previously running services: %s\n' "${RUNNING_SERVICES[*]}" >&2
+      if ((exit_code == 0)); then
+        exit_code="$restart_exit"
+      fi
     fi
   fi
 
