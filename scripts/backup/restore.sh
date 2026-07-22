@@ -5,6 +5,15 @@ readonly CONFIRM_REPLACE_LIVE_DATA="--confirm-replace-live-data"
 readonly STAGING_CONTAINER_ROOT="/staging"
 readonly BACKUP_CONTAINER_ROOT="/backup"
 readonly -a LIVE_SERVICES=(app worker bot)
+readonly -a RESTORE_INCLUDE_FILTERS=(
+  --include "/staging/backup-*/database.dump"
+  --include "/staging/backup-*/manifest"
+  --include "/staging/backup-*/manifest/**"
+  --include "/data/tdlib-worker"
+  --include "/data/tdlib-worker/**"
+  --include "/data/tdlib-bot"
+  --include "/data/tdlib-bot/**"
+)
 
 RESTORED_DUMP=""
 RESTORED_TDLIB_WORKER=""
@@ -80,6 +89,13 @@ backup_restic() {
   docker compose --profile backup run --rm --no-deps backup "$@"
 }
 
+restore_snapshot_subset() {
+  local snapshot_id="$1"
+  local container_staging_dir="$2"
+
+  backup_restic restore "$snapshot_id" --target "$container_staging_dir" "${RESTORE_INCLUDE_FILTERS[@]}"
+}
+
 canonical_staging_root() {
   realpath -m -- "$BACKUP_STAGING_PATH"
 }
@@ -131,6 +147,48 @@ verify_custom_dump() {
     backup --list /restore/database.dump >/dev/null
 }
 
+reject_unexpected_restored_content() {
+  local staging_dir="$1"
+  local backup_directory="$2"
+  local entry
+  local name
+  local -a unexpected_entries=()
+
+  while IFS= read -r -d '' entry; do
+    name="$(basename -- "$entry")"
+    case "$name" in
+      data|staging) ;;
+      *) unexpected_entries+=("$entry") ;;
+    esac
+  done < <(find "$staging_dir" -mindepth 1 -maxdepth 1 -type d -print0)
+
+  if [[ -d "$staging_dir/data" ]]; then
+    while IFS= read -r -d '' entry; do
+      name="$(basename -- "$entry")"
+      case "$name" in
+        tdlib-worker|tdlib-bot) ;;
+        *) unexpected_entries+=("$entry") ;;
+      esac
+    done < <(find "$staging_dir/data" -mindepth 1 -maxdepth 1 -print0)
+  fi
+
+  while IFS= read -r -d '' entry; do
+    name="$(basename -- "$entry")"
+    case "$name" in
+      database.dump|manifest) ;;
+      *) unexpected_entries+=("$entry") ;;
+    esac
+  done < <(find "$backup_directory" -mindepth 1 -maxdepth 1 -print0)
+
+  if ((${#unexpected_entries[@]})); then
+    printf 'Refusing restore: unexpected restored data volume content found under %s:\n' "$staging_dir" >&2
+    for entry in "${unexpected_entries[@]}"; do
+      printf '  - %s\n' "${entry#"$staging_dir"/}" >&2
+    done
+    return 1
+  fi
+}
+
 validate_restored_tree() {
   local staging_dir="$1"
   local -a backup_directories=("$staging_dir"/staging/backup-*)
@@ -142,6 +200,7 @@ validate_restored_tree() {
     return 1
   fi
   backup_directory="${backup_directories[0]}"
+  reject_unexpected_restored_content "$staging_dir" "$backup_directory"
   RESTORED_DUMP="$backup_directory/database.dump"
   manifest="$backup_directory/manifest/backup-manifest.json"
   RESTORED_TDLIB_WORKER="$staging_dir/data/tdlib-worker"
@@ -169,7 +228,7 @@ restore_to_staging() {
   container_staging_dir="$(container_staging_directory "$staging_dir")"
   prepare_fresh_staging_directory "$staging_dir"
   verify_snapshot "$snapshot_id"
-  backup_restic restore "$snapshot_id" --target "$container_staging_dir"
+  restore_snapshot_subset "$snapshot_id" "$container_staging_dir"
   validate_restored_tree "$staging_dir"
   printf 'Staging restore verified: %s\n' "$staging_dir"
 }
@@ -327,7 +386,7 @@ restore_live() {
   LIVE_RESTORE_ACTIVE=1
   docker compose --profile full stop "${LIVE_SERVICES[@]}"
   create_safety_dump
-  backup_restic restore "$snapshot_id" --target "$container_staging_dir"
+  restore_snapshot_subset "$snapshot_id" "$container_staging_dir"
   validate_restored_tree "$LIVE_STAGING_DIR"
   worker_volume="$(compose_volume_name "$project_name" tdlib_state)"
   bot_volume="$(compose_volume_name "$project_name" tdlib_bot_state)"

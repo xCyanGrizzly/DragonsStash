@@ -86,3 +86,82 @@ The implementation no longer treats `manual_uploads`, completed local STL binari
 
 - None for implementation scope.
 - Environment note: local Bash is unavailable because WSL has no installed distribution; Bash syntax was verified inside Docker instead.
+
+---
+
+# Restore Path Scope Review-Finding Fix
+
+**Date:** 2026-07-22
+
+## Fix
+
+Addressed the Important restore finding by replacing both unrestricted
+`restic restore` calls in `scripts/backup/restore.sh` with a shared filtered
+restore wrapper. The wrapper restores only the backup source paths actually
+written by `scripts/backup/container-entrypoint.sh`:
+
+- `/staging/backup-*/database.dump`
+- `/staging/backup-*/manifest` and `/staging/backup-*/manifest/**`
+- `/data/tdlib-worker` and `/data/tdlib-worker/**`
+- `/data/tdlib-bot` and `/data/tdlib-bot/**`
+
+Added an explicit restored-tree guard that refuses unexpected restored content:
+top-level restored directories other than `staging` and `data`, direct
+`data/*` entries other than `tdlib-worker` and `tdlib-bot`, and direct
+`staging/backup-*/*` entries other than `database.dump` and `manifest`. This
+rejects old/broad snapshots that would otherwise restore `data/uploads`,
+temporary ZIP or database volume trees, or other unexpected volume content.
+
+Preserved the existing guarded live-restore confirmation, staging-directory
+validation, mount/repository checks, snapshot verification, custom
+PostgreSQL-dump validation, service stop/start lifecycle, health check, safety
+database dump, TDLib safety archives, and rollback of exactly the PostgreSQL
+database plus the two TDLib volumes.
+
+Added `scripts/backup/restore-path-assertions.sh`, a focused shell assertion
+harness that stubs Docker/Restic and verifies both staging and live restore use
+the expected include filters and that unexpected restored data-volume content is
+rejected explicitly.
+
+Addressed the Minor documentation gap in the root README backup section by
+stating that forwarding behavior and archive/STL-content integrity auditing are
+future work outside the backup scope.
+
+## Verification
+
+- Red check before implementation:
+
+  ```text
+  & 'C:\Program Files\Git\bin\bash.exe' -lc 'scripts/backup/restore-path-assertions.sh'
+  ASSERTION FAILED: database dump include filter missing
+  ```
+
+- Bash syntax check:
+
+  ```text
+  & 'C:\Program Files\Git\bin\bash.exe' -lc 'bash -n scripts/backup/container-entrypoint.sh scripts/backup/run-backup.sh scripts/backup/restore.sh scripts/backup/restore-path-assertions.sh'
+  [passed with no output]
+  ```
+
+- Whitespace check:
+
+  ```text
+  git diff --check
+  warning: in the working copy of '.superpowers/sdd/scope-correction-implementation-report.md', LF will be replaced by CRLF the next time Git touches it
+  warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+  warning: in the working copy of 'scripts/backup/restore.sh', LF will be replaced by CRLF the next time Git touches it
+  [exit 0]
+  ```
+
+- Focused restore-path assertions:
+
+  ```text
+  & 'C:\Program Files\Git\bin\bash.exe' -lc 'scripts/backup/restore-path-assertions.sh'
+  restore-path assertions passed
+  ```
+
+## Concerns
+
+- None for implementation scope.
+- Git Bash was available and used for shell syntax/assertion checks, so Docker
+  fallback was not needed for the final syntax verification.

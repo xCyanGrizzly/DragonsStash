@@ -147,8 +147,9 @@ logical dump plus the worker and bot Telegram session volumes in an encrypted
 Restic repository on a Synology NFS share. `manual_uploads` and temporary ZIP
 processing data are excluded; STL binaries remain in Telegram, while the
 database mappings and Telegram IDs are what recovery preserves for lookup and
-delivery. See the [backup and recovery guide](scripts/backup/README.md) for
-Synology setup, secrets, systemd installation, monitoring, retention, and
+delivery. Forwarding behavior and archive/STL-content integrity auditing are
+future work outside this backup scope. See the [backup and recovery guide](scripts/backup/README.md)
+for Synology setup, secrets, systemd installation, monitoring, retention, and
 guarded restore procedures.
 
 ### Seeding the Database
