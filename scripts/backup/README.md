@@ -113,7 +113,20 @@ the Synology share. `BACKUP_APP_VERSION` is optional metadata. The production
 Compose environment must also retain its existing database and application
 secrets; do not add any secrets to Git.
 
-## 3. Install the nightly systemd job
+## 3. Initialize the Restic repository once
+
+Before enabling the scheduled job, initialize a new repository explicitly:
+
+```bash
+docker compose --profile backup run --rm backup init
+```
+
+The backup container preflight refuses to create a repository implicitly. If a
+scheduled backup reports that the repository is unavailable or uninitialized,
+verify the NFS mount, `BACKUP_REPOSITORY`, and password file before running the
+explicit initialization command for an intended new repository.
+
+## 4. Install the nightly systemd job
 
 The supplied unit assumes the production Compose checkout is
 `/opt/stacks/DragonsStash`. If your deployment lives elsewhere, update the
@@ -136,7 +149,7 @@ catches up after downtime. The first run can take a long time because it uploads
 all existing STL and session data. Later Restic snapshots deduplicate unchanged
 data.
 
-## 4. Monitor and maintain backups
+## 5. Monitor and maintain backups
 
 Inspect the next scheduled run and the last service result:
 
@@ -167,7 +180,29 @@ Choose `BACKUP_RETENTION_DAYS` based on storage capacity and the recovery
 window you need. Watch Synology capacity and investigate any failed timer or
 service promptly.
 
-## 5. Restore modes
+At least monthly, perform a full repository read check:
+
+```bash
+docker compose --profile backup run --rm backup check --read-data
+```
+
+Also rehearse recovery using a disposable staging directory and verify the
+database dump checksum before deleting the rehearsal directory:
+
+```bash
+REHEARSAL_DIR=/var/lib/dragons-stash/backup-staging/monthly-rehearsal-SNAPSHOT_ID
+./scripts/backup/restore.sh restore-to-staging SNAPSHOT_ID "$REHEARSAL_DIR"
+(
+  cd "$REHEARSAL_DIR"/staging/backup-*
+  sha256sum --check manifest/database.dump.sha256
+)
+```
+
+The staging restore also verifies the custom PostgreSQL dump and required data
+directories. Inspect the restored data as appropriate, then remove the
+disposable directory using your approved host cleanup procedure.
+
+## 6. Restore modes
 
 Run restore commands from the production Compose checkout after loading the
 same backup environment used by systemd (for example, as root with
@@ -189,6 +224,14 @@ If a live restore fails, it leaves the application services stopped, retains the
 safety artifacts and staging directory, and attempts rollback after replacement
 has begun. Review the reported paths and service health before manually
 starting services.
+
+After a successful live restore, confirm the services are running and inspect
+their recent logs before declaring recovery complete:
+
+```bash
+docker compose ps
+docker compose logs --tail=100 app worker bot
+```
 
 For a non-destructive recovery rehearsal, choose a snapshot from `list` and
 restore it to a fresh staging directory, for example:

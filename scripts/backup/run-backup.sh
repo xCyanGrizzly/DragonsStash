@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 readonly LOCK_FILE="/run/lock/dragons-stash-backup.lock"
+readonly BACKUP_CONTAINER_ROOT="/backup"
 readonly -a MANAGED_SERVICES=(app worker bot)
 
 declare -a RUNNING_SERVICES=()
@@ -20,6 +21,17 @@ validate_environment() {
   require_value BACKUP_STAGING_PATH
   require_value BACKUP_RESTIC_PASSWORD_FILE
   require_value BACKUP_RETENTION_DAYS
+}
+
+validate_backup_repository() {
+  local repository="${BACKUP_REPOSITORY:-/backup/restic}"
+  local canonical_repository
+
+  canonical_repository="$(realpath -ms -- "$repository")"
+  if [[ "$canonical_repository" == "$BACKUP_CONTAINER_ROOT" || "$canonical_repository" != "$BACKUP_CONTAINER_ROOT"/* ]]; then
+    printf 'BACKUP_REPOSITORY must be strictly below /backup; got %s.\n' "$repository" >&2
+    return 1
+  fi
 }
 
 validate_backup_mount() {
@@ -73,6 +85,7 @@ restart_running_services() {
 
 main() {
   validate_environment
+  validate_backup_repository
 
   exec 9>"$LOCK_FILE"
   if ! flock -n 9; then

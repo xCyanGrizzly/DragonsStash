@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 readonly CONFIRM_REPLACE_LIVE_DATA="--confirm-replace-live-data"
 readonly STAGING_CONTAINER_ROOT="/staging"
+readonly BACKUP_CONTAINER_ROOT="/backup"
 readonly -a LIVE_SERVICES=(app worker bot)
 
 RESTORED_DUMP=""
@@ -40,8 +41,40 @@ validate_environment() {
   require_value BACKUP_MOUNT_PATH
   require_value BACKUP_STAGING_PATH
   require_value BACKUP_RESTIC_PASSWORD_FILE
+  require_value BACKUP_REPOSITORY
   if [[ ! -r "$BACKUP_RESTIC_PASSWORD_FILE" ]]; then
     printf 'Restic password file %s is not readable.\n' "$BACKUP_RESTIC_PASSWORD_FILE" >&2
+    return 1
+  fi
+  validate_backup_repository
+}
+
+validate_backup_repository() {
+  local repository="$BACKUP_REPOSITORY"
+  local canonical_repository
+
+  canonical_repository="$(realpath -ms -- "$repository")"
+  if [[ "$canonical_repository" == "$BACKUP_CONTAINER_ROOT" || "$canonical_repository" != "$BACKUP_CONTAINER_ROOT"/* ]]; then
+    printf 'BACKUP_REPOSITORY must be strictly below /backup; got %s.\n' "$repository" >&2
+    return 1
+  fi
+}
+
+validate_backup_mount() {
+  local probe_file
+
+  if ! mountpoint --q "$BACKUP_MOUNT_PATH"; then
+    printf 'Backup mount %s is not an active mountpoint.\n' "$BACKUP_MOUNT_PATH" >&2
+    return 1
+  fi
+
+  if ! probe_file="$(mktemp "$BACKUP_MOUNT_PATH/.dragons-stash-backup-write-probe.XXXXXX")"; then
+    printf 'Backup mount %s is not writable.\n' "$BACKUP_MOUNT_PATH" >&2
+    return 1
+  fi
+
+  if ! rm -f -- "$probe_file"; then
+    printf 'Unable to remove writable probe %s.\n' "$probe_file" >&2
     return 1
   fi
 }
@@ -352,6 +385,7 @@ restore_live() {
   local timestamp
   local container_staging_dir
   validate_environment
+  validate_backup_mount
   docker compose --profile backup config --quiet
   project_name="$(compose_project_name)"
   verify_snapshot "$snapshot_id"
