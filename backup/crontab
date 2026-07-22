@@ -1,0 +1,2 @@
+0 3 * * * /backup.sh >> /proc/1/fd/1 2>&1
+0 4 * * 0 restic check >> /proc/1/fd/1 2>&1
