@@ -264,16 +264,26 @@ git add scripts/backup/run-backup.sh deploy/systemd/dragons-stash-backup.service
 git commit -m "feat: schedule nightly off-host backups"
 ```
 
-### Task 4: Implement guarded restore tooling
+### Task 4: Make completed STL uploads durable and implement guarded restore tooling
 
 **Files:**
 - Create: `scripts/backup/restore.sh`
+- Create: `prisma/migrations/20260722000000_mark_retained_manual_files/migration.sql`
+- Modify: `prisma/schema.prisma`
+- Modify: `src/app/api/uploads/route.ts`
+- Modify: `worker/src/manual-upload.ts`
 
 **Interfaces:**
 - Consumes: a Restic snapshot ID, the same repository/password configuration, the backup Compose service, and the live Compose project.
-- Produces: restored PostgreSQL data and persistent volumes only after explicit confirmation for live replacement; a non-destructive staging restore by default.
+- Produces: durable completed manual-upload files in the existing `manual_uploads` volume; restored PostgreSQL data and persistent volumes only after explicit confirmation for live replacement; a non-destructive staging restore by default.
 
-- [ ] **Step 1: Define restore modes and destructive guard**
+- [ ] **Step 1: Make new manual-upload files durable**
+
+Add nullable `retainedAt DateTime?` to `ManualUploadFile`. Create an additive migration that leaves existing rows `NULL`. Set `retainedAt: new Date()` when `src/app/api/uploads/route.ts` creates each new file record. Remove the worker's final recursive deletion of `/data/uploads/<uploadId>` while retaining split-file cleanup. This makes the existing `manual_uploads` volume the durable STL archive for new uploads.
+
+Document and report that files already deleted by older worker runs cannot be reconstructed by this feature. The restore verifier must treat `retainedAt IS NULL` rows as legacy warnings and must require every `retainedAt IS NOT NULL` path to exist.
+
+- [ ] **Step 2: Define restore modes and destructive guard**
 
 Support these commands:
 
@@ -286,11 +296,11 @@ Support these commands:
 
 Reject `restore-live` unless the exact confirmation flag is present. `list`, `verify`, and `restore-to-staging` must not stop services or modify live volumes.
 
-- [ ] **Step 2: Implement snapshot verification and staging restore**
+- [ ] **Step 3: Implement snapshot verification and staging restore**
 
 Use `restic snapshots`, `restic check`, and `restic restore SNAPSHOT_ID --target STAGING_DIR`. Verify that the restored staging tree contains a non-empty custom-format dump, a manifest, `manual_uploads`, `tdlib-worker`, and `tdlib-bot` before reporting success.
 
-- [ ] **Step 3: Implement live restore sequencing**
+- [ ] **Step 4: Implement live restore sequencing**
 
 For `restore-live`:
 
@@ -298,17 +308,17 @@ For `restore-live`:
 2. Stop `app`, `worker`, and `bot`.
 3. Create a safety PostgreSQL dump of the current database into local staging.
 4. Restore the selected snapshot to a separate staging directory.
-5. Replace the three Docker volumes only after the restored tree passes validation.
+5. Replace the three Docker volumes only after the restored tree passes validation, including retained STL files in `manual_uploads`.
 6. Recreate the configured database from the restored custom-format dump using `pg_restore --no-owner`.
 7. Start services and run the health endpoint plus file-reference verification.
 
 If any step fails, leave the services stopped, print the exact staging path and failure, and do not delete the safety dump.
 
-- [ ] **Step 4: Add file-reference verification**
+- [ ] **Step 5: Add file-reference verification**
 
-Run a small SQL query against `manual_upload_files` to enumerate `filePath` values and check each path inside the restored `/data/uploads` tree. Report missing paths and return non-zero if any database reference is broken.
+Run a small SQL query against `manual_upload_files` to enumerate retained `filePath` values and check each path inside the restored `/data/uploads` tree. Report legacy rows with `retainedAt IS NULL` as warnings. Return non-zero if any retained database reference is broken.
 
-- [ ] **Step 5: Validate the restore command without touching live data**
+- [ ] **Step 6: Validate the restore command without touching live data**
 
 Run:
 
@@ -319,11 +329,11 @@ bash -n scripts/backup/restore.sh
 
 Expected: syntax passes and `list` prints available snapshot IDs without stopping any service or modifying a volume.
 
-- [ ] **Step 6: Commit restore tooling**
+- [ ] **Step 7: Commit durable STL retention and restore tooling**
 
 ```bash
-git add scripts/backup/restore.sh
-git commit -m "feat: add guarded backup restore workflow"
+git add scripts/backup/restore.sh prisma/schema.prisma prisma/migrations/20260722000000_mark_retained_manual_files/migration.sql src/app/api/uploads/route.ts worker/src/manual-upload.ts
+git commit -m "feat: retain uploaded STL files for recovery"
 ```
 
 ### Task 5: Document Synology setup, operations, and recovery
