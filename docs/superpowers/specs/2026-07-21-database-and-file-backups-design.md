@@ -42,8 +42,7 @@ This approach keeps backup and restore explicit, avoids tying recovery to Postgr
 
 Create a dedicated shared folder, for example `dragonsstash-backups`, with:
 
-- NFS enabled only for the Docker host's fixed IP address.
-- A restricted NFS export used only for this backup share, with host access limited to the Docker host's fixed IP address.
+- The dedicated backup shared folder is exported through NFS only to the Docker host's fixed IP address.
 - No Internet exposure.
 - Sufficient capacity for the repository plus growth and safety margin.
 
@@ -103,7 +102,7 @@ The restore process must be safe to rehearse against a disposable Compose projec
 - Backup failure produces a non-zero systemd result and a clear log entry.
 - Retention pruning runs only after a verified successful snapshot.
 - A snapshot listing and repository metadata check run after each backup.
-- A full Restic integrity check and disposable restore test run monthly.
+- The deployment operator completes and records a monthly operational check: `restic check --read-data` followed by a disposable restore rehearsal. This verifies only the PostgreSQL logical dump and TDLib session-state recovery set; archive/STL-content integrity and future forwarding checks remain out of scope.
 - The project documentation describes how to inspect the last successful snapshot and how to recover when the NAS is unavailable.
 
 ## Security considerations
@@ -119,6 +118,7 @@ The restore process must be safe to rehearse against a disposable Compose projec
 - A nightly systemd timer creates a Restic snapshot on the Synology share.
 - A snapshot includes a PostgreSQL logical dump and both Telegram session volumes, while excluding `manual_uploads` and `tmp_zips`.
 - At least 30 daily recovery points are retained.
+- Each month, the deployment operator runs and records a full `restic check --read-data` and a disposable restore rehearsal of the PostgreSQL dump plus both TDLib session volumes.
 - A simulated host-loss restore reconstructs the database and Telegram session state in a disposable Compose environment.
 - The restored database retains the Telegram metadata and mappings the worker and bot use to locate and send STL binaries that remain in Telegram.
 - A failed backup leaves services running and preserves the last known-good snapshot.

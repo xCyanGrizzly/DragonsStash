@@ -336,7 +336,7 @@ git commit -m "feat: add guarded database and session restore"
 
 - [ ] **Step 1: Document Synology configuration**
 
-Document creating the `dragonsstash-backups` shared folder, enabling NFS, restricting the export to the Docker host's fixed IP, and mounting it at `/mnt/dragonsstash-backups`. Include commands for checking the mount:
+Document creating the `dragonsstash-backups` shared folder, enabling NFS, and configuring that shared folder's NFS export to allow only the Docker host's fixed IP. Document mounting it at `/mnt/dragonsstash-backups`. Include commands for checking the mount:
 
 ```bash
 mountpoint /mnt/dragonsstash-backups
@@ -365,9 +365,9 @@ sudo journalctl -u dragons-stash-backup.service -n 100 --no-pager
 
 Explain that the first run captures PostgreSQL and TDLib session state. State clearly that STL binaries stay in Telegram, and that restored PostgreSQL metadata and mappings are what allow normal lookup and delivery after restore.
 
-- [ ] **Step 4: Document monitoring, retention, and restore**
+- [ ] **Step 4: Document monitoring, retention, restore, and the monthly recovery check**
 
-Document how to inspect timer status, service failures, Restic snapshots, repository checks, and the four restore modes. Explicitly state that `restore-live` is destructive and requires the confirmation flag. Explain that channel-forwarding behavior and archive/STL-content integrity validation are future work, not restore checks.
+Document how to inspect timer status, service failures, Restic snapshots, repository checks, and the four restore modes. Explicitly state that `restore-live` is destructive and requires the confirmation flag. Assign the deployment operator a recurring monthly runbook task: run `docker compose --profile backup run --rm backup check --read-data`, then perform the documented disposable restore rehearsal using a selected snapshot. Record the date, snapshot ID, full-check result, restore/health result, and cleanup result. This is an operator-owned manual procedure, not a second production timer or a change to the nightly backup service. Limit the rehearsal to the PostgreSQL logical dump, `tdlib_state`, and `tdlib_bot_state`; do not add `manual_uploads`, STL-binary, archive-content, or channel-forwarding checks. Explain that channel-forwarding behavior and archive/STL-content integrity validation are future work, not restore checks.
 
 - [ ] **Step 5: Add a concise production-backup section to the root README**
 
@@ -387,7 +387,7 @@ git commit -m "docs: document Synology backup and recovery"
 
 **Interfaces:**
 - Consumes: the complete backup stack from Tasks 1-5.
-- Produces: evidence that the acceptance criteria are met, including a disposable restore rehearsal and a failure-path result.
+- Produces: evidence that the acceptance criteria are met, including a full `restic check --read-data`, a disposable restore rehearsal, and a failure-path result. After deployment, the same full-check and rehearsal are an operator-owned monthly runbook task documented in Task 5.
 
 - [ ] **Step 1: Validate configuration and scripts**
 
@@ -422,9 +422,9 @@ Expected: the service succeeds, the snapshot exists, the repository check succee
 
 Temporarily unmount the Synology share in a controlled maintenance session, run the systemd service, and confirm it fails before creating a new snapshot. Remount the share and confirm the previously successful snapshot remains listed. Verify that services are running after the failed attempt.
 
-- [ ] **Step 5: Rehearse a disposable restore**
+- [ ] **Step 5: Run the full-read integrity check and rehearse a disposable restore**
 
-Restore the selected snapshot to a disposable Compose project or isolated Docker volumes. Import the database dump, restore the two TDLib session trees, start the disposable app/worker/bot services, and call `/api/health`. Confirm the recognizable database metadata and Telegram mappings match the pre-backup record. Do not assert the presence, checksum, content, or forwarding behavior of STL binaries.
+Run `docker compose --profile backup run --rm backup check --read-data` against the selected repository, then restore the selected snapshot to a disposable Compose project or isolated Docker volumes. Import the database dump, restore the two TDLib session trees, start the disposable app/worker/bot services, and call `/api/health`. Confirm the recognizable database metadata and Telegram mappings match the pre-backup record. Record the check and rehearsal evidence as the initial monthly-runbook baseline. Do not assert the presence, checksum, content, or forwarding behavior of STL binaries.
 
 - [ ] **Step 6: Verify retention behavior**
 
@@ -443,7 +443,7 @@ git commit -m "test: document verified backup and restore procedure"
 
 ## Plan Self-Review
 
-- **Spec coverage:** PostgreSQL logical dump, both Telegram session volumes, Synology NFS, Restic encryption, 30-day retention, maintenance window, service restart on failure, guarded restore, monthly repository/restore checks, database metadata recovery, and NAS-loss caveat are covered by Tasks 1-6.
+- **Spec coverage:** PostgreSQL logical dump, both Telegram session volumes, Synology NFS, Restic encryption, 30-day retention, maintenance window, service restart on failure, guarded restore, and an explicitly deployment-operator-owned monthly `restic check --read-data` plus disposable restore rehearsal are covered by Tasks 1-6. The initial run is verified in Task 6 and the recurring runbook is documented in Task 5; neither adds a second production timer.
 - **Exclusions:** `manual_uploads` and `tmp_zips` are excluded; local STL retention, restored STL binaries, file-path/checksum validation, channel forwarding, and archive/STL-content integrity checks are not implementation requirements.
 - **Placeholder scan:** No `TBD`, `TODO`, or unspecified implementation task remains. Environment-dependent values are explicit configuration variables or operator-supplied paths.
 - **Type/interface consistency:** The Compose service name is consistently `backup`; the container command modes are `backup` and `restore`; the host wrapper owns service lifecycle; the restore script owns destructive confirmation; Restic owns snapshots and pruning.
