@@ -97,6 +97,35 @@ services:
     networks:
       - backend
 
+  backup:
+    build:
+      context: .
+      dockerfile: backup/Dockerfile
+    pull_policy: never
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-dragons}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-stash}
+      - PGPASSWORD=${POSTGRES_PASSWORD:-stash}
+      - POSTGRES_DB=${POSTGRES_DB:-dragonsstash}
+      - RESTIC_REPOSITORY=/backups/restic-repo
+      - RESTIC_PASSWORD=${RESTIC_PASSWORD:?Set RESTIC_PASSWORD in .env}
+      - KUMA_PUSH_URL=${KUMA_PUSH_URL:?Set KUMA_PUSH_URL in .env}
+      - TZ=${TZ:-Etc/UTC}
+    volumes:
+      - tdlib_state:/data/tdlib-worker:ro
+      - tdlib_bot_state:/data/tdlib-bot:ro
+      - nas_backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - backend
+
   db:
     image: postgres:16-alpine
     environment:
@@ -125,6 +154,11 @@ volumes:
   tdlib_bot_state:
   tmp_zips:
   manual_uploads:
+  nas_backups:
+    driver_opts:
+      type: nfs
+      o: "addr=${NAS_HOST},rw,nfsvers=4,soft,timeo=100"
+      device: ":${NAS_EXPORT_PATH}"
 
 networks:
   frontend:
