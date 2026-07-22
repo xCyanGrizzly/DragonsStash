@@ -6,36 +6,35 @@
 
 ## Problem
 
-Dragon's Stash currently persists PostgreSQL in a Docker named volume and stores uploaded STL files in the `manual_uploads` volume. A Docker volume protects data from container recreation, but it is not an off-host backup. A host disk failure, accidental deletion, corruption, or ransomware event could destroy both the database and the files it references.
+Dragon's Stash currently persists PostgreSQL in a Docker named volume. The Telegram worker and bot also persist authentication and session state in the `tdlib_state` and `tdlib_bot_state` volumes. Docker volumes protect against container recreation, but they are not off-host backups. A host disk failure, accidental deletion, corruption, or ransomware event could destroy the database and require both Telegram clients to authenticate again.
 
-The worker currently deletes manual-upload directories after processing. The backup feature will change that behavior for new uploads so the existing `manual_uploads` volume becomes a durable STL archive. Files already deleted before this change cannot be reconstructed by the backup feature.
-
-The Telegram worker and bot also persist authentication/session state in `tdlib_state` and `tdlib_bot_state`. These files are sensitive and losing them requires Telegram re-authentication.
+STL binaries are intentionally not retained as a local recovery set. They remain in Telegram. The PostgreSQL database preserves the archive, message, package, and file metadata needed to locate and send those Telegram-hosted binaries after the application database is restored. Existing worker cleanup behavior is unchanged.
 
 ## Goals
 
-- Protect PostgreSQL data and uploaded STL files against loss of the application host.
-- Preserve newly uploaded STL files after worker processing so the backup contains completed uploads, not only in-flight uploads.
+- Protect PostgreSQL data against loss of the application host with a logical backup.
+- Preserve Telegram worker and bot session state so a host restore does not normally require re-authentication.
 - Store backups on a Synology NAS over an authenticated, host-restricted NFS share.
-- Create one recoverable snapshot containing related database and file state.
+- Create one recoverable snapshot containing related database and session state.
 - Retain 30 daily recovery points.
-- Include Telegram worker and bot session state so a host restore does not require re-authentication.
-- Provide a documented, repeatable restore process.
+- Provide a documented, repeatable, guarded restore process.
 - Detect failed or corrupt backups instead of silently pruning the last good copy.
 
 ## Non-goals
 
 - Building an in-app backup-management UI.
+- Backing up `manual_uploads`, retaining completed STL binaries locally, or changing worker cleanup behavior.
 - Backing up temporary ZIP processing data in `tmp_zips`.
 - Copying the raw `postgres_data` volume as the primary database backup.
-- Recovering STL binaries that were deleted by older worker runs before durable retention was enabled.
+- Implementing future Telegram channel-forwarding behavior.
+- Validating the content or binary integrity of Telegram archives or STL files. This is future work and is outside the backup/restore feature.
 - Providing protection against loss of the NAS itself. A later Synology Hyper Backup task can replicate this repository to another device or cloud destination.
 
 ## Selected approach
 
 Use a Linux-host backup script, scheduled by a systemd timer, with Restic writing to an encrypted repository on a Synology NFS share.
 
-This approach keeps the backup and restore workflow explicit, deduplicates large STL files across daily snapshots, and avoids tying recovery to PostgreSQL's internal data-directory layout. Restic's repository encryption also protects database contents, uploaded files, and Telegram session state if the NAS share is accessed directly.
+This approach keeps backup and restore explicit, avoids tying recovery to PostgreSQL's internal data-directory layout, and captures the sensitive TDLib state alongside the database. Restic repository encryption protects database contents and Telegram session state if the NAS share is accessed directly.
 
 ## Storage layout
 
@@ -57,12 +56,11 @@ The repository lives below the mounted share. The Restic password is stored sepa
 Each successful Restic snapshot contains:
 
 - A PostgreSQL custom-format dump generated for that run.
-- The contents of the `manual_uploads` Docker volume.
 - The contents of the `tdlib_state` Docker volume.
 - The contents of the `tdlib_bot_state` Docker volume.
-- A small manifest with the backup timestamp, application image/version, and database migration state.
+- A small manifest with the backup timestamp, application image/version, database migration state, and captured volume paths.
 
-The `tmp_zips` volume is scratch space and is excluded.
+The `manual_uploads` and `tmp_zips` volumes are excluded. STL binaries continue to live in Telegram; the restored database supplies the metadata and mappings required for the worker and bot to locate and send them.
 
 ## Backup flow
 
@@ -73,27 +71,27 @@ The systemd timer invokes one backup command at the chosen nightly time. The com
 3. Stops the `app`, `worker`, and `bot` services while leaving PostgreSQL running.
 4. Creates a PostgreSQL custom-format dump from the running database.
 5. Creates a manifest for the backup.
-6. Runs one Restic backup over the dump and the read-only mounted Docker volumes.
+6. Runs one Restic backup over the dump and the read-only mounted TDLib session volumes.
 7. Verifies that Restic created the snapshot successfully.
 8. Applies the retention policy: keep the latest 30 daily snapshots, then prune unreferenced data.
 9. Restarts all stopped services, whether the backup succeeded or failed.
 
-The service-stop window ensures that application writes and TDLib session updates do not occur while the corresponding file volumes are being captured. A failed run must never trigger retention pruning.
-
-New `ManualUploadFile` rows carry a retention timestamp. Restore verification requires retained file paths to exist and reports older rows without a retention timestamp as legacy warnings, because those binaries may already have been deleted before this feature was enabled.
+The service-stop window ensures that application writes and TDLib session updates do not occur while the corresponding data is captured. A failed run must never trigger retention pruning.
 
 ## Restore flow
 
 The restore tooling and documentation will support this sequence:
 
-1. Stop `app`, `worker`, and `bot`.
+1. Stop `app`, `worker`, and `bot` for a live restore.
 2. Select and inspect a Restic snapshot.
-3. Restore the PostgreSQL dump and volume contents to a staging location.
+3. Restore the PostgreSQL dump and TDLib session contents to a staging location.
 4. Preserve the current database and volumes or confirm that the operator intends to replace them.
-5. Restore `manual_uploads`, `tdlib_state`, and `tdlib_bot_state` into their Docker volumes with the expected ownership and paths.
+5. Restore `tdlib_state` and `tdlib_bot_state` into their Docker volumes with the expected ownership and paths.
 6. Restore the database from the custom-format dump into the configured PostgreSQL database.
-7. Verify that `ManualUploadFile.filePath` values resolve to restored files and that the application health endpoint can connect to PostgreSQL.
+7. Verify the dump, session-volume layout, database connectivity, and worker/bot authentication startup state.
 8. Start the services and inspect logs for startup, migration, and worker/bot authentication errors.
+
+After restore, existing database metadata and mappings allow normal Telegram-based STL lookup and delivery. Restoring STL binaries, forwarding Telegram content, and checking archive/STL binary integrity are outside this restore flow.
 
 The restore process must be safe to rehearse against a disposable Compose project without modifying the live deployment.
 
@@ -119,9 +117,9 @@ The restore process must be safe to rehearse against a disposable Compose projec
 ## Acceptance criteria
 
 - A nightly systemd timer creates a Restic snapshot on the Synology share.
-- A snapshot includes PostgreSQL, all uploaded STL files, and both Telegram session volumes.
-- At least 30 daily recovery points are retained without duplicating unchanged STL content unnecessarily.
-- Newly uploaded STL files remain in `manual_uploads` after worker processing and are included in subsequent backup snapshots.
-- A simulated host-loss restore reconstructs the database and uploaded files in a disposable Compose environment.
+- A snapshot includes a PostgreSQL logical dump and both Telegram session volumes, while excluding `manual_uploads` and `tmp_zips`.
+- At least 30 daily recovery points are retained.
+- A simulated host-loss restore reconstructs the database and Telegram session state in a disposable Compose environment.
+- The restored database retains the Telegram metadata and mappings the worker and bot use to locate and send STL binaries that remain in Telegram.
 - A failed backup leaves services running and preserves the last known-good snapshot.
 - The restore procedure is documented well enough for an operator to execute without reading the implementation.
