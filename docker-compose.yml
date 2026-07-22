@@ -145,8 +145,10 @@ services:
         limits:
           memory: 1G
     networks:
-      - frontend
-      - backend
+      frontend: {}
+      backend:
+        aliases:
+          - dragonsstash-db
 
 volumes:
   postgres_data:
