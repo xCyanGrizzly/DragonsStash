@@ -12,6 +12,11 @@ RESTORED_TDLIB_BOT=""
 LIVE_STAGING_DIR=""
 SAFETY_DUMP=""
 LIVE_RESTORE_ACTIVE=0
+LIVE_REPLACEMENT_STARTED=0
+TEMP_VERIFY_DATABASE=""
+LIVE_UPLOADS_VOLUME=""
+LIVE_WORKER_VOLUME=""
+LIVE_BOT_VOLUME=""
 
 usage() {
   cat <<'EOF'
@@ -63,6 +68,23 @@ validate_staging_directory() {
   printf '%s\n' "$canonical_staging_dir"
 }
 
+prepare_fresh_staging_directory() {
+  local staging_dir="$1"
+
+  if [[ -e "$staging_dir" ]]; then
+    if [[ ! -d "$staging_dir" ]]; then
+      printf 'Staging target %s exists but is not a directory.\n' "$staging_dir" >&2
+      return 1
+    fi
+    if [[ -n "$(find "$staging_dir" -mindepth 1 -print -quit)" ]]; then
+      printf 'Staging target %s must be fresh and empty; remove stale artifacts first.\n' "$staging_dir" >&2
+      return 1
+    fi
+  else
+    mkdir -p -- "$staging_dir"
+  fi
+}
+
 container_staging_directory() {
   local host_staging_dir="$1"
   local staging_root
@@ -81,15 +103,22 @@ verify_custom_dump() {
 
 validate_restored_tree() {
   local staging_dir="$1"
+  local -a backup_directories=("$staging_dir"/staging/backup-*)
+  local backup_directory
   local manifest
 
-  RESTORED_DUMP="$(find "$staging_dir" -type f -name database.dump -size +0c -print -quit)"
-  manifest="$(find "$staging_dir" -type f -path '*/manifest/backup-manifest.json' -size +0c -print -quit)"
-  RESTORED_UPLOADS="$(find "$staging_dir" -type d \( -path '*/data/uploads' -o -name manual_uploads \) -print -quit)"
-  RESTORED_TDLIB_WORKER="$(find "$staging_dir" -type d -name tdlib-worker -print -quit)"
-  RESTORED_TDLIB_BOT="$(find "$staging_dir" -type d -name tdlib-bot -print -quit)"
-  if [[ -z "$RESTORED_DUMP" || -z "$manifest" || -z "$RESTORED_UPLOADS" || -z "$RESTORED_TDLIB_WORKER" || -z "$RESTORED_TDLIB_BOT" ]]; then
-    printf 'Restored tree %s is incomplete; require database.dump, manifest, manual_uploads, tdlib-worker, and tdlib-bot.\n' "$staging_dir" >&2
+  if ((${#backup_directories[@]} != 1)) || [[ ! -d "${backup_directories[0]:-}" ]]; then
+    printf 'Restored tree %s must contain exactly one staging/backup-* directory.\n' "$staging_dir" >&2
+    return 1
+  fi
+  backup_directory="${backup_directories[0]}"
+  RESTORED_DUMP="$backup_directory/database.dump"
+  manifest="$backup_directory/manifest/backup-manifest.json"
+  RESTORED_UPLOADS="$staging_dir/data/uploads"
+  RESTORED_TDLIB_WORKER="$staging_dir/data/tdlib-worker"
+  RESTORED_TDLIB_BOT="$staging_dir/data/tdlib-bot"
+  if [[ ! -s "$RESTORED_DUMP" || ! -s "$manifest" || ! -d "$RESTORED_UPLOADS" || ! -d "$RESTORED_TDLIB_WORKER" || ! -d "$RESTORED_TDLIB_BOT" ]]; then
+    printf 'Restored tree %s is incomplete; require staging/backup-*/database.dump, its manifest, data/uploads, data/tdlib-worker, and data/tdlib-bot.\n' "$staging_dir" >&2
     return 1
   fi
   verify_custom_dump "$RESTORED_DUMP"
@@ -109,7 +138,7 @@ restore_to_staging() {
   validate_environment
   staging_dir="$(validate_staging_directory "$requested_staging_dir")"
   container_staging_dir="$(container_staging_directory "$staging_dir")"
-  mkdir -p -- "$staging_dir"
+  prepare_fresh_staging_directory "$staging_dir"
   verify_snapshot "$snapshot_id"
   backup_restic restore "$snapshot_id" --target "$container_staging_dir"
   validate_restored_tree "$staging_dir"
@@ -166,19 +195,24 @@ create_safety_dump() {
   fi
 }
 
-restore_database() {
+restore_database_dump() {
+  local dump_path="$1"
   local database_user="${POSTGRES_USER:-dragons}"
   local database_name="${POSTGRES_DB:-dragonsstash}"
   docker compose exec -T db dropdb --if-exists --force --username "$database_user" "$database_name"
   docker compose exec -T db createdb --username "$database_user" "$database_name"
   docker compose exec -T db pg_restore --no-owner --exit-on-error \
-    --username "$database_user" --dbname "$database_name" < "$RESTORED_DUMP"
+    --username "$database_user" --dbname "$database_name" < "$dump_path"
+}
+
+restore_database() {
+  restore_database_dump "$RESTORED_DUMP"
 }
 
 verify_file_references() {
-  local uploads_volume="$1"
+  local database_name="$1"
+  local uploads_source="$2"
   local database_user="${POSTGRES_USER:-dragons}"
-  local database_name="${POSTGRES_DB:-dragonsstash}"
   docker compose exec -T db psql --no-psqlrc --tuples-only --no-align --quiet \
     --field-separator=$'\t' \
     --username "$database_user" --dbname "$database_name" \
@@ -187,7 +221,7 @@ verify_file_references() {
       SELECT 'retained', \"filePath\" FROM \"manual_upload_files\" WHERE \"retainedAt\" IS NOT NULL
       ORDER BY 2" |
     docker compose --profile backup run --rm --no-deps -T --entrypoint bash \
-      -v "$uploads_volume:/data/uploads:ro" backup -ceu '
+      -v "$uploads_source:/data/uploads:ro" backup -ceu '
         missing=0
         while IFS="$(printf "\t")" read -r retention file_path; do
           if [[ "$retention" == "legacy" ]]; then
@@ -219,6 +253,59 @@ verify_file_references() {
       '
 }
 
+drop_temporary_verification_database() {
+  local database_user="${POSTGRES_USER:-dragons}"
+
+  if [[ -n "$TEMP_VERIFY_DATABASE" ]]; then
+    docker compose exec -T db dropdb --if-exists --force --username "$database_user" "$TEMP_VERIFY_DATABASE"
+    TEMP_VERIFY_DATABASE=""
+  fi
+}
+
+verify_staged_snapshot_file_references() {
+  local database_user="${POSTGRES_USER:-dragons}"
+
+  TEMP_VERIFY_DATABASE="dragons_restore_verify_$$_$(date +%s)"
+  docker compose exec -T db dropdb --if-exists --force --username "$database_user" "$TEMP_VERIFY_DATABASE"
+  docker compose exec -T db createdb --username "$database_user" "$TEMP_VERIFY_DATABASE"
+  docker compose exec -T db pg_restore --no-owner --exit-on-error \
+    --username "$database_user" --dbname "$TEMP_VERIFY_DATABASE" < "$RESTORED_DUMP"
+  verify_file_references "$TEMP_VERIFY_DATABASE" "$RESTORED_UPLOADS"
+  drop_temporary_verification_database
+}
+
+archive_live_volume() {
+  local volume_name="$1"
+  local logical_name="$2"
+  local archive_path="$LIVE_STAGING_DIR/pre-restore-$logical_name.tar"
+
+  docker compose --profile backup run --rm --no-deps \
+    --entrypoint bash \
+    -v "$volume_name:/safety-source:ro" \
+    -v "$LIVE_STAGING_DIR:/safety-output" \
+    backup -ceu 'tar -C /safety-source -cf "$1" .' bash \
+    "/safety-output/pre-restore-$logical_name.tar"
+  if [[ ! -s "$archive_path" ]]; then
+    printf 'Safety archive %s is missing or empty.\n' "$archive_path" >&2
+    return 1
+  fi
+}
+
+restore_live_volume_archive() {
+  local volume_name="$1"
+  local logical_name="$2"
+  local archive_path="$LIVE_STAGING_DIR/pre-restore-$logical_name.tar"
+
+  docker compose --profile backup run --rm --no-deps \
+    --entrypoint bash \
+    -v "$archive_path:/safety-archive:ro" \
+    -v "$volume_name:/restore-target" \
+    backup -ceu '
+      find /restore-target -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+      tar -C /restore-target -xf /safety-archive
+    '
+}
+
 wait_for_health() {
   local health_url="${RESTORE_HEALTH_URL:-http://localhost:${APP_PORT:-3000}/api/health}"
   local attempt
@@ -234,9 +321,22 @@ wait_for_health() {
 
 live_restore_failure() {
   local exit_code=$?
+  local rollback_ok=1
   trap - EXIT
   if ((LIVE_RESTORE_ACTIVE)); then
     docker compose --profile full stop "${LIVE_SERVICES[@]}" || true
+    drop_temporary_verification_database || true
+    if ((LIVE_REPLACEMENT_STARTED)); then
+      restore_live_volume_archive "$LIVE_UPLOADS_VOLUME" manual_uploads || rollback_ok=0
+      restore_live_volume_archive "$LIVE_WORKER_VOLUME" tdlib_state || rollback_ok=0
+      restore_live_volume_archive "$LIVE_BOT_VOLUME" tdlib_bot_state || rollback_ok=0
+      restore_database_dump "$SAFETY_DUMP" || rollback_ok=0
+      if ((rollback_ok)); then
+        printf 'Rollback restored the pre-restore database and all three Docker volumes. Services remain stopped.\n' >&2
+      else
+        printf 'Rollback failed; services remain stopped. Restore the safety archives and database dump manually.\n' >&2
+      fi
+    fi
     printf 'Live restore failed (exit %s). Services remain stopped. Staging directory: %s\n' "$exit_code" "$LIVE_STAGING_DIR" >&2
     printf 'Safety database dump retained at: %s\n' "$SAFETY_DUMP" >&2
   fi
@@ -259,7 +359,7 @@ restore_live() {
   timestamp="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
   LIVE_STAGING_DIR="$(validate_staging_directory "$BACKUP_STAGING_PATH/live-restore-$timestamp-$$")"
   container_staging_dir="$(container_staging_directory "$LIVE_STAGING_DIR")"
-  mkdir -p -- "$LIVE_STAGING_DIR"
+  prepare_fresh_staging_directory "$LIVE_STAGING_DIR"
   SAFETY_DUMP="$LIVE_STAGING_DIR/pre-restore-database.dump"
   trap live_restore_failure EXIT
   LIVE_RESTORE_ACTIVE=1
@@ -270,13 +370,20 @@ restore_live() {
   uploads_volume="$(compose_volume_name "$project_name" manual_uploads)"
   worker_volume="$(compose_volume_name "$project_name" tdlib_state)"
   bot_volume="$(compose_volume_name "$project_name" tdlib_bot_state)"
+  LIVE_UPLOADS_VOLUME="$uploads_volume"
+  LIVE_WORKER_VOLUME="$worker_volume"
+  LIVE_BOT_VOLUME="$bot_volume"
+  archive_live_volume "$uploads_volume" manual_uploads
+  archive_live_volume "$worker_volume" tdlib_state
+  archive_live_volume "$bot_volume" tdlib_bot_state
+  verify_staged_snapshot_file_references
+  LIVE_REPLACEMENT_STARTED=1
   replace_volume "$RESTORED_UPLOADS" "$uploads_volume"
   replace_volume "$RESTORED_TDLIB_WORKER" "$worker_volume"
   replace_volume "$RESTORED_TDLIB_BOT" "$bot_volume"
   restore_database
   docker compose --profile full up -d "${LIVE_SERVICES[@]}"
   wait_for_health
-  verify_file_references "$uploads_volume"
   LIVE_RESTORE_ACTIVE=0
   trap - EXIT
   printf 'Live restore completed. Staging directory retained at: %s\n' "$LIVE_STAGING_DIR"
