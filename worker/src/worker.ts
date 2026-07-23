@@ -63,6 +63,7 @@ import { hashParts } from "./archive/hash.js";
 import { readZipCentralDirectory } from "./archive/zip-reader.js";
 import { readRarContents } from "./archive/rar-reader.js";
 import { read7zContents } from "./archive/sevenz-reader.js";
+import { tryProvenanceBackfill } from "./provenance-backfill.js";
 import { byteLevelSplit, concatenateFiles } from "./archive/split.js";
 import { uploadToChannel, UploadStallError } from "./upload/channel.js";
 import { processAlbumGroups, detectGroupingConflicts, type IndexedPackageRef } from "./grouping.js";
@@ -314,6 +315,7 @@ interface PipelineContext {
     zipsFound: number;
     zipsDuplicate: number;
     zipsIngested: number;
+    zipsBackfilled: number;
   };
   /** Creator from forum topic name (null for non-forum). */
   topicCreator: string | null;
@@ -422,6 +424,7 @@ export async function runWorkerForAccount(
       zipsFound: 0,
       zipsDuplicate: 0,
       zipsIngested: 0,
+      zipsBackfilled: 0,
     };
 
     try {
@@ -1643,6 +1646,56 @@ async function processOneArchiveSet(
       zipsDuplicate: counters.zipsDuplicate,
     });
     return null;
+  }
+
+  // ── Cross-channel provenance backfill ──
+  // The same-channel checks above missed. Before downloading, see if this
+  // archive is the true origin of a placeholder-source package (manual upload
+  // / rebuild record whose sourceChannelId == destChannelId). If so, backfill
+  // its real provenance and skip the download entirely.
+  const archType = archiveSet.type === "7Z" ? "SEVEN_Z" : archiveSet.type;
+  if (destChannelId && (archType === "ZIP" || archType === "RAR" || archType === "SEVEN_Z")) {
+    try {
+      const derivedCreator =
+        topicCreator && topicCreator !== "General"
+          ? topicCreator
+          : (extractCreatorFromFileName(archiveName) ?? topicCreator ?? null);
+      const preview = previewMatches.get(archiveSet.baseName);
+      const result = await tryProvenanceBackfill({
+        client,
+        destChannelId,
+        scannedSourceChannelId: channel.id,
+        fileName: archiveName,
+        fileSize: totalArchiveSize,
+        archiveType: archType,
+        sourceMessageId: archiveSet.parts[0].id,
+        sourceTopicId,
+        sourceCaption: archiveSet.parts[0].caption ?? null,
+        remoteUniqueId: archiveSet.parts[0].remoteUniqueId ?? null,
+        creator: derivedCreator,
+        scannedFileId: archiveSet.parts[archiveSet.parts.length - 1].fileId,
+        previewData: null,
+        previewMsgId: preview?.id ?? null,
+      });
+      if (result.backfilled) {
+        counters.zipsBackfilled++;
+        accountLog.info(
+          { fileName: archiveName, sourceMessageId: Number(archiveSet.parts[0].id), confidence: result.confidence },
+          "Backfilled provenance for placeholder package — skipping download",
+        );
+        await updateRunActivity(runId, {
+          currentActivity: `Backfilled provenance for ${archiveName}`,
+          currentStep: "backfilling",
+          currentFile: archiveName,
+          currentFileNum: setIdx + 1,
+          totalFiles: totalSets,
+          zipsBackfilled: counters.zipsBackfilled,
+        });
+        return null;
+      }
+    } catch (err) {
+      accountLog.warn({ err, fileName: archiveName }, "Provenance backfill attempt failed (non-fatal), continuing to normal ingestion");
+    }
   }
 
   // ── Size guard: skip archives that exceed WORKER_MAX_ZIP_SIZE_MB ──
