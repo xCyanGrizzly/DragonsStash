@@ -1022,15 +1022,18 @@ export interface PlaceholderCandidate {
   destChannel: { telegramId: bigint } | null;
 }
 
-export async function findPlaceholderCandidate(
+/**
+ * Find every placeholder Package matching name+size (oldest first). Package
+ * has no direct `destChannel` relation (only the scalar `destChannelId`), so
+ * each row's destination TelegramChannel telegramId is resolved with a
+ * follow-up lookup rather than a Prisma include.
+ */
+export async function findPlaceholderCandidates(
   destChannelId: string,
   fileName: string,
   fileSize: bigint,
-): Promise<PlaceholderCandidate | null> {
-  // Package has no direct `destChannel` relation (only the scalar
-  // `destChannelId`), so resolve the destination TelegramChannel's
-  // telegramId with a follow-up lookup rather than a Prisma include.
-  const row = await db.package.findFirst({
+): Promise<PlaceholderCandidate[]> {
+  const rows = await db.package.findMany({
     where: {
       fileName,
       fileSize,
@@ -1048,22 +1051,36 @@ export async function findPlaceholderCandidate(
     },
     orderBy: { indexedAt: "asc" },
   });
-  if (!row) return null;
-  const destChannel = row.destChannelId
-    ? await db.telegramChannel.findUnique({
-        where: { id: row.destChannelId },
-        select: { telegramId: true },
+  if (rows.length === 0) return [];
+
+  const destChannelIds = [...new Set(rows.map((r) => r.destChannelId).filter((id): id is string => !!id))];
+  const channels = destChannelIds.length
+    ? await db.telegramChannel.findMany({
+        where: { id: { in: destChannelIds } },
+        select: { id: true, telegramId: true },
       })
-    : null;
-  return {
+    : [];
+  const telegramIdById = new Map(channels.map((c) => [c.id, c.telegramId]));
+
+  return rows.map((row) => ({
     id: row.id,
     archiveType: row.archiveType,
     fileCount: row.fileCount,
     fileSize: row.fileSize,
     destMessageId: row.destMessageId,
     destMessageIds: row.destMessageIds,
-    destChannel,
-  };
+    destChannel: row.destChannelId && telegramIdById.has(row.destChannelId)
+      ? { telegramId: telegramIdById.get(row.destChannelId)! }
+      : null,
+  }));
+}
+
+export async function findPlaceholderCandidate(
+  destChannelId: string,
+  fileName: string,
+  fileSize: bigint,
+): Promise<PlaceholderCandidate | null> {
+  return (await findPlaceholderCandidates(destChannelId, fileName, fileSize))[0] ?? null;
 }
 
 export async function getPackageFileCrcs(packageId: string): Promise<(string | null)[]> {
