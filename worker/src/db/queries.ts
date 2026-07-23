@@ -1012,12 +1012,25 @@ export async function createAutoGroup(input: {
 
 // ── Provenance backfill ──
 
+export interface PlaceholderCandidate {
+  id: string;
+  archiveType: string;
+  fileCount: number;
+  fileSize: bigint;
+  destMessageId: bigint | null;
+  destMessageIds: bigint[];
+  destChannel: { telegramId: bigint } | null;
+}
+
 export async function findPlaceholderCandidate(
   destChannelId: string,
   fileName: string,
   fileSize: bigint,
-): Promise<{ id: string; archiveType: string; fileCount: number } | null> {
-  return db.package.findFirst({
+): Promise<PlaceholderCandidate | null> {
+  // Package has no direct `destChannel` relation (only the scalar
+  // `destChannelId`), so resolve the destination TelegramChannel's
+  // telegramId with a follow-up lookup rather than a Prisma include.
+  const row = await db.package.findFirst({
     where: {
       fileName,
       fileSize,
@@ -1029,9 +1042,28 @@ export async function findPlaceholderCandidate(
         { sourceMessageId: 0n },
       ],
     },
-    select: { id: true, archiveType: true, fileCount: true },
+    select: {
+      id: true, archiveType: true, fileCount: true, fileSize: true,
+      destMessageId: true, destMessageIds: true, destChannelId: true,
+    },
     orderBy: { indexedAt: "asc" },
   });
+  if (!row) return null;
+  const destChannel = row.destChannelId
+    ? await db.telegramChannel.findUnique({
+        where: { id: row.destChannelId },
+        select: { telegramId: true },
+      })
+    : null;
+  return {
+    id: row.id,
+    archiveType: row.archiveType,
+    fileCount: row.fileCount,
+    fileSize: row.fileSize,
+    destMessageId: row.destMessageId,
+    destMessageIds: row.destMessageIds,
+    destChannel,
+  };
 }
 
 export async function getPackageFileCrcs(packageId: string): Promise<(string | null)[]> {

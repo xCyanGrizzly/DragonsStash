@@ -1,7 +1,8 @@
 import { childLogger } from "./util/logger.js";
 import { downloadFileRange } from "./tdlib/range-download.js";
+import { invokeWithTimeout } from "./tdlib/download.js";
 import { parseZipCentralDirectoryFromTail, MIN_ZIP_TAIL_BYTES } from "./archive/central-directory.js";
-import { fingerprintsMatch } from "./archive/fingerprint.js";
+import { fingerprintsMatch, crcFingerprint } from "./archive/fingerprint.js";
 import {
   findPlaceholderCandidate,
   getPackageFileCrcs,
@@ -49,6 +50,28 @@ async function readScannedZipListing(
   return null;
 }
 
+async function readZipListingFromDestination(
+  client: Client,
+  destChatTelegramId: bigint,
+  destMessageId: bigint,
+  fileSize: bigint,
+): Promise<FileEntry[] | null> {
+  try {
+    // Resolve the destination message's document file id.
+    const msg = (await invokeWithTimeout(client, {
+      _: "getMessage",
+      chat_id: Number(destChatTelegramId),
+      message_id: Number(destMessageId),
+    })) as { content?: { document?: { document?: { id: number } } } };
+    const fid = msg?.content?.document?.document?.id;
+    if (!fid) return null;
+    return await readScannedZipListing(client, String(fid), fileSize);
+  } catch (err) {
+    log.warn({ err, destMessageId: Number(destMessageId) }, "destination ZIP listing read failed");
+    return null;
+  }
+}
+
 export async function tryProvenanceBackfill(
   args: BackfillArgs,
 ): Promise<{ backfilled: boolean; confidence?: "fingerprint" | "name-size" }> {
@@ -62,9 +85,24 @@ export async function tryProvenanceBackfill(
     entries = await readScannedZipListing(args.client, args.scannedFileId, args.fileSize);
     if (entries) {
       const candidateCrcs = await getPackageFileCrcs(candidate.id);
-      const candidateEntries: FileEntry[] = candidateCrcs.map((crc) => ({
+      let candidateEntries: FileEntry[] = candidateCrcs.map((crc) => ({
         path: "", fileName: "", extension: null, compressedSize: 0n, uncompressedSize: 0n, crc32: crc,
       }));
+      const destMessageId =
+        candidate.destMessageIds.length > 0
+          ? candidate.destMessageIds[candidate.destMessageIds.length - 1]
+          : candidate.destMessageId;
+      if (!crcFingerprint(candidateEntries).complete && destMessageId && candidate.destChannel) {
+        const destEntries = await readZipListingFromDestination(
+          args.client,
+          candidate.destChannel.telegramId,
+          destMessageId,
+          candidate.fileSize,
+        );
+        if (destEntries) {
+          candidateEntries = destEntries;
+        }
+      }
       if (fingerprintsMatch(entries, candidateEntries)) {
         confidence = "fingerprint";
       } else {
