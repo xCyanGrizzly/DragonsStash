@@ -65,7 +65,7 @@ import { readRarContents } from "./archive/rar-reader.js";
 import { read7zContents } from "./archive/sevenz-reader.js";
 import { byteLevelSplit, concatenateFiles } from "./archive/split.js";
 import { uploadToChannel, UploadStallError } from "./upload/channel.js";
-import { processAlbumGroups, processRuleBasedGroups, processTimeWindowGroups, processPatternGroups, processCreatorGroups, processZipPathGroups, processReplyChainGroups, processCaptionGroups, detectGroupingConflicts, type IndexedPackageRef } from "./grouping.js";
+import { processAlbumGroups, detectGroupingConflicts, type IndexedPackageRef } from "./grouping.js";
 import { db } from "./db/client.js";
 import type { TelegramAccount, TelegramChannel } from "@prisma/client";
 import type { Client } from "tdl";
@@ -1479,34 +1479,13 @@ async function processArchiveSets(
       scanResult.photos
     );
 
-    // Auto-grouping passes (gated by per-channel flag)
-    const channelRecord = await db.telegramChannel.findUnique({
-      where: { id: channel.id },
-      select: { autoGroupEnabled: true },
-    });
-
-    if (channelRecord?.autoGroupEnabled !== false) {
-      // Learned rule-based grouping (from manual overrides)
-      await processRuleBasedGroups(channel.id, indexedPackageRefs);
-
-      // Time-window grouping for remaining ungrouped packages
-      await processTimeWindowGroups(channel.id, indexedPackageRefs);
-
-      // Pattern-based grouping (date patterns, project slugs)
-      await processPatternGroups(channel.id, indexedPackageRefs);
-
-      // Creator-based grouping (3+ files from same creator)
-      await processCreatorGroups(channel.id, indexedPackageRefs);
-
-      // ZIP path prefix grouping (shared root folder inside archives)
-      await processZipPathGroups(channel.id, indexedPackageRefs);
-
-      // Reply chain grouping (messages replying to same root)
-      await processReplyChainGroups(channel.id, indexedPackageRefs);
-
-      // Caption fuzzy match grouping
-      await processCaptionGroups(channel.id, indexedPackageRefs);
-    }
+    // Heuristic auto-grouping passes (rule/time/pattern/creator/zip-path/
+    // reply-chain/caption) were removed: the STL view is now a flat list
+    // organized by the creator filter, so automatically inventing groups at
+    // ingestion is no longer wanted. Album grouping above is kept because it
+    // reflects real upload structure (files posted together as one Telegram
+    // album), not a heuristic guess. Existing groups and the manual grouping
+    // actions in the UI are unaffected.
 
     // Check for potential grouping conflicts
     await detectGroupingConflicts(channel.id, indexedPackageRefs);
