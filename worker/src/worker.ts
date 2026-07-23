@@ -1673,7 +1673,7 @@ async function processOneArchiveSet(
         sourceCaption: archiveSet.parts[0].caption ?? null,
         remoteUniqueId: archiveSet.parts[0].remoteUniqueId ?? null,
         creator: derivedCreator,
-        scannedFileId: archiveSet.parts[archiveSet.parts.length - 1].fileId,
+        scannedParts: archiveSet.parts.map((p) => ({ fileId: p.fileId, fileSize: p.fileSize })),
         previewData: null,
         previewMsgId: preview?.id ?? null,
       });

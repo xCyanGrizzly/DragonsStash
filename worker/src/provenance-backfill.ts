@@ -27,25 +27,37 @@ export interface BackfillArgs {
   sourceCaption: string | null;
   remoteUniqueId: string | null;
   creator: string | null;
-  scannedFileId: string;
+  scannedParts: { fileId: string; fileSize: bigint }[];
   previewData?: Buffer | null;
   previewMsgId?: bigint | null;
 }
 
+/**
+ * Read a ZIP central directory from the tail of a (possibly multipart)
+ * archive. `parts` is ordered; only the LAST part carries the EOCD record.
+ * `fileSize` on each part is that part's own size (NOT the whole-archive
+ * total) so the download offset stays within that part's bounds, while
+ * `tailStart` passed to the parser is the logical whole-archive offset
+ * (preceding parts' sizes + the offset within the last part).
+ */
 async function readScannedZipListing(
   client: Client,
-  fileId: string,
-  fileSize: bigint,
+  parts: { fileId: string; fileSize: bigint }[],
 ): Promise<FileEntry[] | null> {
-  const total = Number(fileSize);
+  if (parts.length === 0) return null;
+  const lastPart = parts[parts.length - 1];
+  const precedingSize = parts.slice(0, -1).reduce((sum, p) => sum + Number(p.fileSize), 0);
+  const lastSize = Number(lastPart.fileSize);
   for (const tailBytes of [MIN_ZIP_TAIL_BYTES, MIN_ZIP_TAIL_BYTES * 4]) {
-    const start = Math.max(0, total - tailBytes);
+    const partOffset = Math.max(0, lastSize - tailBytes);
+    const downloadLen = Math.min(tailBytes, lastSize);
     try {
-      const tail = await downloadFileRange(client, fileId, start, Math.min(tailBytes, total), fileSize);
-      return parseZipCentralDirectoryFromTail(tail, start);
+      const buf = await downloadFileRange(client, lastPart.fileId, partOffset, downloadLen, lastPart.fileSize);
+      const tailStart = precedingSize + partOffset;
+      return parseZipCentralDirectoryFromTail(buf, tailStart);
     } catch (err) {
       if (err instanceof RangeError) continue; // try a larger tail
-      log.warn({ err, fileId }, "ranged ZIP listing failed");
+      log.warn({ err, fileId: lastPart.fileId }, "ranged ZIP listing failed");
       return null;
     }
   }
@@ -55,21 +67,29 @@ async function readScannedZipListing(
 async function readZipListingFromDestination(
   client: Client,
   destChatTelegramId: bigint,
-  destMessageId: bigint,
-  fileSize: bigint,
+  destMessageIds: bigint[],
+  destMessageId: bigint | null,
 ): Promise<FileEntry[] | null> {
+  const messageIds = destMessageIds.length > 0 ? destMessageIds : destMessageId ? [destMessageId] : [];
+  if (messageIds.length === 0) return null;
   try {
-    // Resolve the destination message's document file id.
-    const msg = (await invokeWithTimeout(client, {
-      _: "getMessage",
-      chat_id: Number(destChatTelegramId),
-      message_id: Number(destMessageId),
-    })) as { content?: { document?: { document?: { id: number } } } };
-    const fid = msg?.content?.document?.document?.id;
-    if (!fid) return null;
-    return await readScannedZipListing(client, String(fid), fileSize);
+    // Resolve each destination message's document file id + size, in order,
+    // so a multipart destination copy is reconstructed with correct
+    // per-part sizes (the last message carries the EOCD-bearing tail part).
+    const parts: { fileId: string; fileSize: bigint }[] = [];
+    for (const msgId of messageIds) {
+      const msg = (await invokeWithTimeout(client, {
+        _: "getMessage",
+        chat_id: Number(destChatTelegramId),
+        message_id: Number(msgId),
+      })) as { content?: { document?: { document?: { id: number; size?: number } } } };
+      const doc = msg?.content?.document?.document;
+      if (!doc?.id) return null;
+      parts.push({ fileId: String(doc.id), fileSize: BigInt(doc.size ?? 0) });
+    }
+    return await readScannedZipListing(client, parts);
   } catch (err) {
-    log.warn({ err, destMessageId: Number(destMessageId) }, "destination ZIP listing read failed");
+    log.warn({ err, destMessageIds: messageIds.map(Number) }, "destination ZIP listing read failed");
     return null;
   }
 }
@@ -88,22 +108,33 @@ async function resolveCandidateFingerprintEntries(
   let candidateEntries: FileEntry[] = candidateCrcs.map((crc) => ({
     path: "", fileName: "", extension: null, compressedSize: 0n, uncompressedSize: 0n, crc32: crc,
   }));
-  const destMessageId =
-    candidate.destMessageIds.length > 0
-      ? candidate.destMessageIds[candidate.destMessageIds.length - 1]
-      : candidate.destMessageId;
-  if (!crcFingerprint(candidateEntries).complete && destMessageId && candidate.destChannel) {
+  const hasDestMessage = candidate.destMessageIds.length > 0 || candidate.destMessageId != null;
+  if (!crcFingerprint(candidateEntries).complete && hasDestMessage && candidate.destChannel) {
     const destEntries = await readZipListingFromDestination(
       client,
       candidate.destChannel.telegramId,
-      destMessageId,
-      candidate.fileSize,
+      candidate.destMessageIds,
+      candidate.destMessageId,
     );
     if (destEntries) {
       candidateEntries = destEntries;
     }
   }
   return candidateEntries;
+}
+
+/**
+ * Classify a fingerprint comparison between two entry sets. "incomplete"
+ * means at least one side is missing CRCs (e.g. an empty file → CRC32 of
+ * zero-length data → null) and the comparison CANNOT be used to confirm or
+ * refute a match — callers must fall back to name+size confidence rather
+ * than treating this as a mismatch.
+ */
+function compareFingerprints(a: FileEntry[], b: FileEntry[]): "match" | "mismatch" | "incomplete" {
+  const fa = crcFingerprint(a);
+  const fb = crcFingerprint(b);
+  if (!fa.complete || !fb.complete) return "incomplete";
+  return fingerprintsMatch(a, b) ? "match" : "mismatch";
 }
 
 export async function tryProvenanceBackfill(
@@ -114,7 +145,7 @@ export async function tryProvenanceBackfill(
 
   let scannedEntries: FileEntry[] | null = null;
   if (args.archiveType === "ZIP") {
-    scannedEntries = await readScannedZipListing(args.client, args.scannedFileId, args.fileSize);
+    scannedEntries = await readScannedZipListing(args.client, args.scannedParts);
   }
 
   let chosen = candidates[0];
@@ -126,13 +157,30 @@ export async function tryProvenanceBackfill(
     // it, notify instead of guessing which one is the real match.
     if (args.archiveType === "ZIP" && scannedEntries) {
       const matches: PlaceholderCandidate[] = [];
+      // Candidates NOT ruled out as a definite (both-complete) mismatch —
+      // used as the name+size fallback pool when the fingerprint can't
+      // confirm a match (e.g. incomplete CRCs on either side).
+      const nonMismatches: PlaceholderCandidate[] = [];
       for (const c of candidates) {
         const candidateEntries = await resolveCandidateFingerprintEntries(args.client, c);
-        if (fingerprintsMatch(scannedEntries, candidateEntries)) matches.push(c);
+        const comparison = compareFingerprints(scannedEntries, candidateEntries);
+        if (comparison === "match") {
+          matches.push(c);
+          nonMismatches.push(c);
+        } else if (comparison === "incomplete") {
+          nonMismatches.push(c);
+        }
+        // comparison === "mismatch": both sides complete and differ — excluded.
       }
       if (matches.length === 1) {
         chosen = matches[0];
         confidence = "fingerprint";
+      } else if (matches.length === 0 && nonMismatches.length === 1) {
+        // Fingerprint couldn't confirm (incomplete CRCs), but exactly one
+        // candidate wasn't ruled out as a definite mismatch — fall back to
+        // name+size confidence rather than treating this as unresolved.
+        chosen = nonMismatches[0];
+        confidence = "name-size";
       } else {
         await db.systemNotification.create({
           data: {
@@ -160,13 +208,17 @@ export async function tryProvenanceBackfill(
     }
   } else if (scannedEntries) {
     const candidateEntries = await resolveCandidateFingerprintEntries(args.client, chosen);
-    if (fingerprintsMatch(scannedEntries, candidateEntries)) {
+    const comparison = compareFingerprints(scannedEntries, candidateEntries);
+    if (comparison === "match") {
       confidence = "fingerprint";
-    } else {
-      // Fingerprint mismatch: NOT the same content despite name+size. Do not backfill.
+    } else if (comparison === "mismatch") {
+      // Both sides' CRCs are complete and differ: NOT the same content
+      // despite name+size. Do not backfill.
       log.info({ candidateId: chosen.id, fileName: args.fileName }, "fingerprint mismatch — not backfilling");
       return { backfilled: false };
     }
+    // comparison === "incomplete": can't confirm or refute by fingerprint —
+    // fall through and backfill on name+size confidence instead.
   }
 
   const ok = await backfillProvenance({
@@ -184,6 +236,26 @@ export async function tryProvenanceBackfill(
   });
 
   if (!ok) return { backfilled: false };
+
+  if (confidence === "name-size") {
+    // Lower-confidence backfill: no CRC fingerprint guard confirmed this
+    // match. Record it as an auditable event so name+size-only backfills
+    // can be reviewed after the fact.
+    await db.systemNotification.create({
+      data: {
+        type: "INTEGRITY_AUDIT",
+        severity: "INFO",
+        title: `Provenance backfilled by name+size: ${args.fileName}`,
+        message: `Package ${chosen.id} was matched to a scanned source message by file name and size only (no CRC fingerprint confirmation).`,
+        context: {
+          packageId: chosen.id,
+          fileName: args.fileName,
+          sourceChannelId: args.scannedSourceChannelId,
+        },
+      },
+    });
+  }
+
   log.info(
     { candidateId: chosen.id, fileName: args.fileName, confidence, source: args.scannedSourceChannelId },
     "provenance backfilled",
