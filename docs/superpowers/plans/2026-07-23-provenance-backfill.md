@@ -493,7 +493,7 @@ git commit -m "feat(worker): ranged TDLib file download (downloadFileRange)"
 
 **Interfaces:**
 - Produces:
-  - `findPlaceholderCandidate(destChannelId: string, fileName: string, fileSize: bigint): Promise<{ id: string; archiveType: string; fileCount: number } | null>` — a package where `sourceChannelId === destChannelId` (placeholder) AND `fileName` AND `fileSize` match, with a real destination (`destMessageId != null`).
+  - `findPlaceholderCandidate(destChannelId: string, fileName: string, fileSize: bigint): Promise<{ id: string; archiveType: string; fileCount: number } | null>` — a **placeholder** package (`sourceChannelId === destChannelId` OR `sourceMessageId === 0` — see spec §1) AND `fileName` AND `fileSize` match, with a real destination (`destMessageId != null`).
   - `getPackageFileCrcs(packageId: string): Promise<(string | null)[]>` — `PackageFile.crc32` values for the candidate.
   - `backfillProvenance(input: BackfillProvenanceInput): Promise<boolean>` — transactionally overwrite placeholder fields; returns `false` (no-op) if the row is no longer a placeholder. Type:
     ```ts
@@ -522,10 +522,15 @@ export async function findPlaceholderCandidate(
 ): Promise<{ id: string; archiveType: string; fileCount: number } | null> {
   return db.package.findFirst({
     where: {
-      sourceChannelId: destChannelId, // placeholder: source == destination
       fileName,
       fileSize,
       destMessageId: { not: null },
+      // Placeholder provenance (spec §1): manual-upload (source == destination)
+      // OR rebuild record (sourceMessageId == 0 "unknown" sentinel).
+      OR: [
+        { sourceChannelId: destChannelId },
+        { sourceMessageId: 0n },
+      ],
     },
     select: { id: true, archiveType: true, fileCount: true },
     orderBy: { indexedAt: "asc" },
@@ -544,10 +549,14 @@ export async function backfillProvenance(input: BackfillProvenanceInput): Promis
   return db.$transaction(async (tx) => {
     const current = await tx.package.findUnique({
       where: { id: input.packageId },
-      select: { sourceChannelId: true, previewData: true, fileCount: true },
+      select: { sourceChannelId: true, sourceMessageId: true, previewData: true, fileCount: true },
     });
     // Re-check placeholder status inside the txn (another worker may have won).
-    if (!current || current.sourceChannelId !== input.destChannelId) return false;
+    // Placeholder = manual-upload (source==dest) OR rebuild (sourceMessageId==0).
+    const stillPlaceholder =
+      !!current &&
+      (current.sourceChannelId === input.destChannelId || current.sourceMessageId === 0n);
+    if (!stillPlaceholder) return false;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: any = {

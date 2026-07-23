@@ -88,10 +88,27 @@ Current state (as of this design):
 
 ### 1. Candidate definition
 
-> A package is a backfill candidate iff `sourceChannelId == destChannelId`.
+> A package is a backfill candidate iff **`sourceChannelId == destChannelId`
+> OR `sourceMessageId == 0`**.
 
-These are exactly the manual-upload and rebuild-created records. Packages with a
-real, non-placeholder source are **never** candidates and are never overwritten.
+Two placeholder shapes exist (verified against live data 2026-07-23):
+- **Manual uploads** (`manual-upload.ts`): `sourceChannelId == destChannelId`,
+  real `contentHash`, real `sourceMessageId`, has a `PackageFile` listing.
+- **Rebuild records** (`rebuild.ts`): `sourceMessageId == 0n` (deliberate
+  "unknown" sentinel), synthetic `contentHash = "rebuild:<destChannelId>:<destMessageId>"`,
+  `fileCount == 0`, and `sourceChannelId` set to an **arbitrary fallback source
+  channel** (`sourceChannels[0]`) — NOT the destination. (This is the common
+  case: e.g. 59,893 records after a destination rebuild.)
+
+Normal ingestion always sets a real `sourceMessageId` (> 0) and a real source
+channel, so neither marker matches a genuinely-sourced package. Both markers are
+overwritten on backfill (source channel + message become real), so a record
+stops being a candidate once fixed — this is what makes re-scans idempotent.
+
+**Known limitation:** backfill does NOT rewrite a rebuild record's synthetic
+`"rebuild:"` `contentHash` (the true content hash would require a full download,
+which this feature avoids). That is acceptable — dedup after backfill relies on
+`remoteUniqueId` + name/size within the source channel, not on `contentHash`.
 
 ### 2. Where it hooks
 
@@ -103,8 +120,9 @@ existing fast paths).
 Flow for the scanned archive set:
 
 1. Stage A — **candidate lookup (zero download).** Query for a package where
-   `sourceChannelId == destChannelId` AND `fileName == archiveName` AND
-   `fileSize == totalArchiveSize`. (`Package` has `@@index([fileName])`.)
+   `(sourceChannelId == destChannelId OR sourceMessageId == 0)` AND
+   `fileName == archiveName` AND `fileSize == totalArchiveSize`.
+   (`Package` has `@@index([fileName])`.)
    - No candidate → fall through to normal ingestion unchanged.
 2. Stage B — **fingerprint confirmation (tiny download).** See §3.
 3. On confirmation → **backfill** (see §4) and return `null` (treated as a
