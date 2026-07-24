@@ -109,7 +109,7 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-dragonsstash}
       - RESTIC_REPOSITORY=/backups/restic-repo
       - RESTIC_PASSWORD=${RESTIC_PASSWORD:?Set RESTIC_PASSWORD in .env}
-      - KUMA_PUSH_URL=${KUMA_PUSH_URL:?Set KUMA_PUSH_URL in .env}
+      - KUMA_PUSH_URL=${KUMA_PUSH_URL:-}
       - TZ=${TZ:-Etc/UTC}
     volumes:
       - tdlib_state:/data/tdlib-worker:ro
@@ -122,7 +122,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 1G
     networks:
       - backend
 
@@ -158,9 +158,9 @@ volumes:
   manual_uploads:
   nas_backups:
     driver_opts:
-      type: nfs
-      o: "addr=${NAS_HOST},rw,nfsvers=4,soft,timeo=100"
-      device: ":${NAS_EXPORT_PATH}"
+      type: cifs
+      o: "username=${NAS_USERNAME},password=${NAS_PASSWORD},vers=3.0,uid=0,gid=0,file_mode=0660,dir_mode=0770"
+      device: "//${NAS_HOST}/${NAS_SHARE}"
 
 networks:
   frontend:
