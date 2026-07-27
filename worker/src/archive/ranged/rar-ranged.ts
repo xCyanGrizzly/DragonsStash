@@ -54,6 +54,7 @@ import { childLogger } from "../../util/logger.js";
 
 const rlog = childLogger("rar-ranged");
 const MAX_RAR_BLOCKS = 50000;
+const MAX_RAR_HEADER_BYTES = 8 * 1024 * 1024; // 8 MB — real RAR block headers are far smaller; guards against a corrupt/desynced HeaderSize
 const HEADER_CHUNK = 8192;
 
 export async function walkRarVolume(
@@ -72,6 +73,7 @@ export async function walkRarVolume(
       const chunkLen = Math.min(HEADER_CHUNK, size - pos);
       let chunk = await read(part.fileId, pos, chunkLen, part.fileSize);
       const ext = version === 5 ? parseRar5BlockExtent(chunk, 0) : parseRar4BlockExtent(chunk, 0);
+      if (ext.headerBytes > MAX_RAR_HEADER_BYTES) return null;
       // Ensure we have the full header bytes to harvest (long filenames).
       let headerBuf = chunk;
       if (ext.headerBytes > chunk.length) {

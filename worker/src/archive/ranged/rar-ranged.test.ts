@@ -88,6 +88,32 @@ describe("walkRarVolume", () => {
     // First region starts right after the 8-byte signature
     expect(regions![0].offset).toBe(8);
   });
+
+  it("returns null when a block claims an absurd header size (corrupt/desynced)", async () => {
+    // RAR5 block with HeaderSize vint encoding a value > 8MB.
+    // Encode 9_000_000 as RAR vint: bytes little-endian 7-bit groups with continuation bit.
+    function encodeVint(n: number): number[] {
+      const out: number[] = [];
+      while (n >= 0x80) {
+        out.push((n & 0x7f) | 0x80);
+        n = Math.floor(n / 128);
+      }
+      out.push(n);
+      return out;
+    }
+    const sig = Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x01, 0x00]); // RAR5 signature
+    const hsVint = encodeVint(9_000_000);
+    // Block = CRC(4) + HeaderSize vint(9MB) + Type(1 byte) + Flags(1 byte)
+    const block = Buffer.concat([Buffer.alloc(4), Buffer.from(hsVint), Buffer.from([0x02, 0x00])]);
+    const vol = Buffer.concat([sig, block]);
+    const size = 20 * 1024 * 1024;
+    const read = async (_id: string, offset: number, length: number) => {
+      if (offset >= vol.length) return Buffer.alloc(0);
+      return vol.subarray(offset, Math.min(offset + length, vol.length));
+    };
+    const regions = await walkRarVolume(read, { fileId: "1", fileSize: BigInt(size), fileName: "c.rar" }, 5, 8);
+    expect(regions).toBeNull();
+  });
 });
 
 describe("readRarListingRanged (single part)", () => {
