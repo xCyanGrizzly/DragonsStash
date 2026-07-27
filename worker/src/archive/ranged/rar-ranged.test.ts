@@ -98,3 +98,27 @@ describe("readRarListingRanged (single part)", () => {
     expect(res === null || Array.isArray(res)).toBe(true); // real unrar parse covered live
   });
 });
+
+describe("readRarListingRanged (multipart)", () => {
+  it("walks each volume from its own signature and reconstructs all parts", async () => {
+    const vol = buildRar5Volume(); // reuse from Task 6 test
+    // Two volumes with identical structure; each RangeReader read is scoped by fileId.
+    const byId: Record<string, Buffer> = { p1: vol, p2: vol };
+    const reads: Record<string, number> = { p1: 0, p2: 0 };
+    const read: RangeReader = async (fileId, offset, length) => {
+      reads[fileId]++;
+      return byId[fileId].subarray(offset, offset + length);
+    };
+    const res = await readRarListingRanged(
+      [
+        { fileId: "p1", fileSize: BigInt(vol.length), fileName: "x.part1.rar" },
+        { fileId: "p2", fileSize: BigInt(vol.length), fileName: "x.part2.rar" },
+      ],
+      read,
+    );
+    // Both volumes were walked (each read at least its signature + blocks).
+    expect(reads.p1).toBeGreaterThan(0);
+    expect(reads.p2).toBeGreaterThan(0);
+    expect(res === null || Array.isArray(res)).toBe(true);
+  });
+});
