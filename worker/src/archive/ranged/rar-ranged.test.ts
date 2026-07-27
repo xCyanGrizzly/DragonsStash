@@ -1,0 +1,56 @@
+import { describe, it, expect } from "vitest";
+import { readVint, detectRarSignature, parseRar5BlockExtent, parseRar4BlockExtent } from "./rar-ranged.js";
+
+describe("readVint", () => {
+  it("reads single-byte and multi-byte values (base-128 LE)", () => {
+    expect(readVint(Buffer.from([0x08]), 0)).toEqual({ value: 8, bytes: 1 });
+    // 0x80,0x01 => 0 | (1<<7) = 128
+    expect(readVint(Buffer.from([0x80, 0x01]), 0)).toEqual({ value: 128, bytes: 2 });
+  });
+});
+
+describe("detectRarSignature", () => {
+  it("detects RAR5 and RAR4", () => {
+    expect(detectRarSignature(Buffer.from([0x52,0x61,0x72,0x21,0x1a,0x07,0x01,0x00]))).toEqual({ version: 5, sigLen: 8 });
+    expect(detectRarSignature(Buffer.from([0x52,0x61,0x72,0x21,0x1a,0x07,0x00]))).toEqual({ version: 4, sigLen: 7 });
+    expect(detectRarSignature(Buffer.alloc(8))).toBeNull();
+  });
+});
+
+describe("parseRar5BlockExtent", () => {
+  it("computes header+data extent and flags end-of-archive", () => {
+    // CRC32(4) | HeaderSize vint=5 | Type vint=2 (file) | Flags vint=2 (data present) | DataSize vint=100 | (pad to headerSize)
+    const b = Buffer.concat([
+      Buffer.from([0,0,0,0]),      // CRC
+      Buffer.from([0x05]),          // HeaderSize = 5 (bytes after this vint)
+      Buffer.from([0x02]),          // Type = 2 (file)
+      Buffer.from([0x02]),          // Flags = 0x02 -> data present
+      Buffer.from([0x64]),          // DataSize = 100
+      Buffer.from([0x00, 0x00]),    // padding to fill HeaderSize(5): Type+Flags+DataSize=3, +2 pad =5
+    ]);
+    const ext = parseRar5BlockExtent(b, 0);
+    // headerBytes = 4 (CRC) + 1 (HeaderSize vint) + 5 (HeaderSize) = 10
+    expect(ext.headerBytes).toBe(10);
+    expect(ext.dataSize).toBe(100);
+    expect(ext.isEnd).toBe(false);
+
+    const endBlk = Buffer.from([0,0,0,0, 0x02, 0x05, 0x00]); // HeaderSize=2, Type=5(end), Flags=0
+    const e2 = parseRar5BlockExtent(endBlk, 0);
+    expect(e2.isEnd).toBe(true);
+  });
+});
+
+describe("parseRar4BlockExtent", () => {
+  it("computes extent with ADD_SIZE when flag 0x8000 is set", () => {
+    // CRC(2) TYPE(1)=0x74 FLAGS(2)=0x8000 HEAD_SIZE(2)=11 ADD_SIZE(4)=200
+    const b = Buffer.alloc(11);
+    b.writeUInt8(0x74, 2);
+    b.writeUInt16LE(0x8000, 3);
+    b.writeUInt16LE(11, 5);
+    b.writeUInt32LE(200, 7);
+    const ext = parseRar4BlockExtent(b, 0);
+    expect(ext.headerBytes).toBe(11);
+    expect(ext.dataSize).toBe(200);
+    expect(ext.isEnd).toBe(false);
+  });
+});
