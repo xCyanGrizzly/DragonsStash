@@ -16,6 +16,7 @@ const K_SIZE = 0x09;
 /** Read a 7z variable-length number: first byte is a length mask, followed by
  *  little-endian bytes. Math.pow keeps values exact above 2^31. */
 export function read7zNumber(buf: Buffer, pos: number): { value: number; next: number } {
+  if (pos >= buf.length) throw new RangeError("7z number reads past buffer end");
   const first = buf[pos];
   let mask = 0x80;
   let value = 0;

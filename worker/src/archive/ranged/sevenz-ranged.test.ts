@@ -76,6 +76,10 @@ describe("read7zNumber", () => {
     // 500 = 0x01F4 -> first 0x81, trailing 0xF4
     expect(read7zNumber(Buffer.from([0x81, 0xf4]), 0)).toEqual({ value: 500, next: 2 });
   });
+  it("throws when pos starts past the buffer end (short read)", () => {
+    expect(() => read7zNumber(Buffer.from([0x2a]), 5)).toThrow(RangeError);
+    expect(() => read7zNumber(Buffer.alloc(0), 0)).toThrow(RangeError);
+  });
 });
 
 describe("locate7zEncodedHeaderPack", () => {
