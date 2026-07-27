@@ -12,6 +12,7 @@ import {
 } from "./db/queries.js";
 import type { FileEntry } from "./archive/zip-reader.js";
 import { readSevenZListingRanged, type RangedPart } from "./archive/ranged/sevenz-ranged.js";
+import { readRarListingRanged } from "./archive/ranged/rar-ranged.js";
 import { tdlibRangeReader } from "./archive/ranged/range-reader.js";
 import { fullDownloadListing } from "./archive/ranged/fallback.js";
 import type { Client } from "tdl";
@@ -67,32 +68,40 @@ async function readScannedZipListing(
   return null;
 }
 
-async function readZipListingFromDestination(
+/**
+ * Resolve the destination copy's message(s) into ranged parts (file id +
+ * size + name), in order, so a multipart destination copy is reconstructed
+ * with correct per-part sizes and names (the last message carries the
+ * EOCD-bearing tail part for ZIP; multipart RAR needs correctly-suffixed
+ * `.partN.rar` names for `unrar` sibling discovery). Cheap-only: any TDLib
+ * failure here degrades the caller to name-size confidence rather than
+ * falling back to a full download.
+ */
+async function resolveDestParts(
   client: Client,
   destChatTelegramId: bigint,
   destMessageIds: bigint[],
   destMessageId: bigint | null,
-): Promise<FileEntry[] | null> {
+  fallbackFileName: string,
+): Promise<RangedPart[] | null> {
   const messageIds = destMessageIds.length > 0 ? destMessageIds : destMessageId ? [destMessageId] : [];
   if (messageIds.length === 0) return null;
   try {
-    // Resolve each destination message's document file id + size, in order,
-    // so a multipart destination copy is reconstructed with correct
-    // per-part sizes (the last message carries the EOCD-bearing tail part).
-    const parts: { fileId: string; fileSize: bigint }[] = [];
+    const parts: RangedPart[] = [];
     for (const msgId of messageIds) {
       const msg = (await invokeWithTimeout(client, {
         _: "getMessage",
         chat_id: Number(destChatTelegramId),
         message_id: Number(msgId),
-      })) as { content?: { document?: { document?: { id: number; size?: number } } } };
+      })) as { content?: { document?: { document?: { id: number; size?: number }; file_name?: string } } };
       const doc = msg?.content?.document?.document;
       if (!doc?.id) return null;
-      parts.push({ fileId: String(doc.id), fileSize: BigInt(doc.size ?? 0) });
+      const fileName = msg?.content?.document?.file_name || fallbackFileName;
+      parts.push({ fileId: String(doc.id), fileSize: BigInt(doc.size ?? 0), fileName });
     }
-    return await readScannedZipListing(client, parts);
+    return parts;
   } catch (err) {
-    log.warn({ err, destMessageIds: messageIds.map(Number) }, "destination ZIP listing read failed");
+    log.warn({ err, destMessageIds: messageIds.map(Number) }, "destination archive part resolution failed");
     return null;
   }
 }
@@ -105,7 +114,7 @@ async function readScannedListingRanged(
   const read = tdlibRangeReader(client);
   if (archiveType === "ZIP") return readScannedZipListing(client, parts);
   if (archiveType === "SEVEN_Z") return readSevenZListingRanged(parts, read);
-  // RAR enabled in Task 8.
+  if (archiveType === "RAR") return readRarListingRanged(parts, read);
   return null;
 }
 
@@ -125,12 +134,22 @@ async function resolveCandidateFingerprintEntries(
   }));
   const hasDestMessage = candidate.destMessageIds.length > 0 || candidate.destMessageId != null;
   if (!crcFingerprint(candidateEntries).complete && hasDestMessage && candidate.destChannel) {
-    const destEntries = await readZipListingFromDestination(
+    const destParts = await resolveDestParts(
       client,
       candidate.destChannel.telegramId,
       candidate.destMessageIds,
       candidate.destMessageId,
+      candidate.fileName,
     );
+    let destEntries: FileEntry[] | null = null;
+    if (destParts) {
+      const read = tdlibRangeReader(client);
+      destEntries =
+        candidate.archiveType === "ZIP" ? await readScannedZipListing(client, destParts)
+        : candidate.archiveType === "SEVEN_Z" ? await readSevenZListingRanged(destParts, read)
+        : candidate.archiveType === "RAR" ? await readRarListingRanged(destParts, read)
+        : null;
+    }
     if (destEntries) {
       candidateEntries = destEntries;
     }

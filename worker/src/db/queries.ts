@@ -1015,6 +1015,7 @@ export async function createAutoGroup(input: {
 export interface PlaceholderCandidate {
   id: string;
   archiveType: string;
+  fileName: string;
   fileCount: number;
   fileSize: bigint;
   destMessageId: bigint | null;
@@ -1046,7 +1047,7 @@ export async function findPlaceholderCandidates(
       ],
     },
     select: {
-      id: true, archiveType: true, fileCount: true, fileSize: true,
+      id: true, archiveType: true, fileName: true, fileCount: true, fileSize: true,
       destMessageId: true, destMessageIds: true, destChannelId: true,
     },
     orderBy: { indexedAt: "asc" },
@@ -1065,6 +1066,7 @@ export async function findPlaceholderCandidates(
   return rows.map((row) => ({
     id: row.id,
     archiveType: row.archiveType,
+    fileName: row.fileName,
     fileCount: row.fileCount,
     fileSize: row.fileSize,
     destMessageId: row.destMessageId,
