@@ -11,6 +11,9 @@ import {
   type PlaceholderCandidate,
 } from "./db/queries.js";
 import type { FileEntry } from "./archive/zip-reader.js";
+import { readSevenZListingRanged, type RangedPart } from "./archive/ranged/sevenz-ranged.js";
+import { tdlibRangeReader } from "./archive/ranged/range-reader.js";
+import { fullDownloadListing } from "./archive/ranged/fallback.js";
 import type { Client } from "tdl";
 
 const log = childLogger("provenance-backfill");
@@ -27,7 +30,7 @@ export interface BackfillArgs {
   sourceCaption: string | null;
   remoteUniqueId: string | null;
   creator: string | null;
-  scannedParts: { fileId: string; fileSize: bigint }[];
+  scannedParts: RangedPart[];
   previewData?: Buffer | null;
   previewMsgId?: bigint | null;
 }
@@ -94,6 +97,18 @@ async function readZipListingFromDestination(
   }
 }
 
+async function readScannedListingRanged(
+  archiveType: string,
+  client: Client,
+  parts: RangedPart[],
+): Promise<FileEntry[] | null> {
+  const read = tdlibRangeReader(client);
+  if (archiveType === "ZIP") return readScannedZipListing(client, parts);
+  if (archiveType === "SEVEN_Z") return readSevenZListingRanged(parts, read);
+  // RAR enabled in Task 8.
+  return null;
+}
+
 /**
  * Build the CRC fingerprint entries for a placeholder candidate: start from
  * its stored PackageFile CRCs, and if those are incomplete (e.g. a rebuild
@@ -143,9 +158,17 @@ export async function tryProvenanceBackfill(
   const candidates = await findPlaceholderCandidates(args.destChannelId, args.fileName, args.fileSize);
   if (candidates.length === 0) return { backfilled: false };
 
-  let scannedEntries: FileEntry[] | null = null;
-  if (args.archiveType === "ZIP") {
-    scannedEntries = await readScannedZipListing(args.client, args.scannedParts);
+  let scannedEntries: FileEntry[] | null = await readScannedListingRanged(
+    args.archiveType, args.client, args.scannedParts,
+  );
+  // Cheap ranged read failed — fall back to a size-capped full download so the
+  // listing still gets indexed. Only worth it when the candidate lacks a listing.
+  if (!scannedEntries && candidates.some((c) => c.fileCount === 0)) {
+    const totalSize = args.scannedParts.reduce((s, p) => s + p.fileSize, 0n);
+    scannedEntries = await fullDownloadListing({
+      client: args.client, parts: args.scannedParts, archiveType: args.archiveType,
+      totalSize, fileName: args.fileName,
+    });
   }
 
   let chosen = candidates[0];
