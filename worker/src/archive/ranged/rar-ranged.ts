@@ -44,3 +44,65 @@ export function parseRar4BlockExtent(buf: Buffer, pos: number): BlockExtent {
   const dataSize = (flags & 0x8000) ? buf.readUInt32LE(pos + 7) : 0;
   return { headerBytes: headSize, dataSize, isEnd: type === 0x7b };
 }
+
+import type { FileEntry } from "../zip-reader.js";
+import type { RangeReader } from "./range-reader.js";
+import type { RangedPart } from "./sevenz-ranged.js";
+import { listFromSparse, type SparsePart } from "./sparse-list.js";
+import { readRarContents } from "../rar-reader.js";
+import { childLogger } from "../../util/logger.js";
+
+const rlog = childLogger("rar-ranged");
+const MAX_RAR_BLOCKS = 50000;
+const HEADER_CHUNK = 8192;
+
+export async function walkRarVolume(
+  read: RangeReader,
+  part: RangedPart,
+  version: 4 | 5,
+  sigLen: number,
+): Promise<{ offset: number; bytes: Buffer }[] | null> {
+  const size = Number(part.fileSize);
+  const regions: { offset: number; bytes: Buffer }[] = [];
+  let pos = sigLen;
+  let blocks = 0;
+  try {
+    while (pos < size) {
+      if (++blocks > MAX_RAR_BLOCKS) return null;
+      const chunkLen = Math.min(HEADER_CHUNK, size - pos);
+      let chunk = await read(part.fileId, pos, chunkLen, part.fileSize);
+      const ext = version === 5 ? parseRar5BlockExtent(chunk, 0) : parseRar4BlockExtent(chunk, 0);
+      // Ensure we have the full header bytes to harvest (long filenames).
+      let headerBuf = chunk;
+      if (ext.headerBytes > chunk.length) {
+        headerBuf = await read(part.fileId, pos, Math.min(ext.headerBytes, size - pos), part.fileSize);
+      }
+      regions.push({ offset: pos, bytes: headerBuf.subarray(0, Math.min(ext.headerBytes, size - pos)) });
+      if (ext.isEnd) break;
+      const advance = ext.headerBytes + ext.dataSize;
+      if (advance <= 0) return null;
+      if (pos + advance > size) break; // data clamped at the volume boundary (multipart continuation)
+      pos += advance;
+    }
+    return regions;
+  } catch (err) {
+    rlog.warn({ err, fileId: part.fileId }, "RAR volume walk failed");
+    return null;
+  }
+}
+
+export async function readRarListingRanged(
+  parts: RangedPart[],
+  read: RangeReader,
+): Promise<FileEntry[] | null> {
+  const sparseParts: SparsePart[] = [];
+  for (const part of parts) {
+    const head = await read(part.fileId, 0, 16, part.fileSize);
+    const sig = detectRarSignature(head);
+    if (!sig) return null;
+    const regions = await walkRarVolume(read, part, sig.version, sig.sigLen);
+    if (!regions) return null;
+    sparseParts.push({ fileName: part.fileName, size: Number(part.fileSize), regions });
+  }
+  return listFromSparse(sparseParts, readRarContents);
+}

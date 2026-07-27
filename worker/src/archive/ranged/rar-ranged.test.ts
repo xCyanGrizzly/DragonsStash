@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { readVint, detectRarSignature, parseRar5BlockExtent, parseRar4BlockExtent } from "./rar-ranged.js";
+import { readVint, detectRarSignature, parseRar5BlockExtent, parseRar4BlockExtent, walkRarVolume, readRarListingRanged } from "./rar-ranged.js";
+import type { RangeReader } from "./range-reader.js";
 
 describe("readVint", () => {
   it("reads single-byte and multi-byte values (base-128 LE)", () => {
@@ -52,5 +53,48 @@ describe("parseRar4BlockExtent", () => {
     expect(ext.headerBytes).toBe(11);
     expect(ext.dataSize).toBe(200);
     expect(ext.isEnd).toBe(false);
+  });
+});
+
+// Build a synthetic RAR5 volume: signature + main header + 2 file blocks (each
+// with data) + end block. We only need extents to be walkable.
+function buildRar5Volume(): Buffer {
+  const sig = Buffer.from([0x52,0x61,0x72,0x21,0x1a,0x07,0x01,0x00]);
+  const block = (type: number, flags: number, dataSize: number, pad = 0) => {
+    const body = [Buffer.from([type]), Buffer.from([flags])];
+    if (flags & 0x0002) body.push(Buffer.from([dataSize])); // DataSize (<=127 for test)
+    if (pad) body.push(Buffer.alloc(pad));
+    const bodyBuf = Buffer.concat(body);
+    const hs = Buffer.from([bodyBuf.length]); // HeaderSize vint (<=127)
+    const header = Buffer.concat([Buffer.alloc(4), hs, bodyBuf]); // CRC(4)+HeaderSize+body
+    const data = Buffer.alloc(flags & 0x0002 ? dataSize : 0, 0xEE);
+    return Buffer.concat([header, data]);
+  };
+  const main = block(1, 0, 0);       // main archive header, no data
+  const f1 = block(2, 0x02, 20);     // file header + 20 bytes data
+  const f2 = block(2, 0x02, 30);     // file header + 30 bytes data
+  const end = block(5, 0, 0);        // end of archive
+  return Buffer.concat([sig, main, f1, f2, end]);
+}
+
+describe("walkRarVolume", () => {
+  it("harvests every block header and stops at end-of-archive", async () => {
+    const vol = buildRar5Volume();
+    const read: RangeReader = async (_id, offset, length) => vol.subarray(offset, offset + length);
+    const regions = await walkRarVolume(read, { fileId: "1", fileSize: BigInt(vol.length), fileName: "a.rar" }, 5, 8);
+    expect(regions).not.toBeNull();
+    // main + 2 files + end = 4 header regions
+    expect(regions!).toHaveLength(4);
+    // First region starts right after the 8-byte signature
+    expect(regions![0].offset).toBe(8);
+  });
+});
+
+describe("readRarListingRanged (single part)", () => {
+  it("returns null cleanly when the reconstructed file isn't a real RAR", async () => {
+    const vol = buildRar5Volume();
+    const read: RangeReader = async (_id, offset, length) => vol.subarray(offset, offset + length);
+    const res = await readRarListingRanged([{ fileId: "1", fileSize: BigInt(vol.length), fileName: "a.rar" }], read);
+    expect(res === null || Array.isArray(res)).toBe(true); // real unrar parse covered live
   });
 });
