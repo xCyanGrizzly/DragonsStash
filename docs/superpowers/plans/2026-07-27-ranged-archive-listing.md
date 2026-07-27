@@ -1054,6 +1054,18 @@ Spot-check: pick one backfilled multipart RAR, compare its `package_files` count
 
 ---
 
+## Task 4b: 7z encoded-header support (added 2026-07-27 after the Task 4 live spike)
+
+The Task 4 deploy revealed the two-region (start+end) 7z reconstruction is rejected by `7z l`
+for archives with an **encoded/LZMA-compressed header** — the packed header stream lives mid-file,
+not at EOF. Fix: parse the encoded header's `PackInfo` and fetch that packed region as a third
+sparse region. Full brief with exact code + tests: `.superpowers/sdd/task-4b-brief.md`. Adds
+`read7zNumber` + `locate7zEncodedHeaderPack` to `sevenz-ranged.ts` and branches
+`readSevenZListingRanged` on the next-header type (`0x01` plain → 2 regions; `0x17` encoded → 3
+regions; else → null/fallback). Sequenced between Task 5 and Task 6; re-verified live at Task 8.
+
+---
+
 ## Self-Review
 
 - **Spec coverage:** 7z ranged read (Tasks 2-4) ✓; RAR walk incl. multipart (Tasks 5-7) ✓; sparse+CLI reconstruction (Task 1) ✓; dispatcher + downstream unchanged (Tasks 4, 8) ✓; size-capped full-download fallback + notification (Task 4) ✓; scanned + destination reads format-aware (Tasks 4, 8) ✓; spike via 7z-first-behind-fallback (Task 4 gate) ✓; unit tests + live verification (throughout) ✓; local deploy recipe (Tasks 4, 8) ✓.

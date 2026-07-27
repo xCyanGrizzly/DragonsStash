@@ -82,14 +82,29 @@ the end; the signature header stores the end header's location.
 1. Ranged-read `[0, 32)`; validate magic `37 7A BC AF 27 1C`. Read LE `uint64`
    `NextHeaderOffset` (byte 12) and `NextHeaderSize` (byte 20). End header is at absolute offset
    `32 + NextHeaderOffset`, length `NextHeaderSize`.
-2. Ranged-read `[32 + NextHeaderOffset, NextHeaderSize)`.
-3. `listFromSparse` with regions `{0: sigHeader}` and `{32+NextHeaderOffset: endHeader}`, total
-   = file size, runner = `7z l`. `parse7zOutput` yields names+sizes (`crc32: null`, as today).
-4. Return `null` on bad magic / read failure / CLI error.
+2. Ranged-read `[32 + NextHeaderOffset, NextHeaderSize)` — the "next header".
+3. Branch on the next header's first byte (a 7z property id):
+   - **`0x01` (kHeader, plain/uncompressed header):** two regions suffice —
+     `{0: sigHeader}` and `{32+NextHeaderOffset: endHeader}`.
+   - **`0x17` (kEncodedHeader, LZMA-compressed header):** the next header is only a *descriptor*
+     whose `PackInfo` points at a packed header stream stored **in the middle** of the file (not
+     at EOF). Parse the descriptor's `StreamsInfo → kPackInfo (0x06)` to read `PackPos` and the
+     `PackSize`s (7z variable-length "numbers"; sum them). Ranged-read the contiguous packed
+     region `[32 + PackPos, Σ PackSize)` and add it as a **third** sparse region. `7z l` then
+     decodes the header from that region.
+   - **anything else:** return `null` (→ fallback).
+4. `listFromSparse` with the 2 or 3 regions, runner = `7z l`. `parse7zOutput` yields
+   names+sizes (`crc32: null`, as today). Return `null` on bad magic / read failure / CLI error.
 
-`7z l` seeks to the end header (incl. decoding an LZMA-encoded header via the real binary) and
-never reads the packed-stream gap, so the sparse holes are untouched. All 7z placeholders are
-single-part.
+**Why the third region is required (spike finding, 2026-07-27):** the original two-region
+(start+end) reconstruction was proven insufficient in a live test — `7z l` rejected it with
+"Cannot open the file as [7z] archive" because these archives use an *encoded* header whose
+compressed bytes live in a packed stream in the file body (a sparse hole), not at EOF. The
+`0x17` branch fetches exactly that packed region. `7z l` still never touches the file-data
+packed streams (it only lists), so those gaps stay sparse. The `read7zNumber` reader (7z's
+base-128-ish variable-length integer with a first-byte length mask) and the minimal
+`kPackInfo` walk are the only new 7z binary parsing; `7z l` still does the actual file listing.
+All 7z placeholders are single-part.
 
 ### RAR ranged listing
 
