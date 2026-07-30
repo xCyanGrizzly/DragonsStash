@@ -89,7 +89,14 @@
       "Bash(wait:*)",
       "WebSearch",
       "Bash(SKILL_CREATOR_PATH=\"C:\\\\Users\\\\A00963355\\\\.claude\\\\plugins\\\\cache\\\\claude-plugins-official\\\\skill-creator\\\\d5c15b861cd2\\\\skills\\\\skill-creator\" && WORKSPACE=\"C:\\\\Users\\\\A00963355\\\\OneDrive - Amaris Zorggroep\\\\Documents\\\\VScodeProjects\\\\DragonsStash\\\\.claude\\\\skills\\\\tdlib-telegram-workspace\\\\iteration-1\" && python \"$SKILL_CREATOR_PATH/eval-viewer/generate_review.py\" \"$WORKSPACE\" --skill-name \"tdlib-telegram\" --benchmark \"$WORKSPACE/benchmark.json\" --static \"$WORKSPACE/review.html\" 2>&1)",
-      "Bash(start:*)"
+      "Bash(start:*)",
+      "Bash(npm run:*)",
+      "Bash(DATABASE_URL=\"postgresql://dragons:stash@localhost:5432/dragonsstash\" npx prisma migrate dev --name add-skipped-packages)",
+      "Bash(git checkout:*)",
+      "Bash(DATABASE_URL=\"postgresql://dragons:stash@localhost:5432/dragonsstash?schema=public\" npx prisma migrate dev --name add_package_groups 2>&1)",
+      "Bash(psql:*)",
+      "Bash(git log:*)",
+      "Bash(git merge:*)"
     ]
   }
 }
