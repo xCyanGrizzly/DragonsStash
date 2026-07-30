@@ -3,7 +3,7 @@
 import { useState, useCallback, useTransition, useMemo, useRef } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Search, Layers, Upload } from "lucide-react";
+import { Search, Layers, Upload, Send } from "lucide-react";
 import { UploadDialog } from "./upload-dialog";
 import { useDataTable } from "@/hooks/use-data-table";
 import {
@@ -16,6 +16,7 @@ import {
 import { PackageFilesDrawer } from "./package-files-drawer";
 import { IngestionStatus } from "./ingestion-status";
 import { SkippedPackagesTab } from "./skipped-packages-tab";
+import { CreatorFilter } from "./creator-filter";
 import { DataTable } from "@/components/shared/data-table";
 import { DataTablePagination } from "@/components/shared/data-table-pagination";
 import { DataTableViewOptions } from "@/components/shared/data-table-view-options";
@@ -49,6 +50,7 @@ import {
   createGroupAction,
   removeFromGroupAction,
   sendAllInGroupAction,
+  sendAllFromCreatorAction,
   updateGroupPreviewAction,
   mergeGroupsAction,
 } from "../actions";
@@ -59,6 +61,7 @@ interface StlTableProps {
   totalCount: number;
   ingestionStatus: IngestionAccountStatus[];
   availableTags: string[];
+  availableCreators: string[];
   searchTerm: string;
   skippedData: SkippedRow[];
   skippedPageCount: number;
@@ -74,6 +77,7 @@ export function StlTable({
   totalCount,
   ingestionStatus,
   availableTags,
+  availableCreators,
   searchTerm,
   skippedData,
   skippedPageCount,
@@ -85,6 +89,7 @@ export function StlTable({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const activeCreator = searchParams.get("creator") ?? "";
 
   const [searchValue, setSearchValue] = useState(searchParams.get("search") ?? "");
   const [viewPkg, setViewPkg] = useState<PackageRow | null>(null);
@@ -207,6 +212,20 @@ export function StlTable({
     [router, pathname, searchParams]
   );
 
+  const updateCreatorFilter = useCallback(
+    (value: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (value) {
+        params.set("creator", value);
+        params.set("page", "1");
+      } else {
+        params.delete("creator");
+      }
+      router.push(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [router, pathname, searchParams]
+  );
+
   const activeTab = searchParams.get("tab") ?? "packages";
 
   const updateTab = useCallback(
@@ -276,6 +295,23 @@ export function StlTable({
     },
     [router]
   );
+
+  const handleSendAllFromCreator = useCallback(() => {
+    if (!confirm(`Send all packages from "${activeCreator}" to your Telegram?`)) return;
+    startTransition(async () => {
+      const result = await sendAllFromCreatorAction(activeCreator);
+      if (result.success) {
+        const { queued, skipped } = result.data;
+        toast.success(
+          `Queued ${queued} package${queued === 1 ? "" : "s"} from ${activeCreator}` +
+            (skipped ? ` (${skipped} already queued)` : "")
+        );
+        router.refresh();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }, [activeCreator, router]);
 
   const handleRemoveFromGroup = useCallback(
     (packageId: string) => {
@@ -500,11 +536,29 @@ export function StlTable({
                 </SelectContent>
               </Select>
             )}
+            {availableCreators.length > 0 && (
+              <CreatorFilter
+                creators={availableCreators}
+                value={activeCreator}
+                onChange={updateCreatorFilter}
+              />
+            )}
             <DataTableViewOptions table={table} />
             <Button variant="outline" size="sm" className="h-9" onClick={() => setUploadOpen(true)}>
               <Upload className="mr-2 h-4 w-4" />
               Upload Files
             </Button>
+            {activeCreator && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5"
+                onClick={handleSendAllFromCreator}
+              >
+                <Send className="h-3.5 w-3.5" />
+                Send all from {activeCreator}
+              </Button>
+            )}
             {selectedPackages.size >= 2 && (
               <Button
                 variant="outline"

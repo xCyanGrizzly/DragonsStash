@@ -589,3 +589,82 @@ export async function sendAllInGroupAction(
     return { success: false, error: "Failed to send group packages" };
   }
 }
+
+export async function sendAllFromCreatorAction(
+  creatorName: string
+): Promise<ActionResult<{ queued: number; skipped: number }>> {
+  const session = await auth();
+  if (!session?.user?.id) return { success: false, error: "Unauthorized" };
+
+  const creator = creatorName.trim();
+  if (!creator) {
+    return { success: false, error: "No creator specified" };
+  }
+
+  try {
+    const telegramLink = await prisma.telegramLink.findUnique({
+      where: { userId: session.user.id },
+    });
+
+    if (!telegramLink) {
+      return { success: false, error: "No linked Telegram account. Link one in Settings." };
+    }
+
+    const sendablePackages = await prisma.package.findMany({
+      where: {
+        creator,
+        destChannelId: { not: null },
+        destMessageId: { not: null },
+      },
+      select: { id: true },
+    });
+
+    if (sendablePackages.length === 0) {
+      return { success: false, error: "No uploaded packages found for this creator" };
+    }
+
+    let queued = 0;
+    let skipped = 0;
+    for (const pkg of sendablePackages) {
+      // Only create if no existing PENDING/SENDING request for this package+link combo
+      const existing = await prisma.botSendRequest.findFirst({
+        where: {
+          packageId: pkg.id,
+          telegramLinkId: telegramLink.id,
+          status: { in: ["PENDING", "SENDING"] },
+        },
+      });
+
+      if (existing) {
+        skipped++;
+        continue;
+      }
+
+      const sendRequest = await prisma.botSendRequest.create({
+        data: {
+          packageId: pkg.id,
+          telegramLinkId: telegramLink.id,
+          requestedByUserId: session.user.id,
+          status: "PENDING",
+        },
+      });
+
+      // Notify the bot via pg_notify
+      try {
+        await prisma.$queryRawUnsafe(
+          `SELECT pg_notify('bot_send', $1)`,
+          sendRequest.id
+        );
+      } catch {
+        // Best-effort — the bot also polls periodically
+      }
+
+      queued++;
+    }
+
+    revalidatePath("/stls");
+    return { success: true, data: { queued, skipped } };
+  } catch {
+    return { success: false, error: "Failed to send creator packages" };
+  }
+}

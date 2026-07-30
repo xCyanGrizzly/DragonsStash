@@ -9,6 +9,28 @@ import type {
   PackageGroupRow,
 } from "./types";
 
+/**
+ * Returns the subset of the given IDs whose `previewData` column is non-null,
+ * WITHOUT transferring the (large) image bytes.
+ *
+ * List views only need a `hasPreview` boolean per row. Selecting `previewData`
+ * directly pulls every JPEG blob (avg ~700 KB, up to 2 MB) into the Node heap
+ * just to compare it against null — under concurrent requests this exhausts the
+ * container memory limit and crashes the process. This keeps the check in SQL.
+ */
+async function fetchPreviewFlags(
+  table: "packages" | "package_groups",
+  ids: string[]
+): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const placeholders = ids.map((_, i) => `$${i + 1}`).join(", ");
+  const rows = await prisma.$queryRawUnsafe<{ id: string }[]>(
+    `SELECT id FROM ${table} WHERE "previewData" IS NOT NULL AND id IN (${placeholders})`,
+    ...ids
+  );
+  return new Set(rows.map((r) => r.id));
+}
+
 export async function listPackages(options: {
   page: number;
   limit: number;
@@ -40,12 +62,16 @@ export async function listPackages(options: {
         indexedAt: true,
         creator: true,
         tags: true,
-        previewData: true, // check actual image data, not previewMsgId proxy
         sourceChannel: { select: { id: true, title: true } },
       },
     }),
     prisma.package.count({ where }),
   ]);
+
+  const previewIds = await fetchPreviewFlags(
+    "packages",
+    items.map((p) => p.id)
+  );
 
   const mapped: PackageListItem[] = items.map((pkg) => ({
     id: pkg.id,
@@ -55,7 +81,7 @@ export async function listPackages(options: {
     archiveType: pkg.archiveType,
     fileCount: pkg.fileCount,
     isMultipart: pkg.isMultipart,
-    hasPreview: pkg.previewData !== null,
+    hasPreview: previewIds.has(pkg.id),
     creator: pkg.creator,
     tags: pkg.tags,
     indexedAt: pkg.indexedAt.toISOString(),
@@ -149,7 +175,7 @@ export async function listDisplayItems(options: {
         select: {
           id: true, fileName: true, fileSize: true, contentHash: true,
           archiveType: true, fileCount: true, isMultipart: true,
-          indexedAt: true, creator: true, tags: true, previewData: true,
+          indexedAt: true, creator: true, tags: true,
           sourceChannel: { select: { id: true, title: true } },
         },
       })
@@ -159,13 +185,13 @@ export async function listDisplayItems(options: {
     ? await prisma.packageGroup.findMany({
         where: { id: { in: groupIds } },
         select: {
-          id: true, name: true, previewData: true,
+          id: true, name: true,
           sourceChannel: { select: { id: true, title: true } },
           packages: {
             select: {
               id: true, fileName: true, fileSize: true, contentHash: true,
               archiveType: true, fileCount: true, isMultipart: true,
-              indexedAt: true, creator: true, tags: true, previewData: true,
+              indexedAt: true, creator: true, tags: true,
               sourceChannel: { select: { id: true, title: true } },
             },
             orderBy: { indexedAt: "desc" },
@@ -173,6 +199,16 @@ export async function listDisplayItems(options: {
         },
       })
     : [];
+
+  // Compute hasPreview flags without transferring image bytes (see fetchPreviewFlags)
+  const allPackageIds = [
+    ...standalonePackages.map((p) => p.id),
+    ...groups.flatMap((g) => g.packages.map((p) => p.id)),
+  ];
+  const [packagePreviewIds, groupPreviewIds] = await Promise.all([
+    fetchPreviewFlags("packages", allPackageIds),
+    fetchPreviewFlags("package_groups", groups.map((g) => g.id)),
+  ]);
 
   // Build DisplayItem array in the original sort order
   const packageMap = new Map(standalonePackages.map((p) => [p.id, p]));
@@ -191,7 +227,7 @@ export async function listDisplayItems(options: {
           archiveType: pkg.archiveType,
           fileCount: pkg.fileCount,
           isMultipart: pkg.isMultipart,
-          hasPreview: pkg.previewData !== null,
+          hasPreview: packagePreviewIds.has(pkg.id),
           creator: pkg.creator,
           tags: pkg.tags,
           indexedAt: pkg.indexedAt.toISOString(),
@@ -209,7 +245,7 @@ export async function listDisplayItems(options: {
         data: {
           id: grp.id,
           name: grp.name,
-          hasPreview: grp.previewData !== null,
+          hasPreview: groupPreviewIds.has(grp.id),
           totalFileSize: grp.packages.reduce((sum, p) => sum + p.fileSize, BigInt(0)).toString(),
           totalFileCount: grp.packages.reduce((sum, p) => sum + p.fileCount, 0),
           packageCount: grp.packages.length,
@@ -227,7 +263,7 @@ export async function listDisplayItems(options: {
             archiveType: pkg.archiveType,
             fileCount: pkg.fileCount,
             isMultipart: pkg.isMultipart,
-            hasPreview: pkg.previewData !== null,
+            hasPreview: packagePreviewIds.has(pkg.id),
             creator: pkg.creator,
             tags: pkg.tags,
             indexedAt: pkg.indexedAt.toISOString(),
@@ -440,12 +476,16 @@ export async function searchPackages(options: {
           indexedAt: true,
           creator: true,
           tags: true,
-          previewData: true,
           sourceChannel: { select: { id: true, title: true } },
         },
       }),
       Promise.resolve(allIds.length),
     ]);
+
+    const previewIds = await fetchPreviewFlags(
+      "packages",
+      items.map((p) => p.id)
+    );
 
     const mapped: PackageListItem[] = items.map((pkg) => ({
       id: pkg.id,
@@ -455,7 +495,7 @@ export async function searchPackages(options: {
       archiveType: pkg.archiveType,
       fileCount: pkg.fileCount,
       isMultipart: pkg.isMultipart,
-      hasPreview: pkg.previewData !== null,
+      hasPreview: previewIds.has(pkg.id),
       creator: pkg.creator,
       tags: pkg.tags,
       indexedAt: pkg.indexedAt.toISOString(),
@@ -492,6 +532,15 @@ export async function getAllPackageTags(): Promise<string[]> {
     SELECT DISTINCT unnest(tags) AS tag FROM packages ORDER BY tag
   `;
   return result.map((r) => r.tag);
+}
+
+export async function getAllPackageCreators(): Promise<string[]> {
+  const result = await prisma.$queryRaw<{ creator: string }[]>`
+    SELECT DISTINCT creator FROM packages
+    WHERE creator IS NOT NULL AND creator <> ''
+    ORDER BY creator
+  `;
+  return result.map((r) => r.creator);
 }
 
 export async function getIngestionStatus(): Promise<IngestionAccountStatus[]> {
@@ -636,12 +685,16 @@ export async function listUngroupedPackages(options: {
         partCount: true,
         tags: true,
         indexedAt: true,
-        previewData: true,
         sourceChannel: { select: { id: true, title: true } },
       },
     }),
     prisma.package.count({ where }),
   ]);
+
+  const previewIds = await fetchPreviewFlags(
+    "packages",
+    items.map((p) => p.id)
+  );
 
   return {
     items: items.map((p) => ({
@@ -656,7 +709,7 @@ export async function listUngroupedPackages(options: {
       partCount: p.partCount,
       tags: p.tags,
       indexedAt: p.indexedAt.toISOString(),
-      hasPreview: !!p.previewData,
+      hasPreview: previewIds.has(p.id),
       sourceChannel: p.sourceChannel,
       matchedFileCount: 0,
       matchedByContent: false,
