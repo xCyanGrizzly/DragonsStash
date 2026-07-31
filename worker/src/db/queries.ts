@@ -639,6 +639,13 @@ export async function setChannelForum(channelId: string, isForum: boolean) {
   });
 }
 
+export async function setChannelAllowsForwarding(channelId: string, allowsForwarding: boolean) {
+  return db.telegramChannel.update({
+    where: { id: channelId },
+    data: { allowsForwarding },
+  });
+}
+
 export async function getTopicProgress(mappingId: string) {
   return db.topicProgress.findMany({
     where: { accountChannelMapId: mappingId },

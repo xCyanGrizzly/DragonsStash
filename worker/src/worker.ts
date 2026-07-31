@@ -16,6 +16,7 @@ import {
   updateLastProcessedMessage,
   updateRunActivity,
   setChannelForum,
+  setChannelAllowsForwarding,
   getTopicProgress,
   upsertTopicProgress,
   upsertChannel,
@@ -493,9 +494,13 @@ export async function runWorkerForAccount(
         try {
         // ── Ensure TDLib knows about this chat ──
         // getChats may not have loaded all channels (pagination, archive folder, etc.)
-        // so we explicitly load each channel before scanning.
+        // so we explicitly load each channel before scanning. The response is
+        // also where we read has_protected_content (below) to decide whether
+        // this channel is eligible for the forward-priority ingestion path.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let chatInfo: any;
         try {
-          await client.invoke({
+          chatInfo = await client.invoke({
             _: "getChat",
             chat_id: Number(channel.telegramId),
           });
@@ -515,6 +520,28 @@ export async function runWorkerForAccount(
             { channelId: channel.id, title: channel.title, isForum: forum },
             "Updated channel forum status"
           );
+        }
+
+        // ── Check if channel allows forwarding ──
+        // TDLib's chat.has_protected_content is documented on the general
+        // Chat object (core.telegram.org/tdlib/docs/classtd_1_1td__api_1_1chat.html),
+        // but PENDING LIVE VERIFICATION here: confirm on first deploy that a
+        // real chatTypeSupergroup/channel response actually populates this
+        // field (some TDLib doc pages describe it in the context of basic
+        // groups only). If it's ever `undefined` in practice, this block is a
+        // no-op and allowsForwarding stays at its last-known/null value —
+        // which safely keeps the channel on the download path.
+        const hasProtectedContent: boolean | undefined = chatInfo?.has_protected_content;
+        if (typeof hasProtectedContent === "boolean") {
+          const allowsForwarding = !hasProtectedContent;
+          if (allowsForwarding !== channel.allowsForwarding) {
+            await setChannelAllowsForwarding(channel.id, allowsForwarding);
+            accountLog.info(
+              { channelId: channel.id, title: channel.title, allowsForwarding },
+              "Updated channel forwarding permission"
+            );
+          }
+          channel.allowsForwarding = allowsForwarding;
         }
 
         const pipelineCtx: PipelineContext = {
