@@ -428,6 +428,11 @@ model TelegramChannel {
   isForum    Boolean     @default(false)
   isActive   Boolean     @default(false)
   category   String?     @db.VarChar(64)
+  /// Whether this chat currently allows forwarding/saving (the inverse of
+  /// TDLib's chat.has_protected_content). Null = not yet checked; treated the
+  /// same as false everywhere in the worker (safe default: use the
+  /// download+reupload path until this is confirmed true).
+  allowsForwarding Boolean?
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
 
@@ -570,6 +575,7 @@ model IngestionRun {
   zipsDuplicate   Int             @default(0)
   zipsIngested    Int             @default(0)
   zipsBackfilled  Int             @default(0)
+  zipsForwarded   Int             @default(0)
   errorMessage    String?
 
   // Live activity tracking — written by worker in real-time
