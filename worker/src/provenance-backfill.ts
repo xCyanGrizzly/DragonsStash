@@ -1,8 +1,6 @@
 import { db } from "./db/client.js";
 import { childLogger } from "./util/logger.js";
-import { downloadFileRange } from "./tdlib/range-download.js";
 import { invokeWithTimeout } from "./tdlib/download.js";
-import { parseZipCentralDirectoryFromTail, MIN_ZIP_TAIL_BYTES } from "./archive/central-directory.js";
 import { fingerprintsMatch, crcFingerprint } from "./archive/fingerprint.js";
 import {
   findPlaceholderCandidates,
@@ -15,6 +13,7 @@ import { readSevenZListingRanged, type RangedPart } from "./archive/ranged/seven
 import { readRarListingRanged } from "./archive/ranged/rar-ranged.js";
 import { tdlibRangeReader } from "./archive/ranged/range-reader.js";
 import { fullDownloadListing } from "./archive/ranged/fallback.js";
+import { readScannedZipListing, readScannedListingRanged } from "./archive/ranged/dispatch.js";
 import type { Client } from "tdl";
 
 const log = childLogger("provenance-backfill");
@@ -34,38 +33,6 @@ export interface BackfillArgs {
   scannedParts: RangedPart[];
   previewData?: Buffer | null;
   previewMsgId?: bigint | null;
-}
-
-/**
- * Read a ZIP central directory from the tail of a (possibly multipart)
- * archive. `parts` is ordered; only the LAST part carries the EOCD record.
- * `fileSize` on each part is that part's own size (NOT the whole-archive
- * total) so the download offset stays within that part's bounds, while
- * `tailStart` passed to the parser is the logical whole-archive offset
- * (preceding parts' sizes + the offset within the last part).
- */
-async function readScannedZipListing(
-  client: Client,
-  parts: { fileId: string; fileSize: bigint }[],
-): Promise<FileEntry[] | null> {
-  if (parts.length === 0) return null;
-  const lastPart = parts[parts.length - 1];
-  const precedingSize = parts.slice(0, -1).reduce((sum, p) => sum + Number(p.fileSize), 0);
-  const lastSize = Number(lastPart.fileSize);
-  for (const tailBytes of [MIN_ZIP_TAIL_BYTES, MIN_ZIP_TAIL_BYTES * 4]) {
-    const partOffset = Math.max(0, lastSize - tailBytes);
-    const downloadLen = Math.min(tailBytes, lastSize);
-    try {
-      const buf = await downloadFileRange(client, lastPart.fileId, partOffset, downloadLen, lastPart.fileSize);
-      const tailStart = precedingSize + partOffset;
-      return parseZipCentralDirectoryFromTail(buf, tailStart);
-    } catch (err) {
-      if (err instanceof RangeError) continue; // try a larger tail
-      log.warn({ err, fileId: lastPart.fileId }, "ranged ZIP listing failed");
-      return null;
-    }
-  }
-  return null;
 }
 
 /**
@@ -104,18 +71,6 @@ async function resolveDestParts(
     log.warn({ err, destMessageIds: messageIds.map(Number) }, "destination archive part resolution failed");
     return null;
   }
-}
-
-async function readScannedListingRanged(
-  archiveType: string,
-  client: Client,
-  parts: RangedPart[],
-): Promise<FileEntry[] | null> {
-  const read = tdlibRangeReader(client);
-  if (archiveType === "ZIP") return readScannedZipListing(client, parts);
-  if (archiveType === "SEVEN_Z") return readSevenZListingRanged(parts, read);
-  if (archiveType === "RAR") return readRarListingRanged(parts, read);
-  return null;
 }
 
 /**
