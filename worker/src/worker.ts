@@ -1770,16 +1770,23 @@ async function processOneArchiveSet(
   // falls through into the existing download pipeline below so indexing
   // completeness never regresses.
   if (channel.allowsForwarding === true) {
-    const forwardResult = await tryForwardArchiveSet(
-      ctx, archiveSet, setIdx, totalSets, previewMatches, ingestionRunId
-    );
-    if (forwardResult !== undefined) {
-      return forwardResult;
+    try {
+      const forwardResult = await tryForwardArchiveSet(
+        ctx, archiveSet, setIdx, totalSets, previewMatches, ingestionRunId
+      );
+      if (forwardResult !== undefined) {
+        return forwardResult;
+      }
+      accountLog.info(
+        { fileName: archiveName },
+        "Forward path unavailable for this archive — falling back to download+reupload"
+      );
+    } catch (forwardPathErr) {
+      accountLog.warn(
+        { err: forwardPathErr, fileName: archiveName },
+        "Forward path threw unexpectedly — falling back to download+reupload"
+      );
     }
-    accountLog.info(
-      { fileName: archiveName },
-      "Forward path unavailable for this archive — falling back to download+reupload"
-    );
   }
 
   const tempPaths: string[] = [];
