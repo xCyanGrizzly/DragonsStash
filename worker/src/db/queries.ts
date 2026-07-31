@@ -377,6 +377,7 @@ export interface ActivityUpdate {
   zipsDuplicate?: number;
   zipsIngested?: number;
   zipsBackfilled?: number;
+  zipsForwarded?: number;
 }
 
 export async function updateRunActivity(
@@ -401,6 +402,7 @@ export async function updateRunActivity(
       ...(activity.zipsDuplicate !== undefined && { zipsDuplicate: activity.zipsDuplicate }),
       ...(activity.zipsIngested !== undefined && { zipsIngested: activity.zipsIngested }),
       ...(activity.zipsBackfilled !== undefined && { zipsBackfilled: activity.zipsBackfilled }),
+      ...(activity.zipsForwarded !== undefined && { zipsForwarded: activity.zipsForwarded }),
       ...(activity.currentTopicId !== undefined && { currentTopicId: activity.currentTopicId }),
       ...(activity.currentAccountChannelMapId !== undefined && {
         currentAccountChannelMapId: activity.currentAccountChannelMapId,
@@ -432,6 +434,7 @@ export async function completeIngestionRun(
     zipsDuplicate: number;
     zipsIngested: number;
     zipsBackfilled: number;
+    zipsForwarded: number;
   }
 ) {
   return db.ingestionRun.update({

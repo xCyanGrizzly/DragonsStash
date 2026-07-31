@@ -64,6 +64,10 @@ import { hashParts } from "./archive/hash.js";
 import { readZipCentralDirectory } from "./archive/zip-reader.js";
 import { readRarContents } from "./archive/rar-reader.js";
 import { read7zContents } from "./archive/sevenz-reader.js";
+import { readScannedListingRanged } from "./archive/ranged/dispatch.js";
+import { deriveForwardContentHash } from "./archive/forward-identity.js";
+import { checkFingerprintRepost } from "./archive/forward-repost-check.js";
+import { forwardArchiveToChannel } from "./upload/forward.js";
 import { tryProvenanceBackfill } from "./provenance-backfill.js";
 import { byteLevelSplit, concatenateFiles } from "./archive/split.js";
 import { uploadToChannel, UploadStallError } from "./upload/channel.js";
@@ -317,6 +321,7 @@ interface PipelineContext {
     zipsDuplicate: number;
     zipsIngested: number;
     zipsBackfilled: number;
+    zipsForwarded: number;
   };
   /** Creator from forum topic name (null for non-forum). */
   topicCreator: string | null;
@@ -426,6 +431,7 @@ export async function runWorkerForAccount(
       zipsDuplicate: 0,
       zipsIngested: 0,
       zipsBackfilled: 0,
+      zipsForwarded: 0,
     };
 
     try {
@@ -1217,7 +1223,7 @@ export async function runWorkerForAccount(
  */
 function inferSkipReason(errMsg: string): "DOWNLOAD_FAILED" | "UPLOAD_FAILED" | "EXTRACT_FAILED" {
   const lower = errMsg.toLowerCase();
-  if (lower.includes("upload") || lower.includes("too many requests") || lower.includes("retry after") || lower.includes("send")) {
+  if (lower.includes("upload") || lower.includes("forward") || lower.includes("too many requests") || lower.includes("retry after") || lower.includes("send")) {
     return "UPLOAD_FAILED";
   }
   if (lower.includes("extract") || lower.includes("metadata") || lower.includes("central directory") || lower.includes("archive")) {
@@ -1756,6 +1762,24 @@ async function processOneArchiveSet(
       accountId: ctx.accountId,
     });
     return null;
+  }
+
+  // ── Forward-priority path ──
+  // If the source channel allows forwarding, try to index + forward without a
+  // local download. Any failure (ranged listing miss, blocked/failed forward)
+  // falls through into the existing download pipeline below so indexing
+  // completeness never regresses.
+  if (channel.allowsForwarding === true) {
+    const forwardResult = await tryForwardArchiveSet(
+      ctx, archiveSet, setIdx, totalSets, previewMatches, ingestionRunId
+    );
+    if (forwardResult !== undefined) {
+      return forwardResult;
+    }
+    accountLog.info(
+      { fileName: archiveName },
+      "Forward path unavailable for this archive — falling back to download+reupload"
+    );
   }
 
   const tempPaths: string[] = [];
@@ -2321,6 +2345,168 @@ async function processOneArchiveSet(
     // ALWAYS delete temp files and the set directory
     await deleteFiles([...tempPaths, ...splitPaths]);
     await rm(setDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Attempt the forward-priority path for one archive set: ranged listing (no
+ * download) + native Telegram forward to the destination channel.
+ *
+ * Returns `undefined` when the forward path isn't usable for this specific
+ * archive (ranged listing failed, or the forward itself failed) — the caller
+ * falls through to the existing download+reupload pipeline in that case, so
+ * indexing completeness never regresses.
+ *
+ * Returns `null` when the archive is a confirmed duplicate (skip, same
+ * contract as the pre-download dedup checks earlier in the caller).
+ *
+ * Returns the new Package id on success.
+ */
+async function tryForwardArchiveSet(
+  ctx: PipelineContext,
+  archiveSet: ArchiveSet,
+  setIdx: number,
+  totalSets: number,
+  previewMatches: Map<string, { id: bigint; fileId: string }>,
+  ingestionRunId: string,
+): Promise<string | null | undefined> {
+  const {
+    client, channelTitle, channel,
+    destChannelTelegramId, destChannelId,
+    counters, topicCreator, sourceTopicId, accountLog,
+  } = ctx;
+  void setIdx;
+  void totalSets;
+
+  const archiveName = archiveSet.parts[0].fileName;
+  const archType = archiveSet.type === "7Z" ? ("SEVEN_Z" as const) : archiveSet.type;
+  if (archType !== "ZIP" && archType !== "RAR" && archType !== "SEVEN_Z") {
+    // The ranged listing readers only cover archive formats. Standalone
+    // DOCUMENT attachments always go through the existing download path,
+    // which for DOCUMENT is already cheap (no extraction, single entry).
+    return undefined;
+  }
+
+  const scannedParts = archiveSet.parts.map((p) => ({
+    fileId: p.fileId,
+    fileSize: p.fileSize,
+    fileName: p.fileName,
+  }));
+
+  const entries = await readScannedListingRanged(archType, client, scannedParts);
+  if (!entries) return undefined;
+
+  const totalArchiveSize = archiveSet.parts.reduce((sum, p) => sum + p.fileSize, 0n);
+  const firstRemoteUniqueId = archiveSet.parts[0].remoteUniqueId ?? null;
+  const contentHash = deriveForwardContentHash(
+    entries,
+    firstRemoteUniqueId,
+    channel.id,
+    archiveSet.parts[0].id,
+  );
+
+  if (await packageExistsByHash(contentHash)) {
+    counters.zipsDuplicate++;
+    accountLog.debug({ fileName: archiveName, contentHash }, "Forward-path duplicate (hash), skipping");
+    return null;
+  }
+
+  const repost = await checkFingerprintRepost(client, entries, archiveName, totalArchiveSize);
+  if (repost.isDuplicate) {
+    counters.zipsDuplicate++;
+    accountLog.info(
+      { fileName: archiveName, matchedPackageId: repost.matchedPackageId },
+      "Forward-path duplicate (CRC fingerprint match against another channel's copy), skipping"
+    );
+    return null;
+  }
+
+  const hashLockAcquired = await tryAcquireHashLock(contentHash);
+  if (!hashLockAcquired) {
+    counters.zipsDuplicate++;
+    accountLog.info(
+      { fileName: archiveName, contentHash },
+      "Hash lock held by another worker — skipping concurrent duplicate"
+    );
+    return null;
+  }
+
+  try {
+    if (await packageExistsByHash(contentHash)) {
+      counters.zipsDuplicate++;
+      return null;
+    }
+
+    let destResult: { messageId: bigint; messageIds: bigint[] };
+    try {
+      destResult = await forwardArchiveToChannel(
+        client,
+        channel.telegramId,
+        destChannelTelegramId,
+        archiveSet.parts.map((p) => p.id),
+      );
+    } catch (forwardErr) {
+      accountLog.warn(
+        { err: forwardErr, fileName: archiveName },
+        "Forward failed — falling back to download+reupload for this archive"
+      );
+      return undefined;
+    }
+
+    await deleteOrphanedPackageByHash(contentHash);
+
+    const creator =
+      topicCreator ??
+      extractCreatorFromFileName(archiveName) ??
+      extractCreatorFromChannelTitle(channelTitle) ??
+      null;
+
+    const tags: string[] = [];
+    if (channel.category) tags.push(channel.category);
+    for (const tag of extractSlicerTags(entries)) {
+      if (!tags.includes(tag)) tags.push(tag);
+    }
+
+    const stub = await createPackageStub({
+      contentHash,
+      fileName: archiveName,
+      fileSize: totalArchiveSize,
+      archiveType: archType,
+      sourceChannelId: channel.id,
+      sourceMessageId: archiveSet.parts[0].id,
+      sourceTopicId,
+      remoteUniqueId: firstRemoteUniqueId,
+      destChannelId,
+      destMessageId: destResult.messageId,
+      destMessageIds: destResult.messageIds,
+      isMultipart: archiveSet.parts.length > 1,
+      partCount: archiveSet.parts.length,
+      ingestionRunId,
+      creator,
+      tags,
+    });
+
+    counters.zipsForwarded++;
+    await deleteSkippedPackage(channel.id, archiveSet.parts[0].id);
+
+    let previewData: Buffer | null = null;
+    let previewMsgId: bigint | null = null;
+    const matchedPhoto = previewMatches.get(archiveSet.baseName);
+    if (matchedPhoto) {
+      previewData = await downloadPhotoThumbnail(client, matchedPhoto.fileId);
+      if (previewData) previewMsgId = matchedPhoto.id;
+    }
+
+    await updatePackageWithMetadata(stub.id, { files: entries, previewData, previewMsgId });
+
+    accountLog.info(
+      { fileName: archiveName, contentHash, fileCount: entries.length, creator },
+      "Archive forwarded (no download)"
+    );
+
+    return stub.id;
+  } finally {
+    await releaseHashLock(contentHash);
   }
 }
 
