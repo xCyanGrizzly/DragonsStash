@@ -500,14 +500,9 @@ export function StlTable({
               </Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="ungrouped" className="gap-1.5">
-            Ungrouped
-            {ungroupedTotalCount > 0 && (
-              <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                {ungroupedTotalCount}
-              </Badge>
-            )}
-          </TabsTrigger>
+          {/* "Ungrouped" tab hidden: the STL list is now flat and grouping is
+              no longer surfaced here. The tab content below is kept (unreachable)
+              to avoid churn; remove it and its data fetch if grouping is dropped. */}
         </TabsList>
 
         <TabsContent value="packages" className="space-y-4">

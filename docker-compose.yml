@@ -98,26 +98,31 @@ services:
       - backend
 
   backup:
-    profiles: ["backup"]
     build:
       context: .
       dockerfile: backup/Dockerfile
+    pull_policy: never
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-dragons}:${POSTGRES_PASSWORD:-stash}@db:5432/${POSTGRES_DB:-dragonsstash}
-      RESTIC_REPOSITORY: ${BACKUP_REPOSITORY:-/backup/restic}
-      RESTIC_PASSWORD_FILE: /run/secrets/restic-password
-      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
-      BACKUP_APP_VERSION: ${BACKUP_APP_VERSION:-unknown}
-    user: "0:0"
+      - POSTGRES_USER=${POSTGRES_USER:-dragons}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-stash}
+      - PGPASSWORD=${POSTGRES_PASSWORD:-stash}
+      - POSTGRES_DB=${POSTGRES_DB:-dragonsstash}
+      - RESTIC_REPOSITORY=/backups/restic-repo
+      - RESTIC_PASSWORD=${RESTIC_PASSWORD:?Set RESTIC_PASSWORD in .env}
+      - KUMA_PUSH_URL=${KUMA_PUSH_URL:-}
+      - TZ=${TZ:-Etc/UTC}
     volumes:
       - tdlib_state:/data/tdlib-worker:ro
       - tdlib_bot_state:/data/tdlib-bot:ro
-      - ${BACKUP_MOUNT_PATH:?Set BACKUP_MOUNT_PATH to the mounted Synology share}:/backup:rw
-      - ${BACKUP_STAGING_PATH:?Set BACKUP_STAGING_PATH to a local staging directory}:/staging:rw
-      - ${BACKUP_RESTIC_PASSWORD_FILE:?Set BACKUP_RESTIC_PASSWORD_FILE to a root-readable secret file}:/run/secrets/restic-password:ro
+      - nas_backups:/backups
     depends_on:
       db:
         condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     networks:
       - backend
 
@@ -140,8 +145,10 @@ services:
         limits:
           memory: 1G
     networks:
-      - frontend
-      - backend
+      frontend: {}
+      backend:
+        aliases:
+          - dragonsstash-db
 
 volumes:
   postgres_data:
@@ -149,6 +156,11 @@ volumes:
   tdlib_bot_state:
   tmp_zips:
   manual_uploads:
+  nas_backups:
+    driver_opts:
+      type: cifs
+      o: "username=${NAS_USERNAME},password=${NAS_PASSWORD},vers=3.0,uid=0,gid=0,file_mode=0660,dir_mode=0770"
+      device: "//${NAS_HOST}/${NAS_SHARE}"
 
 networks:
   frontend:

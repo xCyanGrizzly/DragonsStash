@@ -135,31 +135,31 @@ export async function listDisplayItems(options: {
   const sortCol = sortBy === "fileName" ? `"fileName"` : sortBy === "fileSize" ? `"fileSize"` : `"indexedAt"`;
   const sortDir = order === "asc" ? "ASC" : "DESC";
 
-  // Step 1: Count display items
+  // NOTE: The STL list is intentionally FLAT — every package is its own display
+  // row regardless of packageGroupId. Grouping is no longer surfaced in this
+  // view (the creator column/filter organizes the list instead). PackageGroup
+  // rows and the manual grouping actions still exist in the DB/UI; they just
+  // don't drive this list's layout anymore.
+
+  // Step 1: Count display items (one per package)
   const countResult = await prisma.$queryRawUnsafe<[{ count: bigint }]>(
-    `SELECT COUNT(*) AS count FROM (
-      SELECT DISTINCT COALESCE(p."packageGroupId", p."id") AS display_id
-      FROM packages p
-      ${whereClause}
-    ) AS display_items`,
+    `SELECT COUNT(*) AS count FROM packages p ${whereClause}`,
     ...params
   );
   const total = Number(countResult[0].count);
 
-  // Step 2: Get display item IDs for this page
+  // Step 2: Get package IDs for this page
   const limitParam = paramIdx++;
   const offsetParam = paramIdx++;
   const displayRows = await prisma.$queryRawUnsafe<
     { display_id: string; display_type: string }[]
   >(
     `SELECT
-      COALESCE(p."packageGroupId", p."id") AS display_id,
-      CASE WHEN p."packageGroupId" IS NOT NULL THEN 'group' ELSE 'package' END AS display_type,
-      MAX(p.${sortCol}) AS sort_value
+      p."id" AS display_id,
+      'package' AS display_type,
+      p.${sortCol} AS sort_value
     FROM packages p
     ${whereClause}
-    GROUP BY COALESCE(p."packageGroupId", p."id"),
-             CASE WHEN p."packageGroupId" IS NOT NULL THEN 'group' ELSE 'package' END
     ORDER BY sort_value ${sortDir}
     LIMIT $${limitParam} OFFSET $${offsetParam}`,
     ...params, limit, (page - 1) * limit

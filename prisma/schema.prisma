@@ -569,6 +569,7 @@ model IngestionRun {
   zipsFound       Int             @default(0)
   zipsDuplicate   Int             @default(0)
   zipsIngested    Int             @default(0)
+  zipsBackfilled  Int             @default(0)
   errorMessage    String?
 
   // Live activity tracking — written by worker in real-time

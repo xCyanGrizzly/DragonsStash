@@ -1,5 +1,6 @@
 import { db } from "./client.js";
 import type { ArchiveType, FetchStatus } from "@prisma/client";
+import type { FileEntry } from "../archive/zip-reader.js";
 
 export async function getActiveAccounts() {
   return db.telegramAccount.findMany({
@@ -375,6 +376,7 @@ export interface ActivityUpdate {
   zipsFound?: number;
   zipsDuplicate?: number;
   zipsIngested?: number;
+  zipsBackfilled?: number;
 }
 
 export async function updateRunActivity(
@@ -398,6 +400,7 @@ export async function updateRunActivity(
       ...(activity.zipsFound !== undefined && { zipsFound: activity.zipsFound }),
       ...(activity.zipsDuplicate !== undefined && { zipsDuplicate: activity.zipsDuplicate }),
       ...(activity.zipsIngested !== undefined && { zipsIngested: activity.zipsIngested }),
+      ...(activity.zipsBackfilled !== undefined && { zipsBackfilled: activity.zipsBackfilled }),
       ...(activity.currentTopicId !== undefined && { currentTopicId: activity.currentTopicId }),
       ...(activity.currentAccountChannelMapId !== undefined && {
         currentAccountChannelMapId: activity.currentAccountChannelMapId,
@@ -428,6 +431,7 @@ export async function completeIngestionRun(
     zipsFound: number;
     zipsDuplicate: number;
     zipsIngested: number;
+    zipsBackfilled: number;
   }
 ) {
   return db.ingestionRun.update({
@@ -1004,4 +1008,143 @@ export async function createAutoGroup(input: {
   });
 
   return group.id;
+}
+
+// ── Provenance backfill ──
+
+export interface PlaceholderCandidate {
+  id: string;
+  archiveType: string;
+  fileName: string;
+  fileCount: number;
+  fileSize: bigint;
+  destMessageId: bigint | null;
+  destMessageIds: bigint[];
+  destChannel: { telegramId: bigint } | null;
+}
+
+/**
+ * Find every placeholder Package matching name+size (oldest first). Package
+ * has no direct `destChannel` relation (only the scalar `destChannelId`), so
+ * each row's destination TelegramChannel telegramId is resolved with a
+ * follow-up lookup rather than a Prisma include.
+ */
+export async function findPlaceholderCandidates(
+  destChannelId: string,
+  fileName: string,
+  fileSize: bigint,
+): Promise<PlaceholderCandidate[]> {
+  const rows = await db.package.findMany({
+    where: {
+      fileName,
+      fileSize,
+      destMessageId: { not: null },
+      // Placeholder provenance (spec §1): manual-upload (source == destination)
+      // OR rebuild record (sourceMessageId == 0 "unknown" sentinel).
+      OR: [
+        { sourceChannelId: destChannelId },
+        { sourceMessageId: 0n },
+      ],
+    },
+    select: {
+      id: true, archiveType: true, fileName: true, fileCount: true, fileSize: true,
+      destMessageId: true, destMessageIds: true, destChannelId: true,
+    },
+    orderBy: { indexedAt: "asc" },
+  });
+  if (rows.length === 0) return [];
+
+  const destChannelIds = [...new Set(rows.map((r) => r.destChannelId).filter((id): id is string => !!id))];
+  const channels = destChannelIds.length
+    ? await db.telegramChannel.findMany({
+        where: { id: { in: destChannelIds } },
+        select: { id: true, telegramId: true },
+      })
+    : [];
+  const telegramIdById = new Map(channels.map((c) => [c.id, c.telegramId]));
+
+  return rows.map((row) => ({
+    id: row.id,
+    archiveType: row.archiveType,
+    fileName: row.fileName,
+    fileCount: row.fileCount,
+    fileSize: row.fileSize,
+    destMessageId: row.destMessageId,
+    destMessageIds: row.destMessageIds,
+    destChannel: row.destChannelId && telegramIdById.has(row.destChannelId)
+      ? { telegramId: telegramIdById.get(row.destChannelId)! }
+      : null,
+  }));
+}
+
+export async function findPlaceholderCandidate(
+  destChannelId: string,
+  fileName: string,
+  fileSize: bigint,
+): Promise<PlaceholderCandidate | null> {
+  return (await findPlaceholderCandidates(destChannelId, fileName, fileSize))[0] ?? null;
+}
+
+export async function getPackageFileCrcs(packageId: string): Promise<(string | null)[]> {
+  const rows = await db.packageFile.findMany({
+    where: { packageId },
+    select: { crc32: true },
+  });
+  return rows.map((r) => r.crc32);
+}
+
+export interface BackfillProvenanceInput {
+  packageId: string;
+  destChannelId: string; // to re-check placeholder status in-txn
+  sourceChannelId: string;
+  sourceMessageId: bigint;
+  sourceTopicId: bigint | null;
+  sourceCaption: string | null;
+  remoteUniqueId: string | null;
+  creator: string | null; // always set (re-derived by caller)
+  entries?: FileEntry[]; // set only if candidate had fileCount === 0
+  previewData?: Buffer | null; // set only if provided and candidate lacks one
+  previewMsgId?: bigint | null;
+}
+
+export async function backfillProvenance(input: BackfillProvenanceInput): Promise<boolean> {
+  return db.$transaction(async (tx) => {
+    const current = await tx.package.findUnique({
+      where: { id: input.packageId },
+      select: { sourceChannelId: true, sourceMessageId: true, previewData: true, fileCount: true },
+    });
+    // Re-check placeholder status inside the txn (another worker may have won).
+    // Placeholder = manual-upload (source==dest) OR rebuild (sourceMessageId==0).
+    const stillPlaceholder =
+      !!current &&
+      (current.sourceChannelId === input.destChannelId || current.sourceMessageId === 0n);
+    if (!stillPlaceholder) return false;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any = {
+      sourceChannelId: input.sourceChannelId,
+      sourceMessageId: input.sourceMessageId,
+      sourceTopicId: input.sourceTopicId,
+      sourceCaption: input.sourceCaption,
+      remoteUniqueId: input.remoteUniqueId,
+      creator: input.creator,
+    };
+    if (input.entries && current.fileCount === 0) {
+      await tx.packageFile.deleteMany({ where: { packageId: input.packageId } });
+      await tx.packageFile.createMany({
+        data: input.entries.map((e) => ({
+          packageId: input.packageId,
+          path: e.path, fileName: e.fileName, extension: e.extension,
+          compressedSize: e.compressedSize, uncompressedSize: e.uncompressedSize, crc32: e.crc32,
+        })),
+      });
+      data.fileCount = input.entries.length;
+    }
+    if (input.previewData && !current.previewData) {
+      data.previewData = input.previewData;
+      data.previewMsgId = input.previewMsgId ?? null;
+    }
+    await tx.package.update({ where: { id: input.packageId }, data });
+    return true;
+  });
 }

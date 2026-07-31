@@ -1,8 +1,13 @@
-FROM postgres:16-alpine
+FROM alpine:3.20
 
-RUN apk add --no-cache bash restic coreutils
+# Note: use busybox's built-in crond (Alpine base), NOT the dcron package —
+# dcron's crond fails with "setpgid: Operation not permitted" in this runtime.
+RUN apk add --no-cache restic postgresql16-client curl tzdata tar bash
 
-COPY scripts/backup/container-entrypoint.sh /usr/local/bin/dragons-stash-backup
-RUN chmod 0755 /usr/local/bin/dragons-stash-backup
+COPY backup/backup.sh /backup.sh
+COPY backup/entrypoint.sh /entrypoint.sh
+COPY backup/crontab /etc/crontabs/root
 
-ENTRYPOINT ["/usr/local/bin/dragons-stash-backup"]
+RUN chmod +x /backup.sh /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
