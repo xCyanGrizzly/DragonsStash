@@ -1030,6 +1030,30 @@ export interface PlaceholderCandidate {
   destChannel: { telegramId: bigint } | null;
 }
 
+type PlaceholderRow = {
+  id: string; archiveType: string; fileName: string; fileCount: number; fileSize: bigint;
+  destMessageId: bigint | null; destMessageIds: bigint[]; destChannelId: string | null;
+};
+
+async function enrichWithDestChannel(rows: PlaceholderRow[]): Promise<PlaceholderCandidate[]> {
+  if (rows.length === 0) return [];
+  const destChannelIds = [...new Set(rows.map((r) => r.destChannelId).filter((id): id is string => !!id))];
+  const channels = destChannelIds.length
+    ? await db.telegramChannel.findMany({
+        where: { id: { in: destChannelIds } },
+        select: { id: true, telegramId: true },
+      })
+    : [];
+  const telegramIdById = new Map(channels.map((c) => [c.id, c.telegramId]));
+  return rows.map((row) => ({
+    id: row.id, archiveType: row.archiveType, fileName: row.fileName, fileCount: row.fileCount, fileSize: row.fileSize,
+    destMessageId: row.destMessageId, destMessageIds: row.destMessageIds,
+    destChannel: row.destChannelId && telegramIdById.has(row.destChannelId)
+      ? { telegramId: telegramIdById.get(row.destChannelId)! }
+      : null,
+  }));
+}
+
 /**
  * Find every placeholder Package matching name+size (oldest first). Package
  * has no direct `destChannel` relation (only the scalar `destChannelId`), so
@@ -1059,29 +1083,30 @@ export async function findPlaceholderCandidates(
     },
     orderBy: { indexedAt: "asc" },
   });
-  if (rows.length === 0) return [];
+  return enrichWithDestChannel(rows);
+}
 
-  const destChannelIds = [...new Set(rows.map((r) => r.destChannelId).filter((id): id is string => !!id))];
-  const channels = destChannelIds.length
-    ? await db.telegramChannel.findMany({
-        where: { id: { in: destChannelIds } },
-        select: { id: true, telegramId: true },
-      })
-    : [];
-  const telegramIdById = new Map(channels.map((c) => [c.id, c.telegramId]));
-
-  return rows.map((row) => ({
-    id: row.id,
-    archiveType: row.archiveType,
-    fileName: row.fileName,
-    fileCount: row.fileCount,
-    fileSize: row.fileSize,
-    destMessageId: row.destMessageId,
-    destMessageIds: row.destMessageIds,
-    destChannel: row.destChannelId && telegramIdById.has(row.destChannelId)
-      ? { telegramId: telegramIdById.get(row.destChannelId)! }
-      : null,
-  }));
+/**
+ * Find every uploaded Package (any provenance, any channel) matching
+ * name+size, for the forward-priority path's cross-channel CRC-fingerprint
+ * dedup check. Unlike findPlaceholderCandidates, this is NOT restricted to
+ * placeholder rows — it exists to catch the case where the exact same
+ * archive was independently uploaded (not reposted/forwarded) to two
+ * different source channels.
+ */
+export async function findFingerprintDedupCandidates(
+  fileName: string,
+  fileSize: bigint,
+): Promise<PlaceholderCandidate[]> {
+  const rows = await db.package.findMany({
+    where: { fileName, fileSize, destMessageId: { not: null } },
+    select: {
+      id: true, archiveType: true, fileName: true, fileCount: true, fileSize: true,
+      destMessageId: true, destMessageIds: true, destChannelId: true,
+    },
+    orderBy: { indexedAt: "asc" },
+  });
+  return enrichWithDestChannel(rows);
 }
 
 export async function findPlaceholderCandidate(

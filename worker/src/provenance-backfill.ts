@@ -79,7 +79,7 @@ async function resolveDestParts(
  * candidate with fileCount === 0), fall back to a fresh ranged read of the
  * candidate's own copy in the destination channel (Task 9).
  */
-async function resolveCandidateFingerprintEntries(
+export async function resolveCandidateFingerprintEntries(
   client: Client,
   candidate: PlaceholderCandidate,
 ): Promise<FileEntry[]> {
@@ -119,7 +119,7 @@ async function resolveCandidateFingerprintEntries(
  * refute a match — callers must fall back to name+size confidence rather
  * than treating this as a mismatch.
  */
-function compareFingerprints(a: FileEntry[], b: FileEntry[]): "match" | "mismatch" | "incomplete" {
+export function compareFingerprints(a: FileEntry[], b: FileEntry[]): "match" | "mismatch" | "incomplete" {
   const fa = crcFingerprint(a);
   const fb = crcFingerprint(b);
   if (!fa.complete || !fb.complete) return "incomplete";
