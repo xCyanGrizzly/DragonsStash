@@ -54,6 +54,21 @@ export async function closeBotClient(): Promise<void> {
 }
 
 /**
+ * Make sure TDLib has resolved this user into a private chat before sending.
+ * A bot's local TDLib database only knows about chats it has seen since its
+ * last (re)authentication — after a state-directory reset it has no chat
+ * history cached, so `sendMessage` fails with "Chat not found" even for
+ * users who messaged the bot long ago. `createPrivateChat` forces TDLib to
+ * resolve/fetch the chat first.
+ */
+async function ensurePrivateChat(c: tdl.Client, userId: number): Promise<void> {
+  await withFloodWait(
+    () => c.invoke({ _: "createPrivateChat", user_id: userId, force: false }),
+    "createPrivateChat"
+  );
+}
+
+/**
  * Send a document from a channel to a user's DM.
  *
  * Instead of forwardMessages (unreliable for bot accounts with send_copy),
@@ -70,6 +85,8 @@ export async function copyMessageToUser(
 ): Promise<void> {
   if (!client) throw new Error("Bot client not initialized");
   const c = client;
+
+  await ensurePrivateChat(c, Number(toUserId));
 
   log.info(
     { fromChatId: fromChatId.toString(), messageId: messageId.toString(), toUserId: toUserId.toString() },
@@ -233,6 +250,8 @@ export async function sendTextMessage(
   if (!client) throw new Error("Bot client not initialized");
   const c = client;
 
+  await ensurePrivateChat(c, Number(chatId));
+
   // Parse the text first
   const parsed = await withFloodWait(
     () =>
@@ -268,6 +287,8 @@ export async function sendPhotoMessage(
 ): Promise<void> {
   if (!client) throw new Error("Bot client not initialized");
   const c = client;
+
+  await ensurePrivateChat(c, Number(chatId));
 
   // Write the photo to a temp file
   const { writeFile, unlink } = await import("fs/promises");
