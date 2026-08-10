@@ -142,3 +142,34 @@ export async function closeTdlibClient(client: Client): Promise<void> {
     log.warn({ err }, "Error closing TDLib client");
   }
 }
+
+/**
+ * Prune TDLib's local file cache (filesDirectory). TDLib keeps a permanent
+ * copy of every file it has ever downloaded or uploaded — via inputFileLocal
+ * uploads in particular — with no automatic cleanup. That cache is redundant
+ * (the content already lives in the source and destination Telegram chats)
+ * and grows unbounded, so it's cleared after every ingestion run. A short
+ * immunity_delay protects files from an in-flight operation that might still
+ * reference them.
+ */
+export async function optimizeTdlibStorage(
+  client: Client,
+  accountId: string
+): Promise<void> {
+  try {
+    const result = (await client.invoke({
+      _: "optimizeStorage",
+      size: 0,
+      ttl: 0,
+      count: 0,
+      immunity_delay: 300,
+      return_deleted_file_statistics: true,
+    })) as { size?: number; count?: number };
+    log.info(
+      { accountId, freedBytes: result.size, freedCount: result.count },
+      "TDLib local file cache pruned"
+    );
+  } catch (err) {
+    log.warn({ err, accountId }, "TDLib storage optimization failed");
+  }
+}

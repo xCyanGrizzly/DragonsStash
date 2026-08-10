@@ -42,7 +42,7 @@ import {
   isTopicFetchEnabled,
 } from "./db/queries.js";
 import type { ActivityUpdate } from "./db/queries.js";
-import { createTdlibClient, closeTdlibClient } from "./tdlib/client.js";
+import { createTdlibClient, closeTdlibClient, optimizeTdlibStorage } from "./tdlib/client.js";
 import {
   getAccountChats,
   joinChatByInviteLink,
@@ -1203,6 +1203,7 @@ export async function runWorkerForAccount(
       accountLog.info({ counters }, "Ingestion run completed");
     } finally {
       await throttled.flush();
+      await optimizeTdlibStorage(client, account.id);
       await closeTdlibClient(client);
     }
   } catch (err) {
