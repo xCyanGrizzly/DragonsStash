@@ -1,6 +1,18 @@
-import { describe, it, expect } from "vitest";
-import { readVint, detectRarSignature, parseRar5BlockExtent, parseRar4BlockExtent, walkRarVolume, readRarListingRanged } from "./rar-ranged.js";
+import { describe, it, expect, vi } from "vitest";
 import type { RangeReader } from "./range-reader.js";
+
+let capturedFirstBytes: Buffer | null = null;
+vi.mock("../rar-reader.js", () => ({
+  readRarContents: async (firstPartPath: string) => {
+    const { readFile } = await import("fs/promises");
+    const reconstructed = await readFile(firstPartPath);
+    capturedFirstBytes = reconstructed.subarray(0, 8);
+    return [{ name: "dummy", size: 0 }]; // non-empty so listFromSparse returns it
+  },
+}));
+
+const { readVint, detectRarSignature, parseRar5BlockExtent, parseRar4BlockExtent, walkRarVolume, readRarListingRanged } =
+  await import("./rar-ranged.js");
 
 describe("readVint", () => {
   it("reads single-byte and multi-byte values (base-128 LE)", () => {
@@ -122,6 +134,23 @@ describe("readRarListingRanged (single part)", () => {
     const read: RangeReader = async (_id, offset, length) => vol.subarray(offset, offset + length);
     const res = await readRarListingRanged([{ fileId: "1", fileSize: BigInt(vol.length), fileName: "a.rar" }], read);
     expect(res === null || Array.isArray(res)).toBe(true); // real unrar parse covered live
+  });
+
+  it("preserves the RAR signature bytes in the reconstructed sparse file", async () => {
+    // Regression test: walkRarVolume starts at pos = sigLen and never
+    // harvests the signature itself. If readRarListingRanged forgets to add
+    // it as its own region, the reconstructed file starts with zero bytes
+    // instead of "Rar!\x1a\x07\x01\x00", and every real unrar invocation
+    // rejects it as "not RAR archive" — silently forcing every RAR archive
+    // through the expensive download+reupload fallback regardless of the
+    // channel's forwarding permission.
+    const vol = buildRar5Volume();
+    const sig = vol.subarray(0, 8);
+    const read: RangeReader = async (_id, offset, length) => vol.subarray(offset, offset + length);
+    capturedFirstBytes = null;
+    await readRarListingRanged([{ fileId: "1", fileSize: BigInt(vol.length), fileName: "a.rar" }], read);
+    expect(capturedFirstBytes).not.toBeNull();
+    expect(capturedFirstBytes).toEqual(sig);
   });
 });
 

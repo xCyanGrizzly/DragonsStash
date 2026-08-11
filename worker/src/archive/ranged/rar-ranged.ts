@@ -104,7 +104,12 @@ export async function readRarListingRanged(
     if (!sig) return null;
     const regions = await walkRarVolume(read, part, sig.version, sig.sigLen);
     if (!regions) return null;
-    sparseParts.push({ fileName: part.fileName, size: Number(part.fileSize), regions });
+    // walkRarVolume starts at pos = sigLen and never harvests the signature
+    // itself, so it must be added as its own region — otherwise the
+    // reconstructed sparse file starts with zero bytes instead of the "Rar!"
+    // magic, and unrar rejects it outright as "not RAR archive".
+    const sigRegion = { offset: 0, bytes: head.subarray(0, sig.sigLen) };
+    sparseParts.push({ fileName: part.fileName, size: Number(part.fileSize), regions: [sigRegion, ...regions] });
   }
   return listFromSparse(sparseParts, readRarContents);
 }
