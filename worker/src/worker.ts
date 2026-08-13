@@ -2388,12 +2388,6 @@ async function tryForwardArchiveSet(
 
   const archiveName = archiveSet.parts[0].fileName;
   const archType = archiveSet.type === "7Z" ? ("SEVEN_Z" as const) : archiveSet.type;
-  if (archType !== "ZIP" && archType !== "RAR" && archType !== "SEVEN_Z") {
-    // The ranged listing readers only cover archive formats. Standalone
-    // DOCUMENT attachments always go through the existing download path,
-    // which for DOCUMENT is already cheap (no extraction, single entry).
-    return undefined;
-  }
 
   const scannedParts = archiveSet.parts.map((p) => ({
     fileId: p.fileId,
@@ -2401,8 +2395,19 @@ async function tryForwardArchiveSet(
     fileName: p.fileName,
   }));
 
-  const entries = await readScannedListingRanged(archType, client, scannedParts);
-  if (!entries) return undefined;
+  // Only ZIP/RAR/7z have a ranged-listing reader. For anything else (a
+  // standalone DOCUMENT/STL/3MF attachment), or when the ranged listing
+  // fails for a type that does have one, forward anyway with an empty
+  // entries list instead of falling back to download+reupload —
+  // deriveForwardContentHash and the repost/dedup checks all degrade
+  // gracefully to remote.unique_id-based identity when entries are
+  // empty/incomplete (see forward-identity.ts), and the entire point of a
+  // forwarding-enabled channel is to avoid the download+reupload cost
+  // regardless of whether inner contents can be indexed.
+  const entries =
+    archType === "ZIP" || archType === "RAR" || archType === "SEVEN_Z"
+      ? (await readScannedListingRanged(archType, client, scannedParts)) ?? []
+      : [];
 
   const totalArchiveSize = archiveSet.parts.reduce((sum, p) => sum + p.fileSize, 0n);
   const firstRemoteUniqueId = archiveSet.parts[0].remoteUniqueId ?? null;
