@@ -69,11 +69,17 @@ export async function walkRarVolume(
   let blocks = 0;
   try {
     while (pos < size) {
-      if (++blocks > MAX_RAR_BLOCKS) return null;
+      if (++blocks > MAX_RAR_BLOCKS) {
+        rlog.warn({ fileId: part.fileId, fileName: part.fileName, blocks }, "RAR walk aborted — exceeded MAX_RAR_BLOCKS");
+        return null;
+      }
       const chunkLen = Math.min(HEADER_CHUNK, size - pos);
       let chunk = await read(part.fileId, pos, chunkLen, part.fileSize);
       const ext = version === 5 ? parseRar5BlockExtent(chunk, 0) : parseRar4BlockExtent(chunk, 0);
-      if (ext.headerBytes > MAX_RAR_HEADER_BYTES) return null;
+      if (ext.headerBytes > MAX_RAR_HEADER_BYTES) {
+        rlog.warn({ fileId: part.fileId, fileName: part.fileName, pos, headerBytes: ext.headerBytes }, "RAR walk aborted — headerBytes exceeded MAX_RAR_HEADER_BYTES");
+        return null;
+      }
       // Ensure we have the full header bytes to harvest (long filenames).
       let headerBuf = chunk;
       if (ext.headerBytes > chunk.length) {
@@ -82,13 +88,16 @@ export async function walkRarVolume(
       regions.push({ offset: pos, bytes: headerBuf.subarray(0, Math.min(ext.headerBytes, size - pos)) });
       if (ext.isEnd) break;
       const advance = ext.headerBytes + ext.dataSize;
-      if (advance <= 0) return null;
+      if (advance <= 0) {
+        rlog.warn({ fileId: part.fileId, fileName: part.fileName, pos, headerBytes: ext.headerBytes, dataSize: ext.dataSize }, "RAR walk aborted — non-positive advance");
+        return null;
+      }
       if (pos + advance > size) break; // data clamped at the volume boundary (multipart continuation)
       pos += advance;
     }
     return regions;
   } catch (err) {
-    rlog.warn({ err, fileId: part.fileId }, "RAR volume walk failed");
+    rlog.warn({ err, fileId: part.fileId, fileName: part.fileName, pos }, "RAR volume walk failed");
     return null;
   }
 }
@@ -101,7 +110,10 @@ export async function readRarListingRanged(
   for (const part of parts) {
     const head = await read(part.fileId, 0, 16, part.fileSize);
     const sig = detectRarSignature(head);
-    if (!sig) return null;
+    if (!sig) {
+      rlog.warn({ fileId: part.fileId, fileName: part.fileName, head: head.toString("hex") }, "RAR signature not detected at offset 0");
+      return null;
+    }
     const regions = await walkRarVolume(read, part, sig.version, sig.sigLen);
     if (!regions) return null;
     // walkRarVolume starts at pos = sigLen and never harvests the signature
