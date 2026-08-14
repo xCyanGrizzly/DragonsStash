@@ -19,7 +19,13 @@ pg_dump -h dragonsstash-db -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f "$DUMP_F
 # TDLib volumes are tarred live (best-effort, per design). A file changing
 # mid-read makes GNU tar exit 1 (warning) — that is expected here and must not
 # abort the backup. Only a genuine error (exit >= 2) is fatal.
-tar --warning=no-file-changed -czf "$TAR_FILE" -C /data tdlib-worker tdlib-bot \
+#
+# files/temp is TDLib's own disposable download cache (redundant with the
+# source/destination Telegram chats, pruned by the worker itself after each
+# ingestion run) — it has no business in a backup and its size is what made
+# this tar take 4+ hours once the cache grew back to tens of GB.
+tar --warning=no-file-changed --exclude='tdlib-worker/*/files/temp' \
+  -czf "$TAR_FILE" -C /data tdlib-worker tdlib-bot \
   || { rc=$?; [ "$rc" -le 1 ] || exit "$rc"; }
 
 restic backup "$DUMP_FILE" "$TAR_FILE"
