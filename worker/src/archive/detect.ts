@@ -4,7 +4,7 @@ export interface MultipartInfo {
   baseName: string;
   partNumber: number;
   format: ArchiveFormat;
-  pattern: "ZIP_NUMBERED" | "ZIP_LEGACY" | "RAR_PART" | "RAR_LEGACY" | "SINGLE";
+  pattern: "ZIP_NUMBERED" | "ZIP_LEGACY" | "RAR_PART" | "RAR_LEGACY" | "SEVENZ_NUMBERED" | "SINGLE";
 }
 
 const patterns: {
@@ -43,6 +43,14 @@ const patterns: {
     regex: /^(.+)\.r(\d{2,})$/i,
     format: "RAR",
     pattern: "RAR_LEGACY",
+    getBaseName: (m) => m[1],
+    getPartNumber: (m) => parseInt(m[2], 10),
+  },
+  // pack.7z.001, pack.7z.002 (native 7z volume split)
+  {
+    regex: /^(.+\.7z)\.(\d{3,})$/i,
+    format: "7Z",
+    pattern: "SEVENZ_NUMBERED",
     getBaseName: (m) => m[1],
     getPartNumber: (m) => parseInt(m[2], 10),
   },
