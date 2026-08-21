@@ -84,25 +84,36 @@ export async function recoverIncompleteUploads(): Promise<void> {
     // Batch size for getMessages. TDLib accepts up to ~100 IDs per call.
     // Using 100 means 20k packages → ~200 round-trips instead of 20k.
     const BATCH_SIZE = 100;
+    // Telegram soft-throttles sustained sequential history reads from user
+    // accounts — no FLOOD_WAIT, just growing per-call latency the longer a
+    // single in-flight request stream runs. A small number of batches in
+    // flight at once cuts wall-clock time substantially without approaching
+    // real per-account rate limits.
+    const CONCURRENCY = 3;
 
+    const tdlibClient = client;
+    const destChannelInfo = destChannel;
+    const batches: (typeof packages)[] = [];
     for (const [, channelPackages] of byChannel) {
-      // Group packages by destChannelId (already done) — within each group,
-      // process in batches via getMessages (plural).
       for (let i = 0; i < channelPackages.length; i += BATCH_SIZE) {
-        const batch = channelPackages.slice(i, i + BATCH_SIZE);
-        const batchResults = await verifyMessagesBatch(
-          client,
-          destChannel.telegramId,
-          batch.map((p) => p.destMessageId!)
-        );
+        batches.push(channelPackages.slice(i, i + BATCH_SIZE));
+      }
+    }
 
-        for (let j = 0; j < batch.length; j++) {
-          const pkg = batch[j];
-          const result = batchResults[j];
+    async function processBatch(batch: typeof packages) {
+      const batchResults = await verifyMessagesBatch(
+        tdlibClient,
+        destChannelInfo.telegramId,
+        batch.map((p) => p.destMessageId!)
+      );
 
-          if (result.state === "exists") {
-            verifiedCount++;
-          } else if (result.state === "deleted") {
+      for (let j = 0; j < batch.length; j++) {
+        const pkg = batch[j];
+        const result = batchResults[j];
+
+        if (result.state === "exists") {
+          verifiedCount++;
+        } else if (result.state === "deleted") {
           log.warn(
             {
               packageId: pkg.id,
@@ -141,9 +152,19 @@ export async function recoverIncompleteUploads(): Promise<void> {
             "Could not verify destination message — will retry on next startup"
           );
         }
-        }
       }
     }
+
+    let nextBatchIndex = 0;
+    async function poolWorker() {
+      while (nextBatchIndex < batches.length) {
+        const batch = batches[nextBatchIndex++];
+        await processBatch(batch);
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, batches.length) }, () => poolWorker())
+    );
 
     log.info(
       {
