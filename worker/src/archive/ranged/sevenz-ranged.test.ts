@@ -64,7 +64,250 @@ describe("readSevenZListingRanged", () => {
   });
 });
 
-import { read7zNumber, locate7zEncodedHeaderPack } from "./sevenz-ranged.js";
+import { read7zNumber, locate7zEncodedHeaderPack, mapRangeToVolumes, planSevenZSparseParts } from "./sevenz-ranged.js";
+import type { RangedPart } from "./sevenz-ranged.js";
+import type { SparsePart } from "./sparse-list.js";
+
+describe("mapRangeToVolumes", () => {
+  it("maps a range fully inside one volume", () => {
+    expect(mapRangeToVolumes([100, 100, 100], 120, 30)).toEqual([
+      { partIndex: 1, offset: 20, length: 30 },
+    ]);
+  });
+
+  it("splits a range that straddles a volume boundary", () => {
+    expect(mapRangeToVolumes([100, 100], 90, 20)).toEqual([
+      { partIndex: 0, offset: 90, length: 10 },
+      { partIndex: 1, offset: 0, length: 10 },
+    ]);
+  });
+
+  it("spans three volumes when the range swallows a whole middle volume", () => {
+    expect(mapRangeToVolumes([100, 50, 100], 90, 80)).toEqual([
+      { partIndex: 0, offset: 90, length: 10 },
+      { partIndex: 1, offset: 0, length: 50 },
+      { partIndex: 2, offset: 0, length: 20 },
+    ]);
+  });
+
+  it("degenerates to a single-volume identity mapping", () => {
+    expect(mapRangeToVolumes([5_000_000], 4_900_000, 100)).toEqual([
+      { partIndex: 0, offset: 4_900_000, length: 100 },
+    ]);
+  });
+
+  it("returns null when the range runs past the concatenated end", () => {
+    expect(mapRangeToVolumes([100, 100], 190, 20)).toBeNull();
+    expect(mapRangeToVolumes([100], 100, 1)).toBeNull();
+  });
+
+  it("returns null for negative offsets or lengths", () => {
+    expect(mapRangeToVolumes([100], -1, 10)).toBeNull();
+    expect(mapRangeToVolumes([100], 10, -1)).toBeNull();
+  });
+
+  it("returns no slices for a zero-length range", () => {
+    expect(mapRangeToVolumes([100, 100], 150, 0)).toEqual([]);
+  });
+});
+
+/**
+ * A `.7z.001`/`.7z.002` set is a raw byte split of one logical 7z file, so
+ * fixtures are built as a single logical stream and then cut into volumes.
+ * No real `7z` binary is needed (and none is installed here) because the
+ * contract under test is the whole-archive-offset mapping, not `7z l` parsing.
+ */
+function buildLogical7z(opts: {
+  total: number;
+  nextHeaderStart: number; // absolute offset in the logical stream
+  nextHeader: Buffer;
+  pack?: { start: number; bytes: Buffer }; // absolute offset of packed header bytes
+}): Buffer {
+  const buf = Buffer.alloc(opts.total, 0x5a); // 0x5a stands in for file payload
+  MAGIC.copy(buf, 0);
+  buf.writeUInt8(0, 6); buf.writeUInt8(4, 7);
+  buf.writeUInt32LE(0, 8);
+  buf.writeBigUInt64LE(BigInt(opts.nextHeaderStart - 32), 12); // NextHeaderOffset
+  buf.writeBigUInt64LE(BigInt(opts.nextHeader.length), 20);    // NextHeaderSize
+  buf.writeUInt32LE(0, 28);
+  opts.nextHeader.copy(buf, opts.nextHeaderStart);
+  if (opts.pack) opts.pack.bytes.copy(buf, opts.pack.start);
+  return buf;
+}
+
+function splitIntoVolumes(logical: Buffer, sizes: number[]): Buffer[] {
+  const out: Buffer[] = [];
+  let pos = 0;
+  for (const s of sizes) { out.push(logical.subarray(pos, pos + s)); pos += s; }
+  return out;
+}
+
+function volumeSet(volumes: Buffer[]): {
+  parts: RangedPart[];
+  read: RangeReader;
+  reads: { fileId: string; offset: number; length: number }[];
+} {
+  const parts = volumes.map((v, i) => ({
+    fileId: `v${i + 1}`,
+    fileSize: BigInt(v.length),
+    fileName: `pack.7z.${String(i + 1).padStart(3, "0")}`,
+  }));
+  const reads: { fileId: string; offset: number; length: number }[] = [];
+  const read: RangeReader = async (fileId, offset, length) => {
+    reads.push({ fileId, offset, length });
+    const vol = volumes[parts.findIndex((p) => p.fileId === fileId)];
+    return Buffer.from(vol.subarray(offset, offset + length));
+  };
+  return { parts, read, reads };
+}
+
+/** Rebuild the logical stream from the sparse per-volume reconstructions. */
+function reconstruct(sparseParts: SparsePart[]): Buffer {
+  return Buffer.concat(
+    sparseParts.map((p) => {
+      const b = Buffer.alloc(p.size);
+      for (const r of p.regions) r.bytes.copy(b, r.offset);
+      return b;
+    }),
+  );
+}
+
+describe("readSevenZListingRanged — multi-volume (.7z.001, .7z.002, ...)", () => {
+  it("reads the next header from the LAST volume, not the first", async () => {
+    // Volume 1 is 200 bytes; the index sits at logical 280 — inside volume 2.
+    const nextHeader = Buffer.concat([Buffer.from([0x01]), Buffer.alloc(19, 0x11)]);
+    const logical = buildLogical7z({ total: 300, nextHeaderStart: 280, nextHeader });
+    const { parts, read, reads } = volumeSet(splitIntoVolumes(logical, [200, 100]));
+
+    const sparse = await planSevenZSparseParts(parts, read);
+    expect(sparse).not.toBeNull();
+
+    expect(reads).toEqual([
+      { fileId: "v1", offset: 0, length: 32 },   // signature header: volume 1
+      { fileId: "v2", offset: 80, length: 20 },  // next header: volume 2 @ 280-200
+    ]);
+    // Both volumes are reconstructed so `7z l pack.7z.001` can concatenate them.
+    expect(sparse!.map((p) => [p.fileName, p.size])).toEqual([
+      ["pack.7z.001", 200],
+      ["pack.7z.002", 100],
+    ]);
+    const rebuilt = reconstruct(sparse!);
+    expect(rebuilt.length).toBe(300);
+    expect(rebuilt.subarray(0, 32).equals(logical.subarray(0, 32))).toBe(true);
+    expect(rebuilt.subarray(280, 300).equals(nextHeader)).toBe(true);
+  });
+
+  it("fetches an encoded header's packed bytes from whichever middle volume holds them", async () => {
+    // 3 volumes of 100. Packed header bytes at logical 150 (volume 2), index at 270 (volume 3).
+    // kEncodedHeader, kPackInfo, PackPos=118, NumStreams=1, kSize, PackSize=24
+    const encHeader = Buffer.from([0x17, 0x06, 0x76, 0x01, 0x09, 0x18]);
+    const packBytes = Buffer.alloc(24, 0x77);
+    const logical = buildLogical7z({
+      total: 300,
+      nextHeaderStart: 270,
+      nextHeader: encHeader,
+      pack: { start: 150, bytes: packBytes },
+    });
+    const { parts, read, reads } = volumeSet(splitIntoVolumes(logical, [100, 100, 100]));
+
+    const sparse = await planSevenZSparseParts(parts, read);
+    expect(sparse).not.toBeNull();
+    expect(reads).toEqual([
+      { fileId: "v1", offset: 0, length: 32 },
+      { fileId: "v3", offset: 70, length: 6 },   // index in the last volume
+      { fileId: "v2", offset: 50, length: 24 },  // packed header in the middle volume
+    ]);
+    expect(sparse!).toHaveLength(3);
+    const rebuilt = reconstruct(sparse!);
+    expect(rebuilt.subarray(150, 174).equals(packBytes)).toBe(true);
+    expect(rebuilt.subarray(270, 276).equals(encHeader)).toBe(true);
+  });
+
+  it("splits a header range that straddles a volume boundary into two reads", async () => {
+    // Index is 40 bytes starting at logical 180: last 20 bytes of volume 2 (100..200)
+    // and first 20 bytes of volume 3.
+    const nextHeader = Buffer.concat([Buffer.from([0x01]), Buffer.alloc(39, 0x22)]);
+    const logical = buildLogical7z({ total: 300, nextHeaderStart: 180, nextHeader });
+    const { parts, read, reads } = volumeSet(splitIntoVolumes(logical, [100, 100, 100]));
+
+    const sparse = await planSevenZSparseParts(parts, read);
+    expect(sparse).not.toBeNull();
+    expect(reads).toEqual([
+      { fileId: "v1", offset: 0, length: 32 },
+      { fileId: "v2", offset: 80, length: 20 },
+      { fileId: "v3", offset: 0, length: 20 },
+    ]);
+    // Byte-exact across the seam.
+    expect(reconstruct(sparse!).subarray(180, 220).equals(nextHeader)).toBe(true);
+  });
+
+  it("splits an encoded header's packed bytes across a volume boundary", async () => {
+    // PackPos=58 -> packStart 90, PackSize=30 -> 90..120 straddles volumes 1|2.
+    const encHeader = Buffer.from([0x17, 0x06, 0x3a, 0x01, 0x09, 0x1e]);
+    const packBytes = Buffer.alloc(30, 0x99);
+    const logical = buildLogical7z({
+      total: 300,
+      nextHeaderStart: 290,
+      nextHeader: encHeader,
+      pack: { start: 90, bytes: packBytes },
+    });
+    const { parts, read, reads } = volumeSet(splitIntoVolumes(logical, [100, 100, 100]));
+
+    const sparse = await planSevenZSparseParts(parts, read);
+    expect(sparse).not.toBeNull();
+    expect(reads).toEqual([
+      { fileId: "v1", offset: 0, length: 32 },
+      { fileId: "v3", offset: 90, length: 6 },
+      { fileId: "v1", offset: 90, length: 10 },
+      { fileId: "v2", offset: 0, length: 20 },
+    ]);
+    expect(reconstruct(sparse!).subarray(90, 120).equals(packBytes)).toBe(true);
+  });
+
+  it("keeps a single-volume .7z reading exactly as before", async () => {
+    const nextHeader = Buffer.concat([Buffer.from([0x01]), Buffer.alloc(19, 0x33)]);
+    const logical = buildLogical7z({ total: 300, nextHeaderStart: 280, nextHeader });
+    const { parts, read, reads } = volumeSet([logical]);
+
+    const sparse = await planSevenZSparseParts(parts, read);
+    expect(reads).toEqual([
+      { fileId: "v1", offset: 0, length: 32 },
+      { fileId: "v1", offset: 280, length: 20 },
+    ]);
+    expect(sparse!).toHaveLength(1);
+    expect(sparse![0].size).toBe(300);
+    expect(reconstruct(sparse!).subarray(280, 300).equals(nextHeader)).toBe(true);
+  });
+
+  it("returns null when the next-header offset points past the whole set", async () => {
+    const nextHeader = Buffer.from([0x01, 0x00]);
+    // Claim the index lives at 5000 while the set totals only 300 bytes.
+    const logical = buildLogical7z({ total: 300, nextHeaderStart: 280, nextHeader });
+    logical.writeBigUInt64LE(BigInt(5000 - 32), 12);
+    const { parts, read } = volumeSet(splitIntoVolumes(logical, [200, 100]));
+    expect(await planSevenZSparseParts(parts, read)).toBeNull();
+  });
+
+  it("returns null on an unrecognized next-header type", async () => {
+    const logical = buildLogical7z({
+      total: 300,
+      nextHeaderStart: 280,
+      nextHeader: Buffer.from([0x42, 0x00]),
+    });
+    const { parts, read } = volumeSet(splitIntoVolumes(logical, [200, 100]));
+    expect(await planSevenZSparseParts(parts, read)).toBeNull();
+  });
+
+  it("returns null when the first volume has no 7z signature", async () => {
+    const logical = Buffer.alloc(300, 0x00);
+    const { parts, read } = volumeSet(splitIntoVolumes(logical, [200, 100]));
+    expect(await planSevenZSparseParts(parts, read)).toBeNull();
+  });
+
+  it("returns null for an empty part list", async () => {
+    expect(await planSevenZSparseParts([], async () => Buffer.alloc(0))).toBeNull();
+  });
+});
 
 describe("read7zNumber", () => {
   it("reads a single-byte number", () => {
