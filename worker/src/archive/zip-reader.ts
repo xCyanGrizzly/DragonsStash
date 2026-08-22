@@ -3,6 +3,7 @@ import { open as fsOpen, stat as fsStat } from "fs/promises";
 import path from "path";
 import { Readable } from "stream";
 import { childLogger } from "../util/logger.js";
+import { isSpannedZipPartSet, readSpannedZipCentralDirectory } from "./zip-spanned.js";
 
 const log = childLogger("zip-reader");
 
@@ -17,9 +18,15 @@ export interface FileEntry {
 
 /**
  * Read the central directory of a ZIP file without extracting any contents.
- * For multipart ZIPs (.zip.001, .zip.002 etc.), uses a custom random-access
- * reader that spans all parts seamlessly so yauzl can find the central
- * directory at the end of the combined data.
+ *
+ * Three shapes are handled:
+ *  - a single `.zip` → yauzl directly;
+ *  - a 7-Zip raw byte split (`.zip.001`, `.zip.002`, …), which is one ZIP file
+ *    cut into chunks → a random-access reader that spans the chunks so yauzl
+ *    sees the combined stream;
+ *  - a ZIP-spec spanned/multi-disk archive (`.z01`, `.z02`, …, `.zip`), a
+ *    different on-disk format that yauzl refuses outright → a dedicated
+ *    volume-aware central-directory reader.
  */
 export async function readZipCentralDirectory(
   filePaths: string[]
@@ -28,7 +35,22 @@ export async function readZipCentralDirectory(
     return readSingleZip(filePaths[0]);
   }
 
-  // Multipart: use a spanning random-access reader
+  if (isSpannedZipPartSet(filePaths)) {
+    try {
+      const result = await readSpannedZipCentralDirectory(filePaths);
+      if (result.kind === "entries") return result.entries;
+      if (result.kind === "failed") {
+        log.warn({ reason: result.reason, parts: filePaths.length }, "Failed to read spanned ZIP");
+        return [];
+      }
+      // "not-spanned": named like volumes but really a byte split — fall through.
+    } catch (err) {
+      log.warn({ err, parts: filePaths.length }, "Failed to read spanned ZIP");
+      return [];
+    }
+  }
+
+  // Multipart byte split: use a spanning random-access reader
   return readMultipartZip(filePaths);
 }
 

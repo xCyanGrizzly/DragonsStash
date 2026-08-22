@@ -100,7 +100,7 @@ export async function resolveCandidateFingerprintEntries(
     if (destParts) {
       const read = tdlibRangeReader(client);
       destEntries =
-        candidate.archiveType === "ZIP" ? await readScannedZipListing(client, destParts)
+        candidate.archiveType === "ZIP" ? await readScannedZipListing(destParts, read)
         : candidate.archiveType === "SEVEN_Z" ? await readSevenZListingRanged(destParts, read)
         : candidate.archiveType === "RAR" ? await readRarListingRanged(destParts, read)
         : null;
