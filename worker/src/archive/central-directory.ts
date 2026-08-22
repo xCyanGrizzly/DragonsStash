@@ -11,13 +11,21 @@ function extOf(name: string): string | null {
   return e === "" ? null : e;
 }
 
+/**
+ * Locate the End Of Central Directory record by scanning backward for its
+ * signature. Returns -1 when the buffer holds no EOCD.
+ */
+export function findEocdOffset(tail: Buffer): number {
+  for (let i = tail.length - 22; i >= 0; i--) {
+    if (tail.readUInt32LE(i) === EOCD_SIG) return i;
+  }
+  return -1;
+}
+
 /** Parse a ZIP central directory from the tail of an archive. */
 export function parseZipCentralDirectoryFromTail(tail: Buffer, tailStart: number): FileEntry[] {
   // 1. Find EOCD by scanning backward for its signature.
-  let eocd = -1;
-  for (let i = tail.length - 22; i >= 0; i--) {
-    if (tail.readUInt32LE(i) === EOCD_SIG) { eocd = i; break; }
-  }
+  const eocd = findEocdOffset(tail);
   if (eocd < 0) throw new RangeError("EOCD not found in tail");
 
   let cdSize = tail.readUInt32LE(eocd + 12);
@@ -45,10 +53,22 @@ export function parseZipCentralDirectoryFromTail(tail: Buffer, tailStart: number
   }
 
   // 3. Walk central-directory headers.
+  return walkCentralDirectory(tail, cdLocal, cdSize);
+}
+
+/**
+ * Walk a run of central-directory file headers and return the file entries
+ * (directory entries are skipped).
+ *
+ * `buf` must contain the whole central directory starting at `start`; for a
+ * spanned archive that means the caller has already stitched together the
+ * volumes the directory straddles.
+ */
+export function walkCentralDirectory(tail: Buffer, start: number, cdSize: number): FileEntry[] {
   const entries: FileEntry[] = [];
-  let p = cdLocal;
-  const end = cdLocal + cdSize;
-  while (p + 46 <= end && tail.readUInt32LE(p) === CD_SIG) {
+  let p = start;
+  const end = start + cdSize;
+  while (p + 46 <= end && p + 46 <= tail.length && tail.readUInt32LE(p) === CD_SIG) {
     let crc = tail.readUInt32LE(p + 16) >>> 0;
     let comp = BigInt(tail.readUInt32LE(p + 20));
     let uncomp = BigInt(tail.readUInt32LE(p + 24));
