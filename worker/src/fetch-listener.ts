@@ -538,12 +538,30 @@ function handleManualUpload(uploadId: string): void {
 
 // ── Backfill file-list handler ──
 //
-// Trigger via:
-//   SELECT pg_notify('backfill_filelists', '{"limit":50,"archiveType":"RAR"}');
+// A request must say what it wants: a payload with no narrowing selector is
+// rejected outright rather than sweeping every empty package in the catalogue.
+// See `backfill-scope.ts` for the full contract.
 //
-// Both fields are optional. archiveType filters to one of ZIP/RAR/SEVEN_Z.
-// Default limit is 100. The handler queues so multiple notifications run
-// sequentially (no concurrent TDLib downloads competing for the mutex).
+//   -- repair the ZIP-spec spanned sets (.z01 … .zip) that the pre-402c317
+//   -- reader bug left with no file list. Ranged reads only (~64KB each, vs
+//   -- ~944GB of full downloads), and one destination scan to recover the
+//   -- destMessageIds that were never recorded.
+//   SELECT pg_notify('backfill_filelists', '{
+//     "fileNameLike": "%.z01",
+//     "archiveType": "ZIP",
+//     "limit": 250,
+//     "rangedOnly": true,
+//     "recoverDestIds": true
+//   }');
+//
+//   -- repair a specific handful
+//   SELECT pg_notify('backfill_filelists', '{"packageIds":["ckxyz…","ckabc…"],"rangedOnly":true}');
+//
+//   -- the old broad sweep, now explicit about being one
+//   SELECT pg_notify('backfill_filelists', '{"archiveType":"RAR","limit":50,"allowBroadSweep":true}');
+//
+// The handler queues so multiple notifications run sequentially (no concurrent
+// TDLib downloads competing for the mutex).
 function handleBackfillFilelists(payload: string): void {
   fetchQueue = fetchQueue
     .then(() => processBackfillRequest(payload))

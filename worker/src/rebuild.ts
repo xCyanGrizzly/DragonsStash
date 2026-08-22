@@ -1,8 +1,7 @@
 import type { Client } from "tdl";
-import { config } from "./util/config.js";
 import { childLogger } from "./util/logger.js";
 import { createTdlibClient, closeTdlibClient } from "./tdlib/client.js";
-import { invokeWithTimeout, MAX_SCAN_PAGES } from "./tdlib/download.js";
+import { scanChatDocuments } from "./tdlib/chat-documents.js";
 import { isArchiveAttachment } from "./archive/detect.js";
 import { extractCreatorFromFileName } from "./archive/creator.js";
 import { groupArchiveSets } from "./archive/multipart.js";
@@ -263,127 +262,38 @@ export async function rebuildPackageDatabase(
 }
 
 /**
- * Scan the destination channel for document messages using searchChatMessages.
- * Returns archive messages in chronological order (oldest first).
+ * Scan the destination channel and keep only the documents whose names
+ * `archive/detect.ts` recognizes. The paging itself lives in
+ * `tdlib/chat-documents.ts` and is shared with the file-list repair path.
  */
 async function scanDestinationChannel(
   client: Client,
   chatId: bigint,
   onProgress?: (messagesScanned: number) => Promise<void>
 ): Promise<TelegramMessage[]> {
+  const scan = await scanChatDocuments(client, chatId, onProgress);
+
   const archives: TelegramMessage[] = [];
-  let currentFromId = 0;
-  let totalScanned = 0;
-  let pageCount = 0;
-  let lastProgressUpdate = 0;
-
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    if (pageCount >= MAX_SCAN_PAGES) {
-      log.warn(
-        { chatId: chatId.toString(), pageCount, totalScanned },
-        "Hit max page limit for destination scan, stopping"
+  for (const doc of scan.documents) {
+    if (isArchiveAttachment(doc.fileName)) {
+      archives.push(doc);
+    } else {
+      // Not matched by any pattern in archive/detect.ts, so it is dropped without a
+      // packages/skipped_packages row. Grep "unrecognized attachment" to find naming
+      // schemes we do not handle yet.
+      log.debug(
+        { chatId: chatId.toString(), messageId: Number(doc.id), fileName: doc.fileName },
+        "Skipping unrecognized attachment (no archive/document pattern matched)"
       );
-      break;
     }
-    pageCount++;
-
-    const previousFromId = currentFromId;
-
-    const result = await invokeWithTimeout<{
-      messages?: {
-        id: number;
-        date: number;
-        content: {
-          _: string;
-          document?: {
-            file_name?: string;
-            document?: {
-              id: number;
-              size: number;
-            };
-          };
-        };
-      }[];
-    }>(client, {
-      _: "searchChatMessages",
-      chat_id: Number(chatId),
-      // No topic context for a flat destination scan. TDLib 1.8.64+ replaced
-      // `message_thread_id` / `saved_messages_topic_id` with a single
-      // optional `topic_id`; for a flat scan we just omit it.
-      query: "",
-      from_message_id: currentFromId,
-      offset: 0,
-      limit: 100,
-      filter: { _: "searchMessagesFilterDocument" },
-      sender_id: null,
-    });
-
-    if (!result.messages || result.messages.length === 0) break;
-
-    totalScanned += result.messages.length;
-
-    for (const msg of result.messages) {
-      const doc = msg.content?.document;
-      if (doc?.file_name && doc.document && isArchiveAttachment(doc.file_name)) {
-        archives.push({
-          id: BigInt(msg.id),
-          fileName: doc.file_name,
-          fileId: String(doc.document.id),
-          fileSize: BigInt(doc.document.size),
-          date: new Date(msg.date * 1000),
-        });
-      } else if (doc?.file_name) {
-        // Not matched by any pattern in archive/detect.ts, so it is dropped without a
-        // packages/skipped_packages row. Grep "unrecognized attachment" to find naming
-        // schemes we do not handle yet.
-        log.debug(
-          { chatId: chatId.toString(), messageId: msg.id, fileName: doc.file_name },
-          "Skipping unrecognized attachment (no archive/document pattern matched)"
-        );
-      }
-    }
-
-    // Throttle progress updates to every 2 seconds
-    const now = Date.now();
-    if (onProgress && now - lastProgressUpdate >= 2000) {
-      lastProgressUpdate = now;
-      await onProgress(totalScanned);
-    }
-
-    currentFromId = result.messages[result.messages.length - 1].id;
-
-    // Stuck detection
-    if (currentFromId === previousFromId) {
-      log.warn(
-        { chatId: chatId.toString(), currentFromId, totalScanned },
-        "Pagination stuck, breaking"
-      );
-      break;
-    }
-
-    if (result.messages.length < 100) break;
-
-    await sleep(config.apiDelayMs);
-  }
-
-  // Final progress update
-  if (onProgress) {
-    await onProgress(totalScanned);
   }
 
   log.info(
-    {
-      chatId: chatId.toString(),
-      archives: archives.length,
-      totalScanned,
-      pages: pageCount,
-    },
+    { chatId: chatId.toString(), archives: archives.length, totalScanned: scan.totalScanned, pages: scan.pages },
     "Destination channel scan complete"
   );
 
-  // Reverse to chronological order (oldest first)
-  return archives.reverse();
+  return archives;
 }
 
 /**
@@ -413,8 +323,4 @@ async function updateRebuildProgress(
       // Best-effort
     }
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
