@@ -78,10 +78,17 @@ export function groupArchiveSets(messages: TelegramMessage[]): ArchiveSet[] {
         }
       }
 
-      // Sort by part number (singles get a very high number so they come last — they're the final part)
+      // Sort by part number. A bare single (partNumber -1) sits at a different end of the
+      // set depending on the legacy scheme: in a .zip/.z01/.z02 set the bare pack.zip is the
+      // FINAL disk, but in a .rar/.r00/.r01 set the bare pack.rar is volume 1 and .r00
+      // onwards follow it. Getting this backwards makes parts[0] a headerless continuation
+      // volume, which breaks listing and mislabels the package.
+      const singleRank = multipartEntries.some((e) => e.info.pattern === "RAR_LEGACY")
+        ? -1 // before .r00
+        : 999999;
       allEntries.sort((a, b) => {
-        const aNum = a.info.partNumber === -1 ? 999999 : a.info.partNumber;
-        const bNum = b.info.partNumber === -1 ? 999999 : b.info.partNumber;
+        const aNum = a.info.partNumber === -1 ? singleRank : a.info.partNumber;
+        const bNum = b.info.partNumber === -1 ? singleRank : b.info.partNumber;
         return aNum - bNum;
       });
 

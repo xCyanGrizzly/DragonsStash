@@ -280,6 +280,15 @@ export async function getTopicMessages(
         });
         continue;
       }
+      if (doc?.file_name) {
+        // Not matched by any pattern in archive/detect.ts, so it is dropped without a
+        // packages/skipped_packages row. Grep "unrecognized attachment" to find naming
+        // schemes we do not handle yet.
+        log.debug(
+          { chatId: chatId.toString(), topicId: topicId.toString(), messageId: msg.id, fileName: doc.file_name },
+          "Skipping unrecognized attachment (no archive/document pattern matched)"
+        );
+      }
 
       // Check for photo messages (potential previews)
       const photo = msg.content?.photo;
